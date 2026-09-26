@@ -22,6 +22,32 @@ jobs:
       - run: npm run build
       - run: npm test
 
+  # atlasent-guard, the Claude Code plugin in packages/agent-hooks. Zero dependencies.
+  # Its tests drive the real CLI with Claude Code's stdin payload, so this job proves
+  # the hook blocks, not just that a rule table parses. Node 18 is the declared floor.
+  agent-hooks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 22]
+    defaults:
+      run:
+        working-directory: packages/agent-hooks
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Unit and end-to-end hook tests
+        run: node --test test/*.node.mjs
+      - name: A destructive command is actually refused through the CLI
+        run: |
+          set -euo pipefail
+          export ATLASENT_HOOKS_HOME="$RUNNER_TEMP/ah"
+          out=$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"terraform destroy -auto-approve"},"permission_mode":"bypassPermissions","cwd":"/tmp"}' | node cli.mjs claude-code)
+          echo "$out"
+          echo "$out" | node -e 'const o=JSON.parse(require("fs").readFileSync(0,"utf8")); if (o.hookSpecificOutput.permissionDecision !== "deny") { console.error("expected deny"); process.exit(1); }'
+
   # @atlasent/mcp-gate is a separate package with its own Node floor (>=22, so it
   # cannot ride the 18/20/22 matrix above) and zero npm dependencies, so there is
   # nothing to install.

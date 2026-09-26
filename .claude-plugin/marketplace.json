@@ -1,0 +1,15 @@
+{
+  "name": "atlasent",
+  "owner": {
+    "name": "AtlaSent",
+    "url": "https://www.atlasent.io"
+  },
+  "description": "AtlaSent plugins for Claude Code: destructive and shipping actions wait for a person.",
+  "plugins": [
+    {
+      "name": "atlasent-guard",
+      "source": "./packages/agent-hooks",
+      "description": "Stops AI coding agents from destroying production: destructive and shipping commands wait for a person. Local, no account."
+    }
+  ]
+}

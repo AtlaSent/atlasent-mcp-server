@@ -46,6 +46,9 @@ src/
   integration.test.ts           Live-API tests; require ATLASENT_API_KEY + ATLASENT_BASE_URL, skip otherwise
   integration.write.test.ts     Live-API write tests (mutating tools)
 
+packages/agent-hooks/  Claude Code plugin `atlasent-guard` (PreToolUse hook): destructive/shipping shell + MCP calls ask, catastrophic ones deny, ask becomes deny when unattended. Zero deps, local only, no cloud call. Installed from this repo's root `.claude-plugin/marketplace.json`; npm name `@atlasent/agent-hooks` is NOT published (a publish needs a `package.release` template, same as mcp-gate). Tests drive the real CLI with Claude Code's stdin payload
+.claude-plugin/        marketplace.json listing the plugins in this repo (source paths are relative to the repo root)
+
 Dockerfile            stdio image; also what Glama builds to introspect tools (no creds -> local mode). CI `docker-smoke` job keeps it answering tools/list
 glama.json            Glama listing ownership (maintainers)
 .devcontainer/        one-click contributor environment (local mode)

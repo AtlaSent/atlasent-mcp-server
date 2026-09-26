@@ -1,0 +1,13 @@
+{
+  "description": "AtlaSent guard: destructive and shipping actions wait for a person",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli.mjs\" claude-code", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
