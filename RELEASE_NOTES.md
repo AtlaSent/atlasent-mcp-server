@@ -226,7 +226,7 @@ First stable release of the AtlaSent MCP server. Works with Claude Desktop, Curs
 ### Local demo (no credentials)
 
 ```bash
-git clone https://github.com/AtlaSent-Systems-Inc/atlasent-mcp-server
+git clone https://github.com/Atlasent/atlasent-mcp-server
 cd atlasent-mcp-server && npm install && npm run demo
 ```
 
