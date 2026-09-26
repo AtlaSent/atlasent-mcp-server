@@ -118,6 +118,22 @@ docker run -i --rm atlasent-mcp                                          # local
 docker run -i --rm -e ATLASENT_API_KEY -e ATLASENT_BASE_URL atlasent-mcp  # remote mode
 ```
 
+## Claude Code plugin: stop agents destroying production
+
+[`packages/agent-hooks`](./packages/agent-hooks) is a Claude Code plugin. Destructive
+and shipping commands wait for a person: `DROP TABLE`, `terraform destroy`, volume
+deletes, `git push --force`, production deploys. With nobody to ask, they are refused.
+Everything else runs as normal. Local, no account.
+
+```text
+/plugin marketplace add Atlasent/atlasent-mcp-server
+/plugin install atlasent-guard@atlasent
+```
+
+"Someone at the keyboard said yes" is where it stops. The rest of this repository is
+the organizational version: an approver your organization named, and a permit you can
+prove afterwards.
+
 ## Canon-backed Actions
 
 AtlaSent does not treat every ad-hoc tool string as a new governed Action Type.
