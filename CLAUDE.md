@@ -285,11 +285,14 @@ Headers: `Authorization: Bearer $ATLASENT_API_KEY`, optional `x-anon-key: $ATLAS
 >    held-back functions are waiting on a founder decision, not a missing
 >    mechanism (atlasent-docs CROSS-058, PROPOSED).
 >
-> The durable rule, instead of another count: an endpoint is unusable from this
-> repo if it is in `runtime-functions-disabled.json` (not deployed), in
-> `runtime-functions-staging.json` (staging only), or in `runtime-functions.json`
-> with `production_eligibility: quarantined` (deployed 410). Check those three
-> manifests in `atlasent-api` directly. Verified 2026-09-26: this repo references
+> The durable rule, instead of another count: check the `atlasent-api` manifests
+> directly, relative to the runtime you target. An endpoint is unusable **anywhere**
+> if it is in `runtime-functions-disabled.json` (not deployed) or in
+> `runtime-functions.json` with `production_eligibility: quarantined` (deployed
+> 410). An endpoint in `runtime-functions-staging.json` is deployed to the
+> **staging runtime only**: callable when the configured base URL points at
+> staging, absent in production. Do not ship a default code path that depends on
+> it. Verified 2026-09-26: this repo references
 > none of the endpoints named in this section.
 
 The following atlasent-api edge functions are intentionally **not deployed** on the runtime project and have **no corresponding MCP tools** in this repo. Do not add MCP tools that call these paths — they will always 404 in production. **Updated 2026-09-08** — the disabled set has grown past the 8 entries recorded 2026-08-28 (which had itself grown past the original 3 SSO skeleton handlers, disabled 2026-06-02); it is now 10 entries. None of the 7 added since the original 3 have an MCP tool referencing them either — re-verified against the whole repo (not just `src/`), grepping for every one of the 10 disabled functions' path fragments (`sso-assertion-hook`, `sso-providers`, `sso-connections`, `policy-rules`, `policy-simulate-layered`, `compliance-packs`, `control-assurance`, `outcome-proposals`, `regulatory-interpretations`) — the only match anywhere is this table itself:
