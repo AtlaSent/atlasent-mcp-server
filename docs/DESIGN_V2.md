@@ -1,8 +1,8 @@
 # atlasent-mcp-server v2 Design
 
 > **Doctrine normalization header (2026-05-18).** This file is
-> preserved unchanged below per Doctrine 4 of
-> [`atlasent/VERSIONING_DOCTRINE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/normalize-roadmap-versioning-NWPuP/VERSIONING_DOCTRINE.md).
+> preserved unchanged below per Doctrine 4 of AtlaSent's versioning
+> doctrine.
 > The "v2" in this filename and body refers to the mcp-server's
 > package-major config-schema migration (Supabase-direct → REST
 > proxy), not a platform-version `v2`. Under the current doctrine

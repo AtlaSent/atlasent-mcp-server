@@ -12,4 +12,4 @@ For execution-boundary authorization, use the shipped AtlaSent flow:
 
 Do not replace this with another client-side trajectory evaluator. The AtlaSent runtime remains the sole protected-action decision authority.
 
-Tracking: AtlaSent-Systems-Inc/atlasent-api#2932.
+This removal was part of a broader cleanup that keeps the public tool surface limited to endpoints the AtlaSent API actually serves.

@@ -25,7 +25,7 @@ pre-authorized.
 - [ ] Error messages expose `request_id` so customers can escalate.
 - [ ] README has ready-to-paste JSON for Claude Desktop +
       `~/.cursor/mcp.json` + `~/.config/mcp/atlasent.json`.
-- [ ] E2E test: run against staging atlasent-api via `@modelcontextprotocol/inspector`.
+- [ ] E2E test: run against a staging AtlaSent API via `@modelcontextprotocol/inspector`.
 - [ ] Semver tag → npm publish via GitHub Actions + provenance.
 
 ## Out of scope
