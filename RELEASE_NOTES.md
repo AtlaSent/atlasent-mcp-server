@@ -2,22 +2,52 @@
 
 ## v2.14.0 — 2026-09-25
 
+### Configuration (behaviour change)
+
+- **An API key on its own now selects remote mode.** Setting only
+  `ATLASENT_API_KEY` makes the server call the hosted AtlaSent API;
+  `ATLASENT_BASE_URL` is optional and defaults to
+  `https://api.atlasent.io/functions/v1`. Before 2.14.0, a key without a base
+  URL ran in local mode and made no hosted API calls. To keep local mode with
+  a key set, set `ATLASENT_MODE=local`.
+- The local-mode startup warning now includes a link for getting an API key.
+
 ### Tools
 
 - **`atlasent_await_approval`** — wait for a person to approve or reject a held
-  action in the AtlaSent console (CROSS-056). Held results now carry
+  action in the AtlaSent console. Held results now carry
   `approval_request_id`. On approval the tool claims the single permit the
   runtime minted (`POST /v1/approvals/{id}/claim-permit`); it must still pass
   `atlasent_verify_permit` before anything runs. Rejected, expired, timed out,
   unclaimable or refused all return no permit. The tool has no decision input
   and cannot approve. Needs `approvals:read` on the key.
-
-- **Reported session on every evaluate** (CROSS-056 §2b): `agent_session`
-  carries the MCP client's name and the chat/session id (`ATLASENT_SESSION_ID`,
+- **Verified-actor approvals are claimed with the agent's own identity.** When
+  an action class requires a verified actor, the server obtains a short-lived
+  `actor_identity.v1` for its own agent (available only to an API key bound to
+  a registered agent) and presents it on claim. If that identity cannot be
+  obtained, nothing is claimed and no permit is returned.
+- **Change plans.** `production.deploy`, `infrastructure.change`,
+  `production.rollback` and `secret.configuration.change` take a
+  `change_plan` (`{ operation, revision?, artifact_ref? }`) on `deploy_service`,
+  `evaluate` and `atlasent_evaluate`. The server records it as a Change Brief
+  and binds it to the approval. If the plan changes before claim, pass the new
+  plan to `atlasent_await_approval`: the server files at most one linked
+  re-request and returns the diff. A second mismatch stops with no permit.
+  Results can now carry a `notes` array.
+- **Reported session on every evaluate:** `agent_session` carries the MCP
+  client's name and the chat/session id (`ATLASENT_SESSION_ID`,
   `ATLASENT_RUN_ID`, or the Streamable HTTP session; a generated
   `mcp-process-…` id otherwise). Top-level, never inside `context`.
 - **`atlasent_evaluate` `actor_id` is optional.** Leave it empty with an agent
   API key; the runtime derives the agent and its owner from the key.
+
+### Fixes
+
+- **The agent tool gate sends `context.tool`**, the field the runtime's
+  `agent.tool.invoke` action class reads.
+- The local engine's documentation no longer calls itself fail-closed. Its
+  behaviour is unchanged: it allows action types it does not recognise, so it
+  is for demos and not for enforcement.
 
 ### Security
 
