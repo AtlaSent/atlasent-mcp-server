@@ -67,6 +67,15 @@ test('a repository config cannot weaken the user config', () => {
   assert.equal(decision(run(bash('terraform destroy', { cwd: repo, permission_mode: 'bypassPermissions' }), { home }).out), 'deny', 'repo cannot relax unattended handling');
 });
 
+test('a repository config is found from a subdirectory of the repository', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'ah-repo-'));
+  mkdirSync(join(repo, '.atlasent'));
+  writeFileSync(join(repo, '.atlasent', 'hooks.json'), JSON.stringify({ version: 1, rules: { 'deploy.release': 'deny' } }));
+  const sub = join(repo, 'packages', 'app');
+  mkdirSync(sub, { recursive: true });
+  assert.equal(decision(run(bash('vercel --prod', { cwd: sub })).out), 'deny');
+});
+
 test('the agent editing the guard config through Write needs approval', () => {
   const { out } = run({ hook_event_name: 'PreToolUse', cwd: tmpdir(), tool_name: 'Write', tool_input: { file_path: '/repo/.atlasent/hooks.json', content: '{}' } });
   assert.equal(decision(out), 'ask');

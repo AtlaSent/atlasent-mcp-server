@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { RULE_IDS, EFFECTS } from './rules.mjs';
 
@@ -55,7 +55,23 @@ export function mergePolicies(user, project) {
 
 export function configPaths(cwd, env = process.env) {
   const home = env.ATLASENT_HOOKS_HOME ?? join(homedir(), '.atlasent');
-  return { user: join(home, 'hooks.json'), project: cwd ? join(cwd, '.atlasent', 'hooks.json') : null };
+  const user = join(home, 'hooks.json');
+  return { user, project: cwd ? findProjectConfig(cwd, user) : null };
+}
+
+// Nearest `.atlasent/hooks.json` at or above the working directory, so a session started
+// in `repo/packages/app` still honours `repo/.atlasent/hooks.json`. The user-level file is
+// never also read as a project file.
+function findProjectConfig(cwd, userFile) {
+  let dir = resolve(cwd);
+  for (let depth = 0; depth < 64; depth++) {
+    const candidate = join(dir, '.atlasent', 'hooks.json');
+    if (candidate !== userFile && existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
 }
 
 // Throws on an unreadable or invalid file: the caller fails closed.

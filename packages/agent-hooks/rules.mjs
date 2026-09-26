@@ -100,7 +100,34 @@ export function segmentsOf(command, depth = 0) {
 // ---------------------------------------------------------------------------
 const shortFlags = argv => argv.filter(x => /^-[A-Za-z]+$/.test(x)).map(x => x.slice(1)).join('');
 const hasFlag = (argv, ...names) => argv.some(x => names.includes(x) || names.some(n => n.startsWith('--') && x.startsWith(n + '=')));
-const positional = argv => argv.slice(1).filter(x => !x.startsWith('-'));
+// Options that take a SEPARATE value, per CLI. Without this, the value is read as the
+// subcommand: `npm --workspace pkg publish` looked like `npm pkg`, and
+// `kubectl --context prod delete ns x` looked like `kubectl prod`. The `--opt=value`
+// form needs no entry. Long options common to many CLIs apply to every command except
+// the few whose own flags would collide (rm's --dir is a boolean).
+const COMMON_VALUE_OPTS = ['--context', '--profile', '--region', '--project', '--project-ref', '--kubeconfig', '--config', '--app', '--workspace',
+  '--filter', '--repo', '--scope', '--token', '--cwd', '--prefix', '--stack', '--namespace', '--kube-context', '--subscription', '--account',
+  '--host', '--service', '--environment', '--env', '--workdir', '--org', '--team', '--remote', '--file', '--project-name', '--env-file', '--log-level',
+  '--output', '--endpoint-url', '--configuration', '--server', '--cluster', '--user', '--registry', '--dir'];
+const VALUE_OPTS = {
+  npm: ['-w', '-C'], pnpm: ['-w', '-C', '-F'], yarn: ['-w', '-C'], bun: ['-w', '-C'],
+  kubectl: ['-n', '-s', '-l'], oc: ['-n', '-s', '-l'], k: ['-n', '-s', '-l'], helm: ['-n'],
+  docker: ['-c', '-H', '-f', '-p', '-l'], podman: ['-c', '-H', '-f', '-p', '-l'], 'docker-compose': ['-f', '-p'],
+  fly: ['-a', '-c', '-r'], flyctl: ['-a', '-c', '-r'], railway: ['-s', '-e'], vercel: ['-A', '-S', '-t'], vc: ['-A', '-S', '-t'],
+  heroku: ['-a', '-r'], gh: ['-R'], pulumi: ['-s', '-C'], wrangler: ['-c', '-e'],
+};
+const NO_COMMON = new Set(['rm', 'dd', 'shred']);
+const valueOpts = cmd => new Set([...(VALUE_OPTS[cmd] ?? []), ...(NO_COMMON.has(cmd) ? [] : COMMON_VALUE_OPTS)]);
+const positional = argv => {
+  const takes = valueOpts(argv[0]);
+  const out = [];
+  for (let i = 1; i < argv.length; i++) {
+    const x = argv[i];
+    if (x.startsWith('-')) { if (!x.includes('=') && takes.has(x)) i++; continue; }
+    out.push(x);
+  }
+  return out;
+};
 const sub = (argv, n = 1) => positional(argv).slice(0, n).join(' ');
 
 function rmInfo(argv) {

@@ -92,6 +92,19 @@ const FLAGGED = [
   ['git push heroku main', 'ask', 'deploy.release'],
   ['echo \'{"version":1,"rules":{"sql.destructive":"allow"}}\' > .atlasent/hooks.json', 'ask', 'guard.self-edit'],
   ['sed -i s/deny/allow/ ~/.claude/settings.json', 'ask', 'guard.self-edit'],
+  // Options that take a separate value, before the subcommand (Codex review, #179).
+  ['npm --workspace packages/foo publish', 'ask', 'deploy.release'],
+  ['pnpm --filter api publish', 'ask', 'deploy.release'],
+  ['npm -w pkg publish', 'ask', 'deploy.release'],
+  ['kubectl --context prod delete namespace x', 'ask', 'k8s.delete'],
+  ['kubectl -n prod delete pod x', 'ask', 'k8s.delete'],
+  ['docker --context prod volume rm data', 'ask', 'container.destroy'],
+  ['docker compose -f prod.yml down -v', 'ask', 'container.destroy'],
+  ['helm --kube-context prod uninstall api', 'ask', 'k8s.delete'],
+  ['fly -a app deploy', 'ask', 'deploy.release'],
+  ['gh -R o/r release create v1', 'ask', 'deploy.release'],
+  ['railway -s api down', 'ask', 'paas.destroy'],
+  ['pulumi --stack prod destroy', 'ask', 'iac.destroy'],
   // Chained and wrapped forms.
   ['npm test && git push --force', 'ask', 'git.force-push'],
   ['echo "DROP TABLE users;" | psql "$DATABASE_URL"', 'ask', 'sql.destructive'],
@@ -109,7 +122,7 @@ const SAFE = [
   'psql -c "SELECT * FROM users"', 'psql -c "DELETE FROM sessions WHERE expires_at < now()"',
   'grep -r "DROP TABLE" docs/', 'rg "volumeDelete" src', 'git log --grep "drop table"', 'curl https://api.example.com/health', 'curl -X POST https://api.example.com/items -d "{}"',
   'aws s3 ls', 'aws s3 cp file s3://bucket/', 'gcloud config list', 'vercel', 'vercel dev', 'fly status',
-  'railway logs', 'supabase start', 'supabase db diff', 'prisma migrate dev', 'cat .atlasent/hooks.json',
+  'railway logs', 'kubectl --context prod get pods', 'npm --workspace api test', 'docker --context prod ps', 'rm -r --dir build', 'supabase start', 'supabase db diff', 'prisma migrate dev', 'cat .atlasent/hooks.json',
   'echo "remember to run terraform destroy later"',
 ];
 
