@@ -391,8 +391,10 @@ export function normalizePayloadHash(value: string): string {
     throw new Error(
       "execution_payload_hash must be a SHA-256 digest as 64 hex characters " +
         `(optionally "sha256:"-prefixed); got ${bare.length} character(s). ` +
-        "A malformed digest is silently dropped by the runtime and mints an " +
-        "UNBOUND permit, which disables PAYLOAD_MISMATCH.",
+        "The runtime silently drops a malformed digest and binds the permit to " +
+        "its own hash of the whole request instead, so your digest would never " +
+        "constrain execution: presenting it at verify would fail with " +
+        "PAYLOAD_MISMATCH on every call.",
     );
   }
   return bare.toLowerCase();

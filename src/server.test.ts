@@ -708,10 +708,10 @@ describe("verify_permit (remote mode)", () => {
 
   it("rejects a malformed payload_hash instead of sending one the runtime will drop", async () => {
     // Fail-closed at every layer. v1-evaluate DROPS a digest that does not match
-    // /^[0-9a-f]{64}$/ rather than rejecting it, minting an UNBOUND permit; and
-    // v1-verify-permit will not trust a presented digest against an unbound
-    // permit. Sending a malformed value therefore silently disables
-    // PAYLOAD_MISMATCH, so refuse at the client boundary instead.
+    // /^[0-9a-f]{64}$/ rather than rejecting it, and binds the permit to its own
+    // hash of the whole request instead. The caller's digest then never
+    // constrains execution (presenting it at verify is a deterministic
+    // PAYLOAD_MISMATCH), so refuse at the client boundary instead.
     forceRemoteMode();
     let called = false;
     globalThis.fetch = mock.fn(async (): Promise<Response> => {
@@ -1902,8 +1902,9 @@ describe("atlasent_delete_webhook", () => {
 // The binding must be TOP-LEVEL and plain 64-char lowercase hex. v1-evaluate
 // destructures `execution_payload_hash` from `body` (never from `context`) and
 // binds it into the signed permit only when it matches /^[0-9a-f]{64}$/ — a
-// non-matching value is DROPPED, not rejected, so the permit mints unbound and
-// PAYLOAD_MISMATCH becomes unreachable at verify.
+// non-matching value is DROPPED, not rejected, and the permit is bound to the
+// server's own hash of the whole request instead — so the caller's digest never
+// constrains execution, and presenting it at verify fails deterministically.
 // ---------------------------------------------------------------------------
 
 describe("atlasent_evaluate execution payload binding", () => {
@@ -1933,7 +1934,7 @@ describe("atlasent_evaluate execution payload binding", () => {
     assert.equal(ctx.execution_payload_hash, undefined, "must not be nested under context");
   });
 
-  it("refuses a malformed digest rather than minting an unbound permit", async () => {
+  it("refuses a malformed digest rather than sending one the runtime will drop", async () => {
     forceRemoteMode();
     let called = false;
     globalThis.fetch = mock.fn(async () => {
@@ -1954,6 +1955,11 @@ describe("atlasent_evaluate execution payload binding", () => {
     });
     assert.equal(result.isError, true);
     assert.equal(called, false, "no evaluate request may be sent for a malformed digest");
+    // The error must state the real consequence (the digest never constrains
+    // execution), not the superseded "mints an UNBOUND permit" claim.
+    const text = JSON.stringify(result.content);
+    assert.match(text, /never constrain execution/);
+    assert.doesNotMatch(text, /UNBOUND/);
   });
 });
 
