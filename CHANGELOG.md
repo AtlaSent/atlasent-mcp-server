@@ -27,11 +27,12 @@ Nothing in the MCP server itself yet. See the companion packages below.
   itself. Requires `approvals:read` on the API key.
 - Held results now include `approval_request_id`.
 - Approvals for actions that require a verified actor are claimed with the
-  agent's own actor identity.
+  agent's own actor identity. If that identity cannot be obtained, nothing is
+  claimed and no permit is returned.
 - Mandatory change-control evaluations accept a `change_plan`, record it as a
   Change Brief, and bind it to the approval. If the plan changes before
   claim, the server files at most one linked re-request and returns the diff.
-  A second mismatch stops with no permit.
+  A second mismatch stops with no permit. Results can carry a `notes` array.
 - Every evaluate reports the calling MCP client and session
   (`agent_session`), taken from `ATLASENT_SESSION_ID`, `ATLASENT_RUN_ID`, the
   Streamable HTTP session, or a generated per-process id.
@@ -43,6 +44,7 @@ Nothing in the MCP server itself yet. See the companion packages below.
 - An API key on its own now selects remote mode. `ATLASENT_BASE_URL` is
   optional and defaults to `https://api.atlasent.io/functions/v1`. Before
   this change, a key without a base URL ran in local mode.
+- The local-mode startup warning includes a link for getting an API key.
 - The agent tool gate sends `context.tool`, the field the runtime's
   `agent.tool.invoke` action class reads.
 
