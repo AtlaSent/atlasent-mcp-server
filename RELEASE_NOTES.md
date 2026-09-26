@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## v2.14.0 — 2026-09-25
 
 ### Tools
 
@@ -51,7 +51,7 @@
   `atlasent_list_permits`) never return a permit's `token` (its bearer
   credential) or `signature`: both are stripped client-side, so an older or
   misconfigured backend cannot leak them into an agent's context. The API
-  side stopped returning them in atlasent-api#3638.
+  side has also stopped returning them.
 
 ## v2.12.2 — 2026-09-24
 
@@ -105,8 +105,8 @@ carries everything below.
   (hosted mode only).
 - `atlasent_explain_authority`.
 - **`atlasent_trajectory_verify` removed** — the runtime has no
-  `/v1/trajectory-verify` endpoint (part of the atlasent-api#2932
-  public-contract-honesty cleanup lane). See `docs/TRAJECTORY_VERIFY_DEPRECATED.md`.
+  `/v1/trajectory-verify` endpoint (part of a public-contract-honesty
+  cleanup). See `docs/TRAJECTORY_VERIFY_DEPRECATED.md`.
   The `2.11.0` release above still had it; do not reintroduce it without a
   real backing endpoint.
 
@@ -226,7 +226,7 @@ First stable release of the AtlaSent MCP server. Works with Claude Desktop, Curs
 ### Local demo (no credentials)
 
 ```bash
-git clone https://github.com/AtlaSent-Systems-Inc/atlasent-mcp-server
+git clone https://github.com/Atlasent/atlasent-mcp-server
 cd atlasent-mcp-server && npm install && npm run demo
 ```
 
