@@ -2,7 +2,7 @@
 
 > **Doctrine normalization header (2026-05-18).** This file is
 > preserved unchanged below per Doctrine 4 of
-> [`atlasent/VERSIONING_DOCTRINE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/normalize-roadmap-versioning-NWPuP/VERSIONING_DOCTRINE.md).
+> the internal `VERSIONING_DOCTRINE.md`.
 > Under the current doctrine there is no "v2 product"; the work
 > described here splits across **Phase 1** (Streamable HTTP transport,
 > SDK 2.x adoption, batch/stream/GraphQL tool surfaces — additive on
@@ -16,18 +16,18 @@
 
 > **Reframing normalization header (2026-05-18).** This document
 > remains in scope and is preserved unchanged per the "do not rewrite
-> history" doctrine ([`atlasent/VERSIONING_DOCTRINE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/VERSIONING_DOCTRINE.md)
+> history" doctrine (the internal `VERSIONING_DOCTRINE.md`
 > doctrine 4). Under the 2026-05-18 platform-generation reframing,
 > the work described here is reclassified as the **v1.x capability
 > layer** — additive cash-flowing capabilities on top of the V1 GA
 > substrate. The platform-generation label **v2** now refers to the
 > full enterprise surface, planned in
-> [`atlasent/ENTERPRISE_V2_ROLLOUT.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/ENTERPRISE_V2_ROLLOUT.md).
+> the internal `ENTERPRISE_V2_ROLLOUT.md`.
 > Filename and `V2-D#` identifiers are retained for reference
 > stability; "V2" in this document refers to the historical pre-reframing
 > framing, not the post-reframing platform-generation v2. New
 > decisions use the **`PROD-D#`** namespace. See
-> [`atlasent/ROADMAP.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/ROADMAP.md)
+> the internal `ROADMAP.md`
 > for the current generation matrix.
 
 **Status:** plan · **Wave:** B (transport) + C (tool surface) · **Updated:** 2026-05-15
@@ -37,11 +37,11 @@
 > and Ed25519-signed export envelope are stable; V2 work in this plan is
 > **additive** on V1 (no V1 wire/schema/audit-chain changes ship under V2).
 > V2 implementation is unblocked pending umbrella
-> [`V2_DECISIONS.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/V2_DECISIONS.md) sign-off.
-> Canonical V1 reference: [`atlasent-api/docs/runtime/golden-path-v1.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-api/blob/main/docs/runtime/golden-path-v1.md).
-> V1 GA closeout PRs: see umbrella [`ROADMAP.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/ROADMAP.md) "V1 GA — what closed" section.
+> the internal `V2_DECISIONS.md` sign-off.
+> Canonical V1 reference: the internal runtime golden-path V1 guide (`golden-path-v1.md`).
+> V1 GA closeout PRs: see the internal umbrella `ROADMAP.md` "V1 GA — what closed" section.
 
-MCP server cut of the [umbrella v2 rollout](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/plan-v2-rollout-5IPGF/V2_ROLLOUT.md). Owns the `v2_mcp_streamable_http` flag in `atlasent-control-plane`. Adds batch / stream / GraphQL tool surfaces and behavior-aware tool gates. Closes the gap noted in `atlasent-docs/plans/atlasent-mcp-server.md` (v0.3 → v1.0).
+MCP server cut of the internal umbrella v2 rollout. Owns the `v2_mcp_streamable_http` flag in `atlasent-control-plane`. Adds batch / stream / GraphQL tool surfaces and behavior-aware tool gates. Closes the gap noted in `atlasent-docs/plans/atlasent-mcp-server.md` (v0.3 → v1.0).
 
 ## Position
 
@@ -124,9 +124,9 @@ The server never reads raw event text — only the same redacted projection that
 
 ## Cross-repo links
 
-- Umbrella plan: [`atlasent/V2_ROLLOUT.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/plan-v2-rollout-5IPGF/V2_ROLLOUT.md)
-- API plan: [`atlasent-api/V2_ROLLOUT.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-api/blob/main/V2_ROLLOUT.md)
+- Umbrella plan: the internal umbrella `V2_ROLLOUT.md`
+- API plan: the internal API-side `V2_ROLLOUT.md`
 - SDK plan: this branch, sibling repo
-- Control-plane plan: [`atlasent-control-plane/V2_ROLLOUT.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-control-plane/blob/main/V2_ROLLOUT.md)
-- LangChain plan (parallel behavior gates): [`langchain-llamaindex-integration/V2_ROLLOUT.md`](https://github.com/AtlaSent-Systems-Inc/langchain-llamaindex-integration/blob/main/V2_ROLLOUT.md)
-- Per-repo milestone doc: [`atlasent-docs/plans/atlasent-mcp-server.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-docs/blob/main/plans/atlasent-mcp-server.md)
+- Control-plane plan: the internal control-plane `V2_ROLLOUT.md`
+- LangChain plan (parallel behavior gates): the internal LangChain/LlamaIndex integration `V2_ROLLOUT.md`
+- Per-repo milestone doc: the internal `plans/atlasent-mcp-server.md`

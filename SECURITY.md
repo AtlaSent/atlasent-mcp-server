@@ -51,7 +51,7 @@ We follow [responsible disclosure](https://cheatsheetseries.owasp.org/cheatsheet
 
 ## Maturity classification
 
-Per [`atlasent/MATURITY_DOCTRINE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/MATURITY_DOCTRINE.md) (adopted 2026-05-26), the two engine modes carry distinct maturity tiers and **must not be confused** when assessing authorization guarantees:
+Per AtlaSent's internal maturity doctrine (adopted 2026-05-26), the two engine modes carry distinct maturity tiers and **must not be confused** when assessing authorization guarantees:
 
 | Mode | Maturity | Permit signing | Use |
 |---|---|---|---|
