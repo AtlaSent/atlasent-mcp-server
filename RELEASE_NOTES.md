@@ -62,7 +62,7 @@ No change to decisions, wire shapes or fail-closed behaviour.
   a registered agent) and presents it on claim. Identity failures normally
   stop the claim with no permit. For compatibility with a runtime that does
   not expose the identity endpoint (HTTP 404), the server retries the claim
-  with an empty body, records a note, and the runtime makes the final decision;
+  with an empty body, records a note, and the runtime makes the final decision.
 - **Change plans.** `production.deploy`, `infrastructure.change`,
   `production.rollback` and `secret.configuration.change` take a
   `change_plan` (`{ operation, revision?, artifact_ref? }`) on `deploy_service`,
