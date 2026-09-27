@@ -3,7 +3,7 @@
   "name": "io.github.Atlasent/mcp-server",
   "title": "AtlaSent MCP Server",
   "description": "Stops risky production changes unless someone approved them, and gives you proof for your auditor.",
-  "version": "2.15.0",
+  "version": "2.16.0",
   "websiteUrl": "https://github.com/Atlasent/atlasent-mcp-server",
   "repository": {
     "url": "https://github.com/Atlasent/atlasent-mcp-server",
@@ -13,7 +13,7 @@
     {
       "registryType": "npm",
       "identifier": "@atlasent/mcp-server",
-      "version": "2.15.0",
+      "version": "2.16.0",
       "runtimeHint": "npx",
       "transport": { "type": "stdio" },
       "environmentVariables": [

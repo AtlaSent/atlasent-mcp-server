@@ -1,6 +1,6 @@
 {
   "name": "@atlasent/mcp-server",
-  "version": "2.15.0",
+  "version": "2.16.0",
   "description": "AtlaSent stops risky changes to production unless someone approved them, and gives you proof for your auditor. MCP server for AI agents; works offline in local mode.",
   "type": "module",
   "main": "./dist/index.js",

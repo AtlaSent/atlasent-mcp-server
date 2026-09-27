@@ -1,5 +1,22 @@
 # Release Notes
 
+## v2.16.0 — 2026-09-27
+
+### Agents can reach the approval hold on change-controlled actions
+
+- For `production.deploy`, `infrastructure.change`, `production.rollback` and
+  `secret.configuration.change`, the runtime requires a verified actor identity
+  at evaluate. Until now the server sent one only when claiming an approval, so
+  every agent request for these actions was refused `ACTOR_UNVERIFIED` and never
+  reached a person. The server now mints the agent's own identity and attaches
+  it whenever a change plan is present. This needs an agent-bound API key
+  (console: Connect an AI agent); other keys get a note and the runtime decides.
+- `deploy_service` now refuses early, with an actionable reason, when no
+  `change_plan` is given, instead of sending a request the runtime can only
+  refuse.
+
+No change to fail-closed behaviour: the runtime still decides every request.
+
 ## v2.15.0 — 2026-09-27
 
 ### Getting from the local demo to real permits
@@ -42,8 +59,10 @@ No change to decisions, wire shapes or fail-closed behaviour.
 - **Verified-actor approvals are claimed with the agent's own identity.** When
   an action class requires a verified actor, the server obtains a short-lived
   `actor_identity.v1` for its own agent (available only to an API key bound to
-  a registered agent) and presents it on claim. If that identity cannot be
-  obtained, nothing is claimed and no permit is returned.
+  a registered agent) and presents it on claim. Identity failures normally
+  stop the claim with no permit. For compatibility with a runtime that does
+  not expose the identity endpoint (HTTP 404), the server retries the claim
+  with an empty body, records a note, and the runtime makes the final decision.
 - **Change plans.** `production.deploy`, `infrastructure.change`,
   `production.rollback` and `secret.configuration.change` take a
   `change_plan` (`{ operation, revision?, artifact_ref? }`) on `deploy_service`,
