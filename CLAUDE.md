@@ -261,6 +261,24 @@ at 256). The claim presents that same plan, so the runtime answers 409
   `approved_plan`. If the diff cannot be read, nothing is claimed.
 - Tests: `src/planMismatch.test.ts`.
 
+### Verified actor identity at EVALUATE for change-controlled actions (2026-09-27)
+
+The runtime's verified-actor gate covers the same four action types at
+evaluate, not only at claim (`atlasent-api`
+`_shared/actor-identity-gate-scope.ts`, `requiresActorIdentityAtEvaluate`). An
+evaluate with a plan and no `actor_identity` is denied `ACTOR_UNVERIFIED` before
+any rule runs, so the approval hold never appears. `attachAgentActorIdentity`
+(`src/engine.ts`) mints the agent's own assertion through
+`/v1-agent-actor-identity` and attaches it to every evaluate path that sends a
+`change_plan`: `authorizeRemote`, `evaluateAction` and the linked re-request.
+It runs after `attachChangeControl`, so the remembered re-request body never
+holds a short-lived assertion. A key that cannot mint gets a note and the
+evaluate still goes out. The runtime decides.
+
+`deploy_service` refuses in remote mode, before any call, when `change_plan` is
+missing. The reason tells the agent to ask for the revision rather than invent
+one. Tests: `src/planMismatch.test.ts`.
+
 Headers: `Authorization: Bearer $ATLASENT_API_KEY`, optional `x-anon-key: $ATLASENT_ANON_KEY`.
 
 ## Disabled Endpoints (atlasent-api)

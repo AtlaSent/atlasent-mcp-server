@@ -2060,6 +2060,10 @@ describe("target binding", () => {
     const bodies: Record<string, unknown>[] = [];
     globalThis.fetch = mock.fn(async (url, init) => {
       bodies.push({ url: String(url), ...JSON.parse((init?.body as string) ?? "{}") });
+      // Change Brief / agent identity side calls: an older runtime (404).
+      if (/\/v1-(change-brief|agent-actor-identity)$/.test(String(url))) {
+        return new Response(JSON.stringify({ error: "not_found" }), { status: 404 });
+      }
       return new Response(
         JSON.stringify({ decision: "allow", permit_token: "pt_d1", valid: true, outcome: "allow" }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -2068,7 +2072,12 @@ describe("target binding", () => {
     const { client } = await setup();
     await client.callTool({
       name: "deploy_service",
-      arguments: { actor_id: "user-1", service_name: "billing-service", environment: "production" },
+      arguments: {
+        actor_id: "user-1",
+        service_name: "billing-service",
+        environment: "production",
+        change_plan: { operation: "deploy", revision: "abc123" },
+      },
     });
 
     // deploy_service makes TWO evaluate calls: the outer agent.tool.invoke gate
