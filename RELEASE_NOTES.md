@@ -59,8 +59,10 @@ No change to decisions, wire shapes or fail-closed behaviour.
 - **Verified-actor approvals are claimed with the agent's own identity.** When
   an action class requires a verified actor, the server obtains a short-lived
   `actor_identity.v1` for its own agent (available only to an API key bound to
-  a registered agent) and presents it on claim. If that identity cannot be
-  obtained, nothing is claimed and no permit is returned.
+  a registered agent) and presents it on claim. Identity failures normally
+  stop the claim with no permit. For compatibility with a runtime that does
+  not expose the identity endpoint (HTTP 404), the server retries the claim
+  with an empty body, records a note, and the runtime makes the final decision;
 - **Change plans.** `production.deploy`, `infrastructure.change`,
   `production.rollback` and `secret.configuration.change` take a
   `change_plan` (`{ operation, revision?, artifact_ref? }`) on `deploy_service`,
