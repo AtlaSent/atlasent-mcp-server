@@ -68,8 +68,10 @@ Nothing yet.
   itself. Requires `approvals:read` on the API key.
 - Held results now include `approval_request_id`.
 - Approvals for actions that require a verified actor are claimed with the
-  agent's own actor identity. If that identity cannot be obtained, nothing is
-  claimed and no permit is returned.
+  agent's own actor identity. Identity failures normally stop the claim with
+  no permit. For compatibility with a runtime that does not expose the identity
+  endpoint (HTTP 404), the server retries with an empty body, records a note,
+  and the runtime makes the final decision.
 - Mandatory change-control evaluations accept a `change_plan`, record it as a
   Change Brief, and bind it to the approval. If the plan changes before
   claim, the server files at most one linked re-request and returns the diff.
