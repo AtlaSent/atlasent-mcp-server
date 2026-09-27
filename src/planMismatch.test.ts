@@ -628,3 +628,96 @@ describe("deploy_service without a change_plan (remote)", () => {
     assert.equal(sent.length, 0, "no evaluate, no agent gate, nothing executed");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Attempt correlation: the tool gate and the action it guards share request_id
+// ---------------------------------------------------------------------------
+//
+// atlasent-console's Quick Start shows the agent's deploy attempt by reading
+// these ids back from the decision log. Without them it could only match on
+// actor + time, which picked up the agent's unrelated traffic.
+
+describe("deploy_service request correlation", () => {
+  const ATTEMPT = /^mcp-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  async function deployOnce(client: Client): Promise<{ gate: string; action: string }> {
+    const before = posts(EVAL).length;
+    await client.callTool({
+      name: "deploy_service",
+      arguments: { service_name: "checkout", environment: "production", actor_id: "svc:bot", change_plan: P1 },
+    });
+    const evals = posts(EVAL).slice(before);
+    const gate = evals.find((x) => x.body!.action_type === "agent.tool.invoke")!.body!.request_id as string;
+    const action = evals.find((x) => x.body!.action_type === "production.deploy")!.body!.request_id as string;
+    return { gate, action };
+  }
+
+  it("sends one attempt id on the gate and on the deploy, and a new one per call", async () => {
+    route((_m, p, body) => {
+      if (p === EVAL && body?.action_type === "agent.tool.invoke") return { status: 200, body: { decision: "allow", permit_token: "pt.gate" } };
+      if (p === "/functions/v1/v1-verify-permit") return { status: 200, body: { valid: true, outcome: "allow" } };
+      if (p === BRIEF) return { status: 200, body: { change_brief_id: "cb_1" } };
+      if (p === MINT) return { status: 200, body: { assertion: ASSERTION } };
+      if (p === EVAL) return { status: 200, body: { decision: "hold", approval_request_id: "apr_1" } };
+      return { status: 500, body: {} };
+    });
+    const server = createServer();
+    const [c, s] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "t", version: "1" });
+    await Promise.all([client.connect(c), server.connect(s)]);
+
+    const first = await deployOnce(client);
+    const gateMatch = /^(.+)\.tool-gate$/.exec(first.gate);
+    const actionMatch = /^(.+)\.action$/.exec(first.action);
+    assert.ok(gateMatch && actionMatch, `unexpected ids ${first.gate} / ${first.action}`);
+    assert.match(gateMatch![1], ATTEMPT);
+    assert.equal(gateMatch![1], actionMatch![1], "the gate and the deploy it guards share one attempt");
+
+    const second = await deployOnce(client);
+    assert.notEqual(second.action, first.action, "a new call is a new attempt, never an idempotent replay");
+  });
+
+  it("a gate refusal still carries the attempt id, and no deploy is asked", async () => {
+    route((_m, p) =>
+      p === EVAL ? { status: 200, body: { decision: "deny", deny_code: "NO_TEMPLATE_MATCH", deny_reason: "no" } } : { status: 500, body: {} },
+    );
+    const server = createServer();
+    const [c, s] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "t", version: "1" });
+    await Promise.all([client.connect(c), server.connect(s)]);
+    await client.callTool({
+      name: "deploy_service",
+      arguments: { service_name: "checkout", environment: "production", actor_id: "svc:bot", change_plan: P1 },
+    });
+    const evals = posts(EVAL);
+    assert.equal(evals.length, 1);
+    assert.match(String(evals[0].body!.request_id), /^mcp-.+\.tool-gate$/);
+  });
+
+  it("a linked re-request gets a NEW request_id under the same attempt (reuse would replay the hold)", async () => {
+    await holdWithPlan();
+    // holdWithPlan evaluates without an attempt; give the remembered body one.
+    const d = await authorize({
+      action_type: "production.deploy",
+      actor_id: "svc:bot",
+      environment: "production",
+      target_id: "checkout",
+      change_plan: P1,
+      request_id: "mcp-11111111-2222-4333-8444-555555555555.action",
+    });
+    assert.equal(d.decision, "hold");
+    sent.length = 0;
+    route((m, p) => {
+      if (m === "GET") return { status: 200, body: AWAITING };
+      if (p === MINT) return { status: 200, body: { assertion: ASSERTION } };
+      if (p === claimPath("apr_1")) return mismatch();
+      if (p === BRIEF) return { status: 200, body: { change_brief_id: "cb_2" } };
+      if (p === EVAL) return { status: 200, body: { decision: "hold", approval_request_id: "apr_2" } };
+      if (p === claimPath("apr_2")) return { status: 200, body: { claimed: true, permit_token: "pt.v4.new" } };
+      return { status: 500, body: {} };
+    });
+    await awaitApproval({ ...FAST, approval_request_id: "apr_1", change_plan: P2 });
+    const reId = String(posts(EVAL)[0].body!.request_id);
+    assert.match(reId, /^mcp-11111111-2222-4333-8444-555555555555\.action\.rerequest-[0-9a-f]{8}$/);
+  });
+});

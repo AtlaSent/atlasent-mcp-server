@@ -13,7 +13,16 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `deploy_service` sends one attempt id as `request_id` on both of its
+  evaluations: `mcp-<uuid>.tool-gate` for the `agent.tool.invoke` gate and
+  `mcp-<uuid>.action` for the `production.deploy` it guards. The runtime stores
+  `request_id` on every evaluation row, including early refusals, so the
+  AtlaSent console can tie the gate to the deploy and show the agent's deploy
+  attempt without picking up its other traffic. A linked re-request after a
+  plan change gets a new id under the same attempt, because reusing the held
+  request's id would make the runtime replay that hold.
 
 ## [2.16.0] - 2026-09-27
 

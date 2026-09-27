@@ -33,7 +33,7 @@ import { denyDecision } from "./decision.js";
 import { authorizeLocal, verifyLocal } from "./localEngine.js";
 import { upgradeHint } from "./upgrade.js";
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { VERSION } from "./version.js";
 
@@ -768,11 +768,33 @@ interface EvaluateRequestBodyInput {
   state_snapshot?: Record<string, unknown>;
   execution_payload_hash?: string;
   target_id?: string;
+  request_id?: string;
+}
+
+/**
+ * Correlated request ids for one gated tool call. The agent.tool.invoke gate
+ * and the consequential action it guards share one attempt id:
+ *
+ *   mcp-<uuid>.tool-gate   the outer gate ("may this agent use this tool?")
+ *   mcp-<uuid>.action      the action the tool performs (e.g. production.deploy)
+ *
+ * The runtime persists request_id on every evaluation row, including early
+ * refusals such as ACTOR_UNVERIFIED, so the pairing survives every outcome.
+ * atlasent-console's Quick Start reads this exact shape to show the agent's
+ * deploy attempt and ignore its unrelated traffic; change both together.
+ */
+export function newToolAttemptId(): string {
+  return `mcp-${randomUUID()}`;
+}
+
+export function toolAttemptRequestId(attemptId: string, part: "tool-gate" | "action"): string {
+  return `${attemptId}.${part}`;
 }
 
 function buildEvaluateRequestBody(input: EvaluateRequestBodyInput): Record<string, unknown> {
   const body: Record<string, unknown> = { action_type: input.action_type };
   if (input.actor_id) body.actor_id = input.actor_id;
+  if (input.request_id) body.request_id = input.request_id;
   const session = sanitizeAgentSession(input.agent_session);
   if (session) body.agent_session = session;
   // Must run BEFORE context is attached: it sets `resource_id` top-level and
@@ -812,6 +834,7 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
     // Bind the target too, for the same reason: a target presented at verify
     // against a permit never bound to one is not checked at all.
     ...(ctx.target_id !== undefined ? { target_id: ctx.target_id } : {}),
+    ...(ctx.request_id !== undefined ? { request_id: ctx.request_id } : {}),
   });
 
   // Mandatory-change-control actions: top-level change_plan plus an
@@ -1644,6 +1667,12 @@ export async function awaitApproval(params: AwaitApprovalParams): Promise<AwaitA
         // fresh brief recording it, and the link to the prior approval.
         rerequested = true;
         const body: Record<string, unknown> = { ...pending.evaluate_body, change_plan: presented };
+        // A new evaluation needs a new request_id: reusing the held request's
+        // id would make the runtime replay that recorded hold (idempotency).
+        // Keep the attempt prefix so the re-request stays linked to it.
+        if (typeof body.request_id === "string" && body.request_id) {
+          body.request_id = `${body.request_id}.rerequest-${randomUUID().slice(0, 8)}`;
+        }
         if (MANDATORY_CHANGE_CONTROL_ACTION_TYPES.has(actionType) && policyFlag("auto_change_brief", j, polled.json)) {
           try {
             const brief = await createChangeBriefForPlan({ ...pending.brief, change_plan: presented });
