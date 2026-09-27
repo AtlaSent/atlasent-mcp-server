@@ -389,13 +389,17 @@ Keep these statements distinct:
 
 ### Get an API key
 
-1. Create an account at
+1. Create a free account at
    **[console.atlasent.io/auth/sign-up](https://console.atlasent.io/auth/sign-up?utm_source=mcp&utm_medium=readme)**.
-2. In the console, open **API keys** and create a key with the `evaluate:write`
-   and `verify:execute` scopes.
-3. Set `ATLASENT_API_KEY` (and optionally `ATLASENT_BASE_URL`) in your MCP host
-   config, as in the example below. The server switches to remote mode
-   automatically when both are set.
+2. Choose **Connect an AI agent** (also under **Settings → API Keys**). Name the
+   agent, pick your app (Claude Code, Claude Desktop, Cursor, Windsurf, …) and
+   the console gives you a key plus the exact command or JSON to paste.
+3. Paste it into your MCP host config. `ATLASENT_API_KEY` on its own switches the
+   server to remote mode; `ATLASENT_BASE_URL` is optional and defaults to the
+   hosted API.
+4. Ask your agent to try something consequential (for example, "deploy the api
+   service to production"). The console shows the decision, and anything that
+   needs approval waits in the approval queue until someone approves it.
 
 Remote mode gives you what local mode cannot: Ed25519-signed, single-use permits,
 your organization's own policies, and a tamper-evident audit trail you can verify
@@ -404,7 +408,6 @@ offline.
 Remote example:
 
 ```bash
-ATLASENT_MODE=remote \
 ATLASENT_API_KEY=ask_live_xxx \
 ATLASENT_BASE_URL=https://api.atlasent.io/functions/v1 \
 ATLASENT_MCP_READONLY=1 \

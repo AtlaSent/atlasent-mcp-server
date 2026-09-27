@@ -2350,3 +2350,27 @@ describe("serverInfo version", () => {
     assert.equal(client.getServerVersion()?.version, pkg.version);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Upgrade path — the agent (not just stderr) must learn how to get real permits
+// ---------------------------------------------------------------------------
+
+describe("upgrade path reaches the agent", () => {
+  it("sends instructions at initialize that name the sign-up link and the one env var", async () => {
+    const { client } = await setup();
+    const instructions = client.getInstructions() ?? "";
+    assert.match(instructions, /https:\/\/console\.atlasent\.io\/auth\/sign-up\?utm_source=mcp&utm_medium=agent/);
+    assert.match(instructions, /ATLASENT_API_KEY/);
+    assert.match(instructions, /not protection/, "must not present the local demo as protection");
+    assert.doesNotMatch(instructions, /ATLASENT_API_KEY and ATLASENT_BASE_URL/, "the key alone selects remote mode");
+  });
+
+  it("puts the sign-up link in the local demo's terminal-allow conditions", async () => {
+    const { authorizeLocal } = await import("./localEngine.js");
+    const d = authorizeLocal({ action_type: "demo.unrecognised_action", actor_id: "dev", context: {} });
+    assert.equal(d.decision, "allow");
+    const text = (d.conditions ?? []).join(" ");
+    assert.match(text, /console\.atlasent\.io\/auth\/sign-up/);
+    assert.match(text, /ATLASENT_API_KEY/);
+  });
+});

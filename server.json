@@ -19,7 +19,7 @@
       "environmentVariables": [
         {
           "name": "ATLASENT_API_KEY",
-          "description": "AtlaSent API key (from your AtlaSent dashboard). Leave blank to run in local mode.",
+          "description": "AtlaSent API key: sign up free at console.atlasent.io and choose Connect an AI agent. Leave blank for the local demo mode.",
           "isRequired": false,
           "isSecret": true
         },

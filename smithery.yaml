@@ -8,7 +8,7 @@ configSchema:
   properties:
     apiKey:
       type: string
-      description: "AtlaSent API key (from your AtlaSent dashboard). Leave blank to run in local mode."
+      description: "AtlaSent API key: sign up free at console.atlasent.io and choose Connect an AI agent. Leave blank for the local demo mode."
     baseUrl:
       type: string
       description: "AtlaSent API base URL. Leave blank to use the hosted SaaS endpoint (api.atlasent.io)."
