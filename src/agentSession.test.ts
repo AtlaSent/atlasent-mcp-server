@@ -93,7 +93,12 @@ describe("protected tools report the session too", () => {
     process.env.ATLASENT_SESSION_ID = "chat-7";
     await (await client("cursor")).callTool({
       name: "deploy_service",
-      arguments: { service_name: "api", actor_id: "agent:a1", environment: "staging" },
+      arguments: {
+        service_name: "api",
+        actor_id: "agent:a1",
+        environment: "staging",
+        change_plan: { operation: "deploy", revision: "abc123" },
+      },
     });
     assert.ok(bodies.length >= 1);
     assert.deepEqual(bodies[0].agent_session, { host: "cursor", session_id: "chat-7" });

@@ -490,6 +490,57 @@ export const MANDATORY_CHANGE_CONTROL_ACTION_TYPES: ReadonlySet<string> = new Se
   "secret.configuration.change",
 ]);
 
+/**
+ * The same four action types also require a VERIFIED actor identity at
+ * evaluate, not only at claim (atlasent-api _shared/actor-identity-gate-scope.ts
+ * requiresActorIdentityAtEvaluate -> requiresMandatoryChangeControls). Without
+ * one the runtime denies ACTOR_UNVERIFIED before any policy runs, so no
+ * approval hold can ever be created. An agent-bound key can mint its own
+ * (mintAgentActorIdentity); a plain key cannot, and the runtime decides.
+ *
+ * Attaches a freshly minted assertion to `body.actor_identity` for exactly
+ * these action types, when the body already carries a change_plan, and
+ * returns notes to surface. Never fails the request:
+ * when no assertion can be obtained the evaluate still goes out and the
+ * runtime answers (fail-closed there). Call it AFTER attachChangeControl so
+ * the evaluate body remembered for a linked re-request never carries a
+ * short-lived assertion; the re-request mints its own.
+ */
+export async function attachAgentActorIdentity(
+  body: Record<string, unknown>,
+  action_type: string,
+  environment: string | undefined,
+): Promise<string[]> {
+  if (!MANDATORY_CHANGE_CONTROL_ACTION_TYPES.has(action_type)) return [];
+  // No plan: the runtime's change-plan gate denies first, so an identity
+  // would never be read. Do not mint a credential nobody will check.
+  if (body.change_plan === undefined) return [];
+  const minted = await mintAgentActorIdentity(action_type, environment ?? "");
+  if (minted.ok) {
+    body.actor_identity = minted.actor_identity;
+    return [];
+  }
+  return [
+    `'${action_type}' requires a verified actor identity at evaluate, and none could be minted ` +
+      `(${minted.reason}). Only an agent-bound AtlaSent API key can mint one for its own agent; ` +
+      "with any other key the runtime denies ACTOR_UNVERIFIED.",
+  ];
+}
+
+/**
+ * The client-side twin of the runtime's EXECUTION_PAYLOAD_HASH_REQUIRED gate:
+ * a mandatory-change-control action without a complete change plan can only
+ * ever be denied, so say what to send instead of spending a runtime call.
+ */
+export function missingChangePlanReason(action_type: string, change_plan: unknown): string | null {
+  if (!MANDATORY_CHANGE_CONTROL_ACTION_TYPES.has(action_type) || change_plan !== undefined) return null;
+  return (
+    `'${action_type}' requires change_plan: { operation, revision and/or artifact_ref } describing exactly ` +
+    'what will run (e.g. { "operation": "deploy", "revision": "<git SHA>" }). Ask the user for the ' +
+    "revision or artifact if you do not know it; do not invent one. Nothing was evaluated or executed."
+  );
+}
+
 export interface ChangePlan {
   operation: string;
   revision?: string;
@@ -774,10 +825,11 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
     target_system: ctx.target_system,
     change_plan: ctx.change_plan,
   });
+  const identityNotes = await attachAgentActorIdentity(body, ctx.action_type, ctx.environment);
 
   const data = await post<RawEvaluate>("/v1-evaluate", body);
   if (data.decision === "hold" || data.decision === "escalate") changeControl.remember(data.approval_request_id);
-  const notes = changeControl.notes;
+  const notes = [...changeControl.notes, ...identityNotes];
 
   // Normalise request_id → audit_id (canonical API contract uses request_id).
   const audit_id = data.request_id;
@@ -965,11 +1017,17 @@ export async function evaluateAction(params: EvaluateParams): Promise<EvaluateRe
     target_system: params.target_system,
     change_plan: params.change_plan,
   });
+  const identityNotes = await attachAgentActorIdentity(
+    body,
+    params.action_type,
+    typeof env === "string" ? env : undefined,
+  );
   const res = await post<EvaluateResponse>("/v1-evaluate", body);
   if (res.decision === "hold" || res.decision === "escalate") changeControl.remember(res.approval_request_id);
-  if (changeControl.notes.length) {
+  const added = [...changeControl.notes, ...identityNotes];
+  if (added.length) {
     const prior = Array.isArray(res.notes) ? (res.notes as unknown[]) : [];
-    return { ...res, notes: [...prior, ...changeControl.notes] };
+    return { ...res, notes: [...prior, ...added] };
   }
   return res;
 }
@@ -1597,6 +1655,14 @@ export async function awaitApproval(params: AwaitApprovalParams): Promise<AwaitA
           }
         }
         body.supersedes_approval_id = id;
+        const pendingCtx = pending.evaluate_body.context as Record<string, unknown> | undefined;
+        notes.push(
+          ...(await attachAgentActorIdentity(
+            body,
+            actionType,
+            typeof pendingCtx?.environment === "string" ? pendingCtx.environment : undefined,
+          )),
+        );
         let evaluated: { status: number; json: Record<string, unknown> | null };
         try {
           evaluated = await rawRequest("POST", "/v1-evaluate", body);

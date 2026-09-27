@@ -124,6 +124,7 @@ describe("auto Change Brief for mandatory-change-control actions", () => {
   it("creates the brief FIRST with exactly the plan, then evaluates with its id and the same top-level plan", async () => {
     route((_m, p) => {
       if (p === BRIEF) return { status: 200, body: { change_brief_id: "cb_1" } };
+      if (p === MINT) return { status: 200, body: { assertion: ASSERTION } };
       if (p === EVAL) return { status: 200, body: { decision: "allow", permit_token: "pt.v4.ok" } };
       return { status: 500, body: {} };
     });
@@ -135,7 +136,7 @@ describe("auto Change Brief for mandatory-change-control actions", () => {
       change_plan: { operation: " deploy ", revision: "aaa111", artifact_ref: "" },
     });
     assert.equal(d.decision, "allow");
-    assert.deepEqual(sent.map((s) => s.path), [BRIEF, EVAL], "brief precedes evaluate");
+    assert.deepEqual(sent.map((s) => s.path), [BRIEF, MINT, EVAL], "brief, then the actor identity, then evaluate");
     const brief = sent[0].body!;
     assert.deepEqual(brief.execution_change_plan, P1, "normalised plan, nothing invented");
     assert.equal(brief.action_type, "production.deploy");
@@ -144,7 +145,8 @@ describe("auto Change Brief for mandatory-change-control actions", () => {
     assert.equal(brief.actor_id, "svc:bot");
     assert.equal(brief.target_system, "unspecified");
     assert.match(String(brief.canonical_plan_digest), /^sha256:[0-9a-f]{64}$/);
-    const ev = sent[1].body!;
+    const ev = sent[2].body!;
+    assert.deepEqual(ev.actor_identity, ASSERTION, "the minted agent identity rides the evaluate");
     assert.equal(ev.change_brief_id, "cb_1");
     assert.deepEqual(ev.change_plan, brief.execution_change_plan, "evaluate plan === brief plan");
     assert.equal(ev.resource_id, "checkout", "brief target_id matches the evaluate resource_id");
@@ -160,9 +162,10 @@ describe("auto Change Brief for mandatory-change-control actions", () => {
       change_plan: { operation: "apply", artifact_ref: "plan-42" },
     });
     assert.equal(r.decision, "hold");
-    assert.deepEqual(sent.map((s) => s.path), [BRIEF, EVAL]);
-    assert.equal(sent[1].body!.change_brief_id, "cb_9");
-    assert.deepEqual(sent[1].body!.change_plan, { operation: "apply", artifact_ref: "plan-42" });
+    assert.deepEqual(sent.map((s) => s.path), [BRIEF, MINT, EVAL]);
+    assert.equal(sent[1].body!.environment, "production", "identity minted for the context environment");
+    assert.equal(sent[2].body!.change_brief_id, "cb_9");
+    assert.deepEqual(sent[2].body!.change_plan, { operation: "apply", artifact_ref: "plan-42" });
   });
 
   for (const status of [404, 403]) {
@@ -549,5 +552,79 @@ describe("deploy_service → atlasent_await_approval (tools)", () => {
     assert.equal(out.approval_request_id, "apr_2");
     assert.match(out.summary, /plan changed from deploy, revision aaa111 to deploy, revision bbb222 → re-request sent \(approval apr_2\) → waiting → approved/);
     assert.match(out.next_step, /atlasent_verify_permit/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Verified actor identity at evaluate (mandatory change control)
+// ---------------------------------------------------------------------------
+//
+// atlasent-api requiresActorIdentityAtEvaluate() forces the verified-actor gate
+// on for production.deploy & co. Without an assertion the runtime denies
+// ACTOR_UNVERIFIED before any rule runs, so an approval hold is unreachable.
+
+describe("verified actor identity at evaluate", () => {
+  it("an agent-bound key's minted identity is attached, bound to this action and environment", async () => {
+    route((_m, p) => {
+      if (p === BRIEF) return { status: 200, body: { change_brief_id: "cb_1" } };
+      if (p === MINT) return { status: 200, body: { assertion: ASSERTION } };
+      if (p === EVAL) return { status: 200, body: { decision: "hold", approval_request_id: "apr_1" } };
+      return { status: 500, body: {} };
+    });
+    const d = await authorize({ action_type: "production.deploy", environment: "production", target_id: "checkout", change_plan: P1 });
+    assert.equal(d.decision, "hold");
+    assert.deepEqual(posts(MINT)[0].body, { action_type: "production.deploy", environment: "production" });
+    assert.deepEqual(posts(EVAL)[0].body!.actor_identity, ASSERTION);
+    const notes = (d as { notes?: string[] }).notes ?? [];
+    assert.equal(notes.some((n) => /actor identity/.test(n)), false, "no identity note when minting worked");
+  });
+
+  it("a key that cannot mint (not agent-bound) still evaluates, without an identity, and says why", async () => {
+    route((_m, p) => {
+      if (p === BRIEF) return { status: 200, body: { change_brief_id: "cb_1" } };
+      if (p === MINT) return { status: 403, body: { error: "agent_binding_required" } };
+      if (p === EVAL) return { status: 200, body: { decision: "deny", deny_code: "ACTOR_UNVERIFIED", deny_reason: "no assertion" } };
+      return { status: 500, body: {} };
+    });
+    const d = await evaluateAction({
+      action_type: "production.deploy",
+      actor_id: "deploy-bot",
+      context: { environment: "production" },
+      change_plan: P1,
+    });
+    assert.equal(d.decision, "deny", "the runtime decides; the client never upgrades anything");
+    assert.equal("actor_identity" in posts(EVAL)[0].body!, false);
+    assert.match(String((d.notes as string[]).join(" ")), /agent_binding_required.*agent-bound/);
+  });
+
+  it("does not mint an identity for an action outside mandatory change control", async () => {
+    route((_m, p) => (p === EVAL ? { status: 200, body: { decision: "allow", permit_token: "pt" } } : { status: 500, body: {} }));
+    await authorize({ action_type: "data.export", actor_id: "a", environment: "production" });
+    assert.equal(posts(MINT).length, 0);
+  });
+
+  it("does not mint when no change_plan was given (the plan gate denies first)", async () => {
+    route((_m, p) => (p === EVAL ? { status: 200, body: { decision: "deny", deny_code: "EXECUTION_PAYLOAD_HASH_REQUIRED" } } : { status: 500, body: {} }));
+    await authorize({ action_type: "production.deploy", actor_id: "a", environment: "production" });
+    assert.equal(posts(MINT).length, 0);
+  });
+});
+
+describe("deploy_service without a change_plan (remote)", () => {
+  it("refuses with an actionable reason before any runtime call", async () => {
+    route(() => ({ status: 500, body: {} }));
+    const server = createServer();
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "t", version: "1" });
+    await Promise.all([client.connect(ct), server.connect(st)]);
+    const res = await client.callTool({
+      name: "deploy_service",
+      arguments: { service_name: "checkout", environment: "production", actor_id: "agent:a1" },
+    });
+    const out = JSON.parse((res.content as Array<{ text: string }>)[0].text) as { decision: string; reasons: string[] };
+    assert.equal(out.decision, "deny");
+    assert.match(out.reasons[0], /change_plan.*operation.*revision/);
+    assert.match(out.reasons[0], /do not invent one/);
+    assert.equal(sent.length, 0, "no evaluate, no agent gate, nothing executed");
   });
 });

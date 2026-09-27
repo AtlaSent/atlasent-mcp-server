@@ -49,7 +49,16 @@ const DEPLOY_ARGS = {
   service_name: "billing-api",
   environment: "staging",
   actor_id: "agent-7",
+  change_plan: { operation: "deploy", revision: "abc123" },
 };
+
+// production.deploy is mandatory change control: the server also creates a
+// Change Brief and mints an agent actor identity before evaluating. Those are
+// answered 404 here (older runtime) so the call sequence under test is only
+// evaluate / verify.
+function isChangeControlSideCall(url: string): boolean {
+  return url.includes("/v1-change-brief") || url.includes("/v1-agent-actor-identity");
+}
 
 let originalFetch: typeof globalThis.fetch;
 
@@ -69,6 +78,7 @@ describe("deploy_service verify-before-execute boundary", () => {
     const calls: CapturedCall[] = [];
     globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const url = String(input);
+      if (isChangeControlSideCall(url)) return jsonResponse({ error: "not_found" }, 404);
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       calls.push({ url, body });
 
@@ -108,6 +118,7 @@ describe("deploy_service verify-before-execute boundary", () => {
     const calls: CapturedCall[] = [];
     globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const url = String(input);
+      if (isChangeControlSideCall(url)) return jsonResponse({ error: "not_found" }, 404);
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       calls.push({ url, body });
 
@@ -139,6 +150,7 @@ describe("deploy_service verify-before-execute boundary", () => {
     const calls: CapturedCall[] = [];
     globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const url = String(input);
+      if (isChangeControlSideCall(url)) return jsonResponse({ error: "not_found" }, 404);
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       calls.push({ url, body });
 

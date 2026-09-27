@@ -39,6 +39,7 @@ import {
   createWebhook,
   deleteWebhook,
   awaitApproval,
+  missingChangePlanReason,
   type ReportedAgentSession,
 } from "./engine.js";
 import { randomUUID } from "node:crypto";
@@ -555,6 +556,20 @@ export function createServer(): McpServer {
           reasons: ["MCP tool rate limit exceeded — slow down and retry"],
         };
         log("deploy_service.rate_limited", { decision });
+        return toolResult(decision);
+      }
+
+      // production.deploy is mandatory change control: without a complete
+      // change_plan the runtime can only deny it, and would do so AFTER the
+      // agent.tool.invoke gate below. Refuse here, before any call, with an
+      // answer the agent can act on (ask for the revision) instead of a bare
+      // deny. Fail-closed: nothing is evaluated and nothing executes.
+      // Remote mode only: the local demo engine has no change-control gate.
+      const planMissing =
+        getMode() === "remote" ? missingChangePlanReason("production.deploy", args.change_plan) : null;
+      if (planMissing !== null) {
+        const decision = { decision: "deny" as const, reasons: [planMissing] };
+        log("deploy_service.change_plan_required", { service: args.service_name, decision });
         return toolResult(decision);
       }
 
