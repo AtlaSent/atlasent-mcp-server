@@ -13,6 +13,10 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [2.15.0] - 2026-09-27
+
 ### Added
 
 - The server now sends MCP `instructions` at initialize: when to call
@@ -206,7 +210,8 @@ stable and will not change without a major version bump.
   call until you write a rule, and records metadata-only activity evidence.
   No account, no network, no dependencies.
 
-[Unreleased]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.14.0...HEAD
+[Unreleased]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.15.0...HEAD
+[2.15.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.12.2...v2.13.0
 [2.12.2]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.12.1...v2.12.2

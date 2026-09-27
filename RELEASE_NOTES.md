@@ -1,5 +1,23 @@
 # Release Notes
 
+## v2.15.0 — 2026-09-27
+
+### Getting from the local demo to real permits
+
+- **The agent now learns how to upgrade.** The server sends MCP
+  `instructions` at initialize: call `atlasent_evaluate` before consequential
+  actions, act only on `allow` after verifying the permit, wait on `hold`, and
+  if no `ATLASENT_API_KEY` is set, that local mode is a demo and how to get a
+  key (free sign-up, then **Connect an AI agent** in the console).
+- The local demo's terminal-allow note carries the same sign-up link and names
+  `ATLASENT_API_KEY`. Before this, the only pointer was on stderr, which most
+  MCP hosts hide.
+- The stderr warning and the `NODE_ENV=production` refusal no longer say
+  `ATLASENT_BASE_URL` is required; the key alone selects remote mode.
+- README "Get an API key" walks through the console's Connect an AI agent flow.
+
+No change to decisions, wire shapes or fail-closed behaviour.
+
 ## v2.14.0 — 2026-09-25
 
 ### Configuration (behaviour change)
