@@ -15,6 +15,25 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 Nothing yet.
 
+## [2.16.0] - 2026-09-27
+
+### Fixed
+
+- Agents can now reach the approval hold on `production.deploy`,
+  `infrastructure.change`, `production.rollback` and
+  `secret.configuration.change`. The runtime requires a verified actor identity
+  at evaluate for these four types; the server only sent one when claiming an
+  approval, so every such request was denied `ACTOR_UNVERIFIED`. It now mints
+  the agent's own identity (`/v1-agent-actor-identity`) and attaches it whenever
+  a change plan is sent. A key that cannot mint gets a note, and the runtime
+  still decides.
+
+### Changed
+
+- In remote mode, `deploy_service` refuses before any call when `change_plan`
+  is missing, and tells the agent to ask for the revision rather than invent
+  one.
+
 ## [2.15.0] - 2026-09-27
 
 ### Added
@@ -210,7 +229,8 @@ stable and will not change without a major version bump.
   call until you write a rule, and records metadata-only activity evidence.
   No account, no network, no dependencies.
 
-[Unreleased]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.15.0...HEAD
+[Unreleased]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.16.0...HEAD
+[2.16.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.12.2...v2.13.0
