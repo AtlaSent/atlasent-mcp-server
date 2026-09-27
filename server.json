@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Atlasent/mcp-server",
   "title": "AtlaSent MCP Server",
-  "description": "Atlasent authority for AI agents: consequential tool calls wait for approval, with signed proof.",
+  "description": "Atlasent for AI agents: with an API key, actions wait for approval with signed proof. No key: demo.",
   "version": "2.16.0",
   "websiteUrl": "https://github.com/Atlasent/atlasent-mcp-server",
   "repository": {

@@ -9,7 +9,7 @@ MCP server that enforces authorize-before-execute for any MCP-compatible AI agen
 
 **Atlasent is security and organizational authority infrastructure for consequential actions by people, software, and AI.**
 
-This MCP server brings it to AI agents (Claude, Cursor, Windsurf, any MCP host). Before an agent's tool call changes a real system (a production deploy, a data export, an access grant), the agent asks Atlasent first:
+This MCP server brings it to AI agents (Claude, Cursor, Windsurf, any MCP host). Before an agent's tool call changes a real system (a production deploy, a data export, an access grant), the agent asks Atlasent first. With an API key (remote mode):
 
 1. **Connect it** to your agent with a few lines of config.
 2. **Risky actions wait** for a person to approve them. Everything else runs as normal.
