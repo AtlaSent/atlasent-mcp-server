@@ -1,4 +1,4 @@
-# AtlaSent MCP Gate
+# Atlasent MCP Gate
 
 A fail-closed proxy that sits between an MCP client and an MCP server. Every tool call
 is blocked until you write a rule allowing it. Runs entirely on your machine.
@@ -50,7 +50,7 @@ still needs runtime-deny, independent-review, replay and cross-tenant cases. The
 runner's local automated test uses a simulated runtime and is not live proof.
 
 Run a local MCP tool gate without an account, subscription, API key, or network service.
-Local allow rules are operator configuration, **not AtlaSent organizational permits** —
+Local allow rules are operator configuration, **not Atlasent organizational permits** —
 see [the authority ladder](../../README.md#which-authority-decided) for what that means
 and what it does not.
 
@@ -159,7 +159,8 @@ upstreams that create detached descendants require an external supervisor/sandbo
 
 ## Free / paid boundary and remaining delivery
 
-Free local edition: tool visibility through MCP listing, explicit rules, blocking,
+Free local edition (part of the free Atlasent Community plan; plans at
+https://www.atlasent.io/pricing): tool visibility through MCP listing, explicit rules, blocking,
 metadata evidence, offline viewer and versioned contributed policy packs.
 Planned paid organizational management: enrolled gates, centrally owned policy,
 independent approvals, retained evidence, alerts and fleet health. No pricing or billing
