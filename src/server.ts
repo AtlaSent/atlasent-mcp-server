@@ -40,6 +40,8 @@ import {
   deleteWebhook,
   awaitApproval,
   missingChangePlanReason,
+  newToolAttemptId,
+  toolAttemptRequestId,
   type ReportedAgentSession,
 } from "./engine.js";
 import { randomUUID } from "node:crypto";
@@ -257,6 +259,7 @@ async function agentToolGate(
   environment: string,
   approvals?: string[],
   agentSession?: ReportedAgentSession,
+  requestId?: string,
 ): Promise<Decision | null> {
   // Forward the call's approvals into the gate context. Without this, a
   // production tool call is denied at the agent gate for "no approvals" even
@@ -280,6 +283,7 @@ async function agentToolGate(
     target_id: toolName,
     ...(approvals && approvals.length ? { approvals } : {}),
     ...(agentSession && { agent_session: agentSession }),
+    ...(requestId && { request_id: requestId }),
   };
   const gate = await authorize(ctx);
   if (gate.decision !== "allow") {
@@ -575,7 +579,17 @@ export function createServer(): McpServer {
 
       // Outer Gate: agent.tool.invoke is authorized and its Permit is
       // verified inside agentToolGate before this handler can continue.
-      const agentGate = await agentToolGate("deploy_service", args.actor_id, args.environment, args.approvals, reportedSessionFor(server));
+      // One attempt id ties the outer gate to the deploy it guards: both
+      // evaluation rows carry it in request_id (see toolAttemptRequestId).
+      const attemptId = newToolAttemptId();
+      const agentGate = await agentToolGate(
+        "deploy_service",
+        args.actor_id,
+        args.environment,
+        args.approvals,
+        reportedSessionFor(server),
+        toolAttemptRequestId(attemptId, "tool-gate"),
+      );
       if (agentGate !== null) return toolResult(agentGate);
 
       const ctx: ActionContext = {
@@ -595,6 +609,7 @@ export function createServer(): McpServer {
         ...(args.change_plan ? { change_plan: args.change_plan } : {}),
         ...(args.target_system ? { target_system: args.target_system } : {}),
         agent_session: reportedSessionFor(server),
+        request_id: toolAttemptRequestId(attemptId, "action"),
       };
 
       const decision = await authorize(ctx);

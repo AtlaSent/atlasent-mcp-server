@@ -41,6 +41,15 @@ export type ActionContext = {
   change_plan?: { operation: string; revision?: string; artifact_ref?: string };
   /** Descriptive system the target lives in, for the auto Change Brief. */
   target_system?: string;
+  /**
+   * The runtime's per-call request identity (`request_id` on /v1-evaluate,
+   * persisted on the evaluation row). One deploy_service call sends the SAME
+   * attempt id on its agent.tool.invoke gate and on the action it gates (see
+   * toolAttemptRequestId in engine.ts), so a reader of the decision log can tell
+   * which gate belongs to which consequential action. Caller-chosen, never
+   * authority; the runtime uses it for idempotency.
+   */
+  request_id?: string;
 };
 
 export type AllowDecision = {
