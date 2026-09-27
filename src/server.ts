@@ -12,6 +12,7 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { serverInstructions } from "./upgrade.js";
 import { z } from "zod";
 import { toolResult, type ActionContext, type Decision } from "./decision.js";
 import {
@@ -377,10 +378,13 @@ function toolError(e: unknown) {
 }
 
 export function createServer(): McpServer {
-  const server = new McpServer({
-    name: "@atlasent/mcp-server",
-    version: VERSION,
-  });
+  const server = new McpServer(
+    {
+      name: "@atlasent/mcp-server",
+      version: VERSION,
+    },
+    { instructions: serverInstructions() },
+  );
 
   if (
     process.env.ATLASENT_MCP_READONLY === "1" ||

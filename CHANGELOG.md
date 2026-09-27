@@ -13,7 +13,25 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
-Nothing in the MCP server itself yet. See the companion packages below.
+### Added
+
+- The server now sends MCP `instructions` at initialize: when to call
+  `atlasent_evaluate`, to act only on `allow` after verifying the permit, to wait
+  on `hold` rather than retry, and how to move from the local demo to real
+  permits (sign-up link and the one env var to set). Hosts that support
+  `instructions` put this in the agent's context.
+
+### Changed
+
+- The local demo engine's terminal-allow note now includes the sign-up link and
+  names `ATLASENT_API_KEY`. Until now the only sign-up pointer was on stderr,
+  which most MCP hosts hide from both the person and the agent.
+- The local-mode stderr warning and the `NODE_ENV=production` refusal no longer
+  say `ATLASENT_BASE_URL` is required (it is optional since 2.14.0), and the
+  warning no longer cites an internal document.
+- README "Get an API key" now walks through the console's **Connect an AI
+  agent** flow; the registry and Smithery `ATLASENT_API_KEY` descriptions say
+  where to get a key.
 
 ## [2.14.0] - 2026-09-25
 

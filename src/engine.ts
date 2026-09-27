@@ -31,6 +31,7 @@
 import type { ActionContext, Decision, VerifyResult } from "./decision.js";
 import { denyDecision } from "./decision.js";
 import { authorizeLocal, verifyLocal } from "./localEngine.js";
+import { upgradeHint } from "./upgrade.js";
 
 import { createHash } from "node:crypto";
 
@@ -63,13 +64,10 @@ function emitLocalModeWarning(): void {
   console.error(
     "[atlasent-mcp-server] WARNING: running in LOCAL mode. " +
       "Local-mode permits are unsigned and forgeable " +
-      "(Date.now() + UUID, no HMAC). " +
-      "Per atlasent/MATURITY_DOCTRINE.md, local mode is classified " +
-      "Experimental and is intended for development and CI only. " +
-      "For production-authoritative authorization, set ATLASENT_API_KEY " +
-      "and ATLASENT_BASE_URL to use the hosted AtlaSent backend " +
-      "(get an API key: https://console.atlasent.io/auth/sign-up?utm_source=mcp&utm_medium=cli). " +
-      "See SECURITY.md § 'Maturity classification' for details. " +
+      "(Date.now() + UUID, no HMAC), and the local engine's default is allow. " +
+      "Local mode is Experimental: use it for development, demos and CI only. " +
+      upgradeHint("cli") +
+      " See SECURITY.md \u00a7 'Maturity classification' for details. " +
       "Set ATLASENT_SUPPRESS_LOCAL_MODE_WARNING=true to silence this warning " +
       "in dev/CI scripts.",
   );
@@ -125,8 +123,8 @@ export function getMode(): Mode {
     throw new Error(
       "MCP server refuses to run in local mode with NODE_ENV=production. " +
         "Local-mode permits are unsigned and forgeable. Either set " +
-        "ATLASENT_API_KEY and ATLASENT_BASE_URL to use the hosted AtlaSent " +
-        "backend, or explicitly opt in (NOT RECOMMENDED) with " +
+        "ATLASENT_API_KEY to use the hosted AtlaSent backend " +
+        "(ATLASENT_BASE_URL is optional), or explicitly opt in (NOT RECOMMENDED) with " +
         "ATLASENT_ALLOW_LOCAL_MODE_IN_PROD=true.",
     );
   }

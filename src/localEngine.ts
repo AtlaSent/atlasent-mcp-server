@@ -39,6 +39,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { ActionContext, Decision, VerifyResult } from "./decision.js";
+import { upgradeHint } from "./upgrade.js";
 
 const DESTRUCTIVE_KEYWORDS = ["delete", "drop", "destroy", "truncate", "rm", "purge", "wipe"];
 const PERMIT_TTL_MS = 5 * 60 * 1000;
@@ -469,7 +470,8 @@ export function authorizeLocal(ctx: ActionContext): Decision {
       "Local demo engine: no rule matched, and the terminal rule is allow. " +
         "This is not a finding that the action is safe, and local permits are " +
         "unsigned. For deny-by-default local enforcement use @atlasent/mcp-gate; " +
-        "for an organizational permit, configure a hosted backend.",
+        "for an organizational permit, use remote mode. " +
+        upgradeHint("agent"),
     ],
     audit_id,
   };
