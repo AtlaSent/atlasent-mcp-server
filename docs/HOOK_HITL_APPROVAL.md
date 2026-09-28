@@ -1,7 +1,8 @@
 # Design: the guard waits for a person in the console
 
-Status: **ACCEPTED** (2026-09-28; decisions below). Slice 1 (the hook) is
-implemented in `packages/agent-hooks/connected.mjs` and not yet staging-proven.
+Status: **ACCEPTED** (2026-09-28; decisions below). D1 (the hook) is
+implemented in `packages/agent-hooks/connected.mjs`. D2 is blocked on the
+runtime binding fix A1 (see "Delivery plan").
 
 ## The problem
 
@@ -298,19 +299,94 @@ seed comes back to the founder for explicit approval before any write.
   `pending.json`. A tampered pending pointer can at worst consume another
   approval's permit, which then fails `PAYLOAD_MISMATCH`; it cannot allow.
 
-## Slices
+## Delivery plan: stages, deliverables, exit criteria
 
-1. **Hook, connected mode** (this repo): evaluate, pending store, re-run
-   claim/verify, redaction, `connect`, nudge, tests. **Implemented.** Staging
-   proof needs a staging org with the HITL variant above, a registered agent,
-   and a key bound to it (`evaluate:write`, `approvals:read`,
-   `verify:execute`). The proof must also establish that a console approval
-   satisfies the class's human-approval gate at claim time.
-2. **Console display** (`atlasent-console`): the request-type panel and the
-   Deny-with-a-note wiring on `/approval-queue`.
-3. **Notification** (`atlasent-api` / console): Slack on a new hold for this
-   type. `v1-evaluate` already calls `notifyOrgChatChannels` on a hold; check
-   whether it covers this type and gives the approver enough to act before
-   building anything new.
-4. **Policy seed:** an `agent.tool.invoke` template for new accounts that
-   holds unattended guard requests. Written live, with explicit go-ahead.
+Founder decision sequence (2026-09-28). Each stage starts only when the
+previous one has met its exit criteria. Approving one stage does not approve
+the next. D6–D8 are not approved. Production Change and customer acceptance
+work takes priority over this plan wherever the two conflict.
+
+**Stop conditions (binding).** Stop and return to the founder if a stage would
+need any of the following:
+- a breaking `/v1` or permit/canonical-form change;
+- weaker fail-closed behaviour, or weaker `production.deploy` requirements;
+- trusting a client-supplied actor, environment or target without verifying it;
+- a redacted preview used as the binding;
+- a second approval plane, standing grants, or a wait tool that grants anything;
+- a new production secret, a broader credential scope, or a production DB or
+  policy write;
+- approval APIs that cannot enforce the binding;
+- a security defect.
+
+| Stage | Status | Concrete deliverable | Exit criteria (all must hold) |
+|---|---|---|---|
+| **D1** Hook, connected mode | **Source-complete** (`cc308c6`); one runtime blocker found, fix proposed (see below) | `packages/agent-hooks/connected.mjs` + `redact.mjs` + `jcs.mjs`, `atlasent-hooks connect`, 52 tests | ✅ 52/52 hook tests pass, mutation-checked. ✅ Every error, timeout or malformed answer denies, and the no-key path is byte-identical. ✅ Wire bodies are asserted: all 3 target placements plus a top-level digest at evaluate, and target, digest, environment and agent at verify. ⛔ The runtime has to carry the digest through the approval (A1 below). Until it does, D1 cannot reach "allow once" against a real runtime. |
+| **D2** Staging acceptance | Blocked on A1 | One recorded acceptance run on staging runtime `lwnqpmnxpeyhpxvastku`: `docs/acceptance/HITL_HOOK_STAGING_<date>.md` plus a script that replays it | Using a real connected staging identity: (a) an unattended guarded action returns HOLD, a legitimate console approval follows, the permit is bound to the exact action, and exactly one verified execution happens. (b) A changed action cannot reuse the permit: changed command, MCP argument and Write content each get a new approval. (c) Every negative case in the founder list is observed live: wrong agent, target or environment; insufficient approval; expired approval or permit; consumed permit; replay; a different session or key claiming; malformed or timed-out runtime; redaction failure; mismatched hash. Each one denies. (d) The record lists the decision id, approval id, evaluation → re-evaluation → permit lineage, actor, target, environment, action hash and verify/consume evidence, and **no secrets**. (e) The approval satisfied the class's human-approval gate at claim time. |
+| **D3** Console `/approval-queue` panel | After D2 | `atlasent-console` request-type panel for `agent.tool.invoke` holds. It shows the agent, represented org, rule/action, redacted preview, repo/target, environment, hold reason and authority required, with **Approve once** and **Deny with note** | Both buttons call `v1-approvals` resolve and nothing else: no console-side decision state (runtime-authority guard green). The deny note reaches the agent on its next retry, shown end to end on staging. The note field has been decided (A2 below). Orphan-component, permission-gating and lint-baseline guards are green. |
+| **D4** Slack notification | After D3 | A new eligible hold notifies the org's Slack, deep-linked to the D3 approval. The existing `notifyOrgChatChannels` hold path is extended only if it lacks what the approver needs | On staging, a hold posts one message with the approval link and the redacted preview, and no secrets. A Slack message cannot approve anything: if interactive, it calls the same `v1-approvals` resolve with the same authority checks, proven by a test where a Slack user without authority is refused. |
+| **D5** Default policy, prepared | After D4 | Exact proposed `agent.tool.invoke` HITL-variant class + bundle for new connected accounts. It covers the actions and contexts affected, the human-approval requirement, self-approval posture, individual vs team, independent approval, and rollback | Seeded on **staging only**. A staging run shows that unattended guarded actions HOLD and need a human, and that the rollback works. The deviation from the Canon gate flags (IMPL-029) is recorded. A decision packet goes to the founder. **Stop.** |
+| D6 Production seed | **Not approved** | — | Explicit founder approval of the D5 packet. |
+| D7 Mobile push | Deferred | — | Must use the same runtime approval path. |
+| D8 Standing/time-bounded grants | Deferred | — | Needs its own authority design. |
+
+**First concrete deliverable:** the D2 staging acceptance record. It is the one
+artifact that proves the whole claim ("an unattended action waits for a person
+and runs once, exactly as approved"), and every later stage builds on it.
+
+### A1 — Runtime blocker found in D1 contract re-verification (stop condition 14)
+
+Re-reading `atlasent-api` before D2 showed that **an approval dropped the
+exact-action binding**. Three facts combine:
+- The hold's `approval_requests` row stored no digest.
+- `_shared/approval_reevaluation.ts` rebuilt the evaluate request without the
+  top-level `execution_payload_hash`.
+- `execution_evaluations.execution_hash_expected` is persisted only when a
+  permit is issued, and a hold issues none.
+
+As a result, the permit a person approved was bound to the re-evaluation's own
+request hash, not to the action. When the hook verifies that exact action, the
+answer is `PAYLOAD_MISMATCH` every time. This fails closed, so nothing
+unauthorized can run. But "allow once" is unreachable, and the approval API was
+not enforcing the binding the design relies on.
+
+Proposed fix (atlasent-api branch `claude/serene-archimedes-0vhdev`, not merged,
+not deployed). It is additive, needs no migration, and leaves `/v1` and the
+permit format unchanged:
+1. `v1-evaluate` writes the accepted caller digest (ordinary-action branch only)
+   and the target onto the hold/escalate `approval_requests` row, using the
+   existing `execution_payload_hash`/`target_id` columns (`20261229000001`).
+   It does not set `execution_binding_version`.
+2. `buildApprovalReevaluationPlan` re-presents the digest at the top level.
+   A malformed recorded digest fails closed.
+3. Both the resolve-time and claim-time call sites pass it through. Mandatory
+   change-control types are excluded, because their binding is re-derived from
+   the recorded `change_plan`. A failed read at claim refuses the claim.
+
+Tests: 4 composed tests (real `handleApprovals` + `handleEvaluate`) and 2
+hold-insert tests. Five mutations were tried, one per piece of the fix, and all
+five are killed. The v1-evaluate, v1-approvals and reevaluation suites pass
+1256/1256.
+
+Behaviour change: for any existing caller that passed a digest and then
+claimed through an approval, the claimed permit is now bound to that digest.
+Before, it was bound to the server's hash and could never match. This moves
+only toward stricter, correct binding.
+
+### A2 — Deny note field (decision 5, inspected)
+
+`approval_requests.reason` is exposed on `GET /v1/approvals/:id`, and resolve
+writes the approver's `body.reason` into it. **It does not fit as-is.** The
+escalate path writes the *escalation* reason into the same column at creation,
+and resolve then overwrites it, with `null` when no note is given. So the column
+means "why this was requested" or "what the approver said" depending on when
+you read it, and the request reason is lost in place. That fails the
+immutability test.
+
+Proposal for D3: one bounded additive column on the canonical record,
+`approval_requests.resolution_note text` (≤ 2000 chars, CHECK on length),
+written once at resolve by the same UPDATE, never updated after (write-once
+trigger), exposed on GET, and included in the `approval.resolved` audit payload.
+`reason` keeps its current meaning. The hook already reads `resolution_note`
+before `reason`. This needs a runtime migration. A staging apply is inside D3.
+A production apply needs its own go-ahead.
+
