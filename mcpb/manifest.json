@@ -4,7 +4,7 @@
   "display_name": "Atlasent",
   "version": "2.16.0",
   "description": "Atlasent for AI agents: with an API key, consequential actions wait for approval and get a signed record. With no key: an unsigned local demo.",
-  "long_description": "Before an agent's tool call changes a real system (a production deploy, a data export, an access grant), the agent asks Atlasent first. With an API key, risky actions wait for a person in your organization to approve them, and every decision gets a signed record of who approved it. With no key the server runs a local demo: an in-process rules engine with unsigned permits that protects nothing. Also includes a read-only evidence-gap report that lists CI deploy steps with no approval gate in front of them. Source and docs: https://github.com/Atlasent/atlasent-mcp-server",
+  "long_description": "Before an agent's tool call changes a real system (a production deploy, a data export, an access grant), the agent asks Atlasent first. With an API key, risky actions wait for a person in your organization to approve them, and every decision gets a signed record, including who approved it when approval was required. With no key the server runs a local demo: an in-process rules engine with unsigned permits that protects nothing. Also includes a read-only evidence-gap report that lists CI deploy steps with no approval gate in front of them. Source and docs: https://github.com/Atlasent/atlasent-mcp-server",
   "author": {
     "name": "Atlasent",
     "url": "https://www.atlasent.io"

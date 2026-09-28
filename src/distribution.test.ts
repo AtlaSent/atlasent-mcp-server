@@ -73,8 +73,11 @@ describe("distribution metadata", () => {
   });
 
   it("no listing overclaims offline verification", () => {
-    for (const f of ["server.json", "mcpb/manifest.json", "smithery.yaml", "packages/agent-hooks/README.md", "packages/agent-hooks/.claude-plugin/plugin.json"]) {
+    for (const f of ["server.json", "mcpb/manifest.json", "smithery.yaml", "README.md", "packages/agent-hooks/README.md", "packages/agent-hooks/.claude-plugin/plugin.json"]) {
       assert.doesNotMatch(read(f), /verify (it )?offline|without trusting us/i, f);
+      // Not every action class requires human approval, so no listing may
+      // promise that every record names an approver.
+      assert.doesNotMatch(read(f), /record of who approved it/i, f);
     }
   });
 });
