@@ -17,7 +17,7 @@ else runs exactly as before.
     mutation such as volumeDelete) [http.delete]. A person must approve this before it runs.
 ```
 
-Local. No account, no network, no dependencies. MIT licensed.
+Local. No account, no network, no dependencies. Apache-2.0 licensed.
 
 ## Install (30 seconds)
 
