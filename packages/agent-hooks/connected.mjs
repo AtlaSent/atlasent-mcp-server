@@ -178,6 +178,15 @@ const noteOf = j => {
   return null;
 };
 
+// A deny is a policy decision, not a wait: retrying the same action gets the same answer.
+const DENY_HINT = 'This is a policy decision, not a wait for approval. Do not retry it unchanged; change the approach or ask the user.';
+const decisionIdOf = j => {
+  for (const k of ['evaluation_id', 'decision_id', 'request_id']) {
+    const v = j?.[k];
+    if (typeof v === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(v)) return v;
+  }
+  return null;
+};
 const RETRY_HINT = 'Do not change the action. Wait, then run exactly the same action again (or use atlasent_await_approval if it is available).';
 
 // ---------------------------------------------------------------------------
@@ -266,18 +275,28 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
     const r = await api.evaluate(body);
     if (r.status !== 200 || !r.json) return deny('evaluate_failed', `Atlasent could not evaluate this (HTTP ${r.status})${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}. It was blocked.`);
     const d = r.json.decision;
+    const decisionRef = decisionIdOf(r.json) ? ` Decision ${decisionIdOf(r.json)}.` : '';
     if ((d === 'hold' || d === 'escalate') && typeof r.json.approval_request_id === 'string' && r.json.approval_request_id) {
       const id = r.json.approval_request_id;
       pending.set(digest, id);
-      return deny('held', `Held for approval (${id}). A person has been asked in Atlasent. ${RETRY_HINT}`);
+      return deny('held', `Held for approval (${id}). A person has been asked in Atlasent.${decisionRef} ${RETRY_HINT}`);
+    }
+    if (d === 'hold' || d === 'escalate') {
+      // The runtime held it but recorded no approval request (a non-fatal path on
+      // its side). Nobody can approve it, so re-running would only hold again.
+      return deny('held_unrecorded', `Atlasent held this for approval, but no approval request was recorded, so there is nothing for a person to approve.${decisionRef} It was blocked. Do not retry it automatically; tell the user.`);
+    }
+    if (d !== 'allow' && d !== 'deny') {
+      return deny('evaluate_failed', `Atlasent answered with an unrecognized decision${typeof d === 'string' ? ` ("${d.slice(0, 40)}")` : ''}.${decisionRef} It was blocked.`);
     }
     if (d === 'allow' && typeof r.json.permit_token === 'string' && r.json.permit_token) {
       // The governing policy allowed without a person. That is the policy's call; the
       // permit still has to verify here.
       return await verifyAndAllow(r.json.permit_token, assertion.subject.principal_id);
     }
+    if (d === 'allow') return deny('evaluate_failed', `Atlasent allowed this but returned no permit, so there is nothing to verify.${decisionRef} It was blocked.`);
     const code = typeof r.json.deny_code === 'string' ? ` (${r.json.deny_code})` : '';
-    return deny('denied', `Atlasent denied this${code}${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}.`);
+    return deny('denied', `Atlasent denied this${code}${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}.${decisionRef} ${DENY_HINT}`);
   } catch (e) {
     return deny('error', `Atlasent could not be reached or answered unexpectedly (${String(e?.message ?? e).slice(0, 160)}), so it was blocked.`);
   }
