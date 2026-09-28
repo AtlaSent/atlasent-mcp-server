@@ -1,30 +1,39 @@
-# Smithery configuration — https://smithery.ai/docs/build/project-config/smithery.yaml
+# Smithery stdio config (the older startCommand format).
+#
+# Smithery's current publish flow for a local stdio server takes an MCPB
+# bundle instead: `npm run build && npm run bundle` builds
+# atlasent-mcp-server-<version>.mcpb from this same repository
+# (scripts/build-mcpb.mjs, manifest in mcpb/manifest.json). This file stays for
+# hosts that still read startCommand; src/distribution.test.ts checks that it
+# parses and maps config to the env vars the server reads.
+#
+# configSchema and commandFunction MUST sit under startCommand. Until
+# 2026-09-28 they were top-level, where the startCommand format ignores them.
 
 startCommand:
   type: stdio
+  configSchema:
+    type: object
+    properties:
+      apiKey:
+        type: string
+        description: "Atlasent API key: sign up free at console.atlasent.io and choose Connect an AI agent. Leave blank for the local demo mode."
+      baseUrl:
+        type: string
+        description: "Atlasent API base URL. Leave blank to use the hosted SaaS endpoint (api.atlasent.io)."
+        default: "https://api.atlasent.io/functions/v1"
+      mode:
+        type: string
+        description: "local (default with no apiKey: offline rules engine, unsigned permits, dev only) or remote (hosted Atlasent API)"
+        enum: ["remote", "local"]
 
-configSchema:
-  type: object
-  properties:
-    apiKey:
-      type: string
-      description: "Atlasent API key: sign up free at console.atlasent.io and choose Connect an AI agent. Leave blank for the local demo mode."
-    baseUrl:
-      type: string
-      description: "Atlasent API base URL. Leave blank to use the hosted SaaS endpoint (api.atlasent.io)."
-      default: "https://api.atlasent.io/functions/v1"
-    mode:
-      type: string
-      description: "local (default with no apiKey: offline rules engine, unsigned permits, dev only) or remote (hosted Atlasent API)"
-      enum: ["remote", "local"]
-
-commandFunction: |-
-  (config) => ({
-    command: 'npx',
-    args: ['-y', '@atlasent/mcp-server'],
-    env: {
-      ...(config.apiKey ? { ATLASENT_API_KEY: config.apiKey } : {}),
-      ...(config.baseUrl ? { ATLASENT_BASE_URL: config.baseUrl } : {}),
-      ...(config.mode ? { ATLASENT_MODE: config.mode } : {})
-    }
-  })
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', '@atlasent/mcp-server'],
+      env: {
+        ...(config.apiKey ? { ATLASENT_API_KEY: config.apiKey } : {}),
+        ...(config.baseUrl ? { ATLASENT_BASE_URL: config.baseUrl } : {}),
+        ...(config.mode ? { ATLASENT_MODE: config.mode } : {})
+      }
+    })

@@ -17,6 +17,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "./server.js";
 import { startStreamableHttp } from "./streamableHttp.js";
+import { dropEmptyAtlasentEnv } from "./hostEnv.js";
 
 function pickTransport(): "stdio" | "streamable-http" {
   // CLI flag takes precedence over env var.
@@ -68,6 +69,7 @@ async function runStreamableHttp(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  dropEmptyAtlasentEnv();
   const transport = pickTransport();
   if (transport === "streamable-http") {
     await runStreamableHttp();

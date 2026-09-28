@@ -46,3 +46,26 @@ describe("getMode", () => {
     assert.equal(getMode(), "remote");
   });
 });
+
+describe("dropEmptyAtlasentEnv (form-filled host config)", () => {
+  it("treats blank optional fields as unset, so the hosted base URL default applies", async () => {
+    const { dropEmptyAtlasentEnv } = await import("./hostEnv.js");
+    const env: NodeJS.ProcessEnv = {
+      ATLASENT_API_KEY: "ask_live_x",
+      ATLASENT_BASE_URL: "",
+      ATLASENT_MODE: "  ",
+      OTHER: "",
+    };
+    assert.deepEqual(dropEmptyAtlasentEnv(env).sort(), ["ATLASENT_BASE_URL", "ATLASENT_MODE"]);
+    assert.equal(env.ATLASENT_API_KEY, "ask_live_x");
+    assert.equal("ATLASENT_BASE_URL" in env, false);
+    assert.equal(env.OTHER, "", "only ATLASENT_* optional vars are touched");
+  });
+
+  it("a blank API key means local mode, never remote with an empty key", async () => {
+    const { dropEmptyAtlasentEnv } = await import("./hostEnv.js");
+    const env: NodeJS.ProcessEnv = { ATLASENT_API_KEY: "" };
+    dropEmptyAtlasentEnv(env);
+    assert.equal(env.ATLASENT_API_KEY, undefined);
+  });
+});
