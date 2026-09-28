@@ -1,5 +1,15 @@
 # Release Notes
 
+## Unreleased
+
+### Evidence-gap report: where are my deploys ungoverned?
+
+- New read-only tool `atlasent_evidence_gap_report`. Given your workflow files,
+  it lists every deploy, publish, migration and infrastructure-apply step and
+  says whether an AtlaSent gate stands in front of it: `bound`, `gated`,
+  `gated_upstream`, `weak` or `ungoverned`. Runs offline in local mode, with
+  no account, and reports what it cannot see rather than implying a clean bill.
+
 ## v2.16.0 — 2026-09-27
 
 ### Agents can reach the approval hold on change-controlled actions

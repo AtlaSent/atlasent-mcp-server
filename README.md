@@ -303,6 +303,25 @@ The tool never invents an action type: every candidate is a Canon entry by refer
 
 Read-only lookup of canonical Atlasent concepts such as Authority, Policy, Decision, Permit, Verification, Evidence, Gate, and Trust Root.
 
+### `atlasent_evidence_gap_report`
+
+"Where are my deploys ungoverned?" Pass the text of your `.github/workflows/*.yml` files and get back every step that changes a real system (deploys, package and image publishes, database migrations, `terraform`/`pulumi` applies), each with a status:
+
+| `status` | Meaning |
+|---|---|
+| `bound` | A gate runs earlier in the job, and the step runs only `if: steps.<gate>.outputs.verified == 'true'`. |
+| `gated` | A gate runs earlier in the job; a deny fails the job before the step. |
+| `gated_upstream` | The gate is in a job this job `needs:`. Nothing re-verifies the permit where the step runs. |
+| `weak` | A gate exists but cannot stop the step: `continue-on-error`, its own `if:` (a `skip_gate` input, for example), or `mode: evaluate-only` with nothing consuming the permit. |
+| `ungoverned` | No gate at all. |
+
+```text
+Input:  { workflows: [{ path, content }], gate_actions? }
+Output: { summary, findings[], triggers, parse_errors[], not_checked[], next_step }
+```
+
+Works in local mode: no API key, no network, nothing executed. `gate_actions` names your own gate wrappers (a composite action, say); they are reported as custom gates whose internals were not inspected. The report always lists what it cannot see (repository settings, deploys outside CI, the inside of `./deploy.sh`), and a file it cannot parse is listed in `parse_errors`, never skipped. A clean report is not proof that nothing is ungoverned.
+
 ### `atlasent_integrity_audit`
 
 Read-only audit of the organization's Authority graph for internal inconsistency. Hosted mode only; the organization is derived server-side from the API key.

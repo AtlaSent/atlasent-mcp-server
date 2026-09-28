@@ -95,6 +95,7 @@ describe("tools/list", () => {
       "atlasent_evaluate",
       "atlasent_evaluate_many",
       "atlasent_evaluate_stream",
+      "atlasent_evidence_gap_report",
       "atlasent_explain_authority",
       "atlasent_get_decision",
       "atlasent_get_evidence_export",
