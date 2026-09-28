@@ -136,7 +136,13 @@ export function parseYamlSubset(source: string): YValue {
       const minIndent = Math.min(
         ...body.filter((b) => b !== "").map((b) => b.length - b.trimStart().length),
       );
-      const joined = body.map((b) => (b === "" ? "" : b.slice(minIndent))).join("\n");
+      const lit = body.map((b) => (b === "" ? "" : b.slice(minIndent)));
+      // `>` folds line breaks into spaces (blank lines stay breaks), so a
+      // command split over lines is one command, as the runner executes it.
+      const joined =
+        block[2] === ">"
+          ? lit.reduce((acc, l, k) => (k === 0 ? l : l === "" || lit[k - 1] === "" ? `${acc}\n${l}` : `${acc} ${l}`), "")
+          : lit.join("\n");
       text = block[1] + JSON.stringify(joined); // stored as a quoted scalar
       lines.push({ indent, text, no: i + 1 });
       i = j - 1;
@@ -385,6 +391,53 @@ function truthy(v: YValue | undefined): boolean {
   return typeof v === "string" && /^(true|'true'|"true")$/i.test(v.trim());
 }
 
+/**
+ * `continue-on-error` can only be ruled out when it is absent or a literal
+ * false. An expression such as `${{ inputs.advisory }}` may evaluate true at
+ * run time, so it counts as possibly on.
+ */
+function mayContinueOnError(v: YValue | undefined): boolean {
+  if (v === undefined) return false;
+  return !(typeof v === "string" && /^(false|'false'|"false"|)$/i.test(v.trim()));
+}
+
+/** Status functions that let a step or job run after an earlier failure. */
+function runsAfterFailure(cond: string): boolean {
+  return /\b(always|failure|cancelled)\s*\(\s*\)/.test(cond);
+}
+
+function stripExpr(cond: string): string {
+  const t = cond.trim();
+  const m = /^\$\{\{([\s\S]*)\}\}$/.exec(t);
+  return (m ? m[1] : t).trim();
+}
+
+/**
+ * True only when the condition positively requires `steps.<id>.outputs.verified
+ * == 'true'`: that comparison alone, or ANDed with other terms. Any `||`, a
+ * negation, a different comparison, or a status function that runs after a
+ * failure means the step can run without a verified permit.
+ */
+function requiresVerified(cond: string, id: string): boolean {
+  const c = stripExpr(cond);
+  if (c.includes("||") || runsAfterFailure(c)) return false;
+  const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const positive = new RegExp(`^\\(?\\s*steps\\.${esc}\\.outputs\\.verified\\s*==\\s*(['"])true\\1\\s*\\)?$`);
+  return c.split("&&").some((part) => positive.test(part.trim()));
+}
+
+const GATE_SCRIPT = /(?:^|[\s/])([\w.-]*(?:atlasent|permit|deploy|release)[-_]gate[\w.-]*\.(?:sh|bash|py|js|mjs|cjs|ts))\b/gi;
+
+/** A gate script of your own, but never a test or check of one. */
+function customGateScript(run: string): boolean {
+  if (/\bnode\s+--test\b|\b(deno|bun)\s+test\b|\b(vitest|jest|mocha)\b/.test(run)) return false;
+  for (const m of run.matchAll(GATE_SCRIPT)) {
+    if (!SCRIPT_EXCLUDE_GATE.test(m[1])) return true;
+  }
+  return false;
+}
+const SCRIPT_EXCLUDE_GATE = /(test|spec|check|lint|mock|fixture|acceptance)/i;
+
 function gateInfo(step: YMap, index: number, extraGates: string[] = []): GateInfo | null {
   const run = typeof step.run === "string" ? runWithoutComments(step.run) : "";
   const uses = typeof step.uses === "string" ? step.uses : "";
@@ -402,7 +455,7 @@ function gateInfo(step: YMap, index: number, extraGates: string[] = []): GateInf
   } else if (/\/v1[-/]verify-permit\b/.test(run)) {
     verifies = true;
     custom = true;
-  } else if (/(?:^|[\s/])[\w.-]*(?:atlasent|permit|deploy|release)[-_]gate[\w.-]*\.(?:sh|bash|py|js|mjs|cjs|ts)\b/i.test(run)) {
+  } else if (customGateScript(run)) {
     // A gate script of your own (e.g. scripts/deploy-gate.ts). Its logic is
     // not inspected; the report says so on every step it covers.
     verifies = true;
@@ -418,7 +471,7 @@ function gateInfo(step: YMap, index: number, extraGates: string[] = []): GateInf
     id: typeof step.id === "string" ? step.id : null,
     issuesOnly,
     verifies,
-    advisory: truthy(step["continue-on-error"]),
+    advisory: mayContinueOnError(step["continue-on-error"]),
     conditional: typeof step.if === "string" && step.if.trim() !== "",
     custom,
   };
@@ -531,7 +584,12 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
       const gs = stepsOf(job as YMap)
         .map((s, i) => gateInfo(s, i, gateActions))
         .filter((g): g is GateInfo => !!g);
-      if (gs.some(enforcingGate)) jobGate.set(name, "enforcing");
+      // A gate job that may continue on error, or may be skipped by its own
+      // `if:`, cannot stop the jobs that need it.
+      const jobWeak =
+        mayContinueOnError((job as YMap)["continue-on-error"]) ||
+        (typeof (job as YMap).if === "string" && ((job as YMap).if as string).trim() !== "");
+      if (gs.some(enforcingGate) && !jobWeak) jobGate.set(name, "enforcing");
       else if (gs.length > 0) jobGate.set(name, "weak");
     }
     // Nearest gate in the needs: graph; an enforcing one wins over a weak one.
@@ -575,10 +633,15 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
         let status: GapStatus;
         let reason: string;
         const enforcing = earlier.filter(enforcingGate);
-        const bound = enforcing.find(
-          (g) => g.id && new RegExp(`steps\\.${g.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.outputs\\.verified`).test(stepIf),
-        );
-        if (bound) {
+        const bound = enforcing.find((g) => g.id && requiresVerified(stepIf, g.id));
+        const jobIf = typeof job.if === "string" ? job.if : "";
+        if (enforcing.length > 0 && !bound && runsAfterFailure(stepIf)) {
+          status = "weak";
+          reason =
+            "A gate runs earlier in this job, but this step's `if:` uses always(), failure() or cancelled(), " +
+            "so the gate failing does not stop it. The rest of the condition may still prevent it (for example " +
+            "a rollback that needs a gated step to have run); that part is not evaluated.";
+        } else if (bound) {
           status = "bound";
           reason = `Runs only if gate step "${bound.id}" reported verified == 'true'.`;
           if (bound.custom) reason += " The gate is your own script or wrapper, not atlasent-action; whether it fails closed was not inspected.";
@@ -600,7 +663,12 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
               : "The gate only issues a permit (evaluate-only); nothing in this job verifies and consumes it before this step.";
         } else {
           const up = upstreamGate(jobName);
-          if (up?.kind === "enforcing") {
+          if (up?.kind === "enforcing" && runsAfterFailure(jobIf)) {
+            status = "weak";
+            reason =
+              `Gated in job "${up.job}", but this job's \`if:\` uses always(), failure() or cancelled(), ` +
+              "so the gate job failing does not stop it. The rest of the condition is not evaluated.";
+          } else if (up?.kind === "enforcing") {
             status = "gated_upstream";
             reason =
               `Gated in job "${up.job}", which this job needs. Nothing re-verifies the permit where this step runs; ` +

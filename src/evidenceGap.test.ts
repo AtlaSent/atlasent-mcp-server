@@ -287,3 +287,72 @@ describe("atlasent_evidence_gap_report tool", () => {
     }
   });
 });
+
+describe("review findings (Codex, #191): no false 'governed' results", () => {
+  const status = (src: string) => analyzeWorkflows(wf(src)).findings.map((f) => f.status).join(",");
+  const gated = (stepIf: string, gateExtra = "") => `
+jobs:
+  d:
+    steps:
+      - id: gate
+        uses: Atlasent/atlasent-action@v1${gateExtra}
+      - if: ${stepIf}
+        run: npm publish
+`;
+  it("bound requires verified == 'true', not a mention of the output", () => {
+    assert.equal(status(gated("${{ always() && steps.gate.outputs.verified != 'true' }}")), "weak");
+    assert.equal(status(gated("steps.gate.outputs.verified == 'false'")), "gated");
+    assert.equal(status(gated("steps.gate.outputs.verified == 'true' || github.actor == 'x'")), "gated");
+    assert.equal(
+      status(gated("steps.gate.outputs.verified == 'true' && github.ref == 'refs/heads/main' || github.actor == 'x'")),
+      "gated",
+      "an || anywhere lets the step run without a verified permit",
+    );
+    assert.equal(status(gated("${{ steps.gate.outputs.verified == 'true' && github.ref == 'refs/heads/main' }}")), "bound");
+  });
+  it("a step that runs after failure (always/failure/cancelled) is weak", () => {
+    assert.equal(status(gated("always()")), "weak");
+    assert.equal(status(gated("${{ !cancelled() }}")), "weak");
+    assert.equal(status(gated("success()")), "gated");
+  });
+  it("continue-on-error set by an expression counts as possibly on", () => {
+    assert.equal(status(gated("steps.gate.outputs.verified == 'true'", "\n        continue-on-error: ${{ inputs.advisory }}")), "weak");
+    assert.equal(status(gated("steps.gate.outputs.verified == 'true'", "\n        continue-on-error: false")), "bound");
+  });
+  it("tests and checks of a gate script are not gates", () => {
+    assert.equal(
+      status(`
+jobs:
+  d:
+    steps:
+      - run: node --test scripts/deploy-gate-acceptance.test.mjs
+      - run: node scripts/check-deploy-gate.ts
+      - run: npm publish
+`),
+      "ungoverned",
+    );
+  });
+  it("a test runner invoking a real gate script is still a test, not a gate", () => {
+    assert.equal(status("jobs:\n  d:\n    steps:\n      - run: node --test scripts/deploy-gate.mjs\n      - run: npm publish\n"), "ungoverned");
+    assert.equal(status("jobs:\n  d:\n    steps:\n      - run: node scripts/deploy-gate.mjs\n      - run: npm publish\n"), "gated");
+  });
+  it("folds > block scalars before detecting commands", () => {
+    assert.equal(status("jobs:\n  d:\n    steps:\n      - run: >\n          docker buildx build -t x\n          --push .\n"), "ungoverned");
+  });
+  it("a job that runs after its gate job fails, or a gate job that can be skipped or continue on error, is weak", () => {
+    const up = (jobExtra: string, gateJobExtra = "") => `
+jobs:
+  gate:${gateJobExtra}
+    steps:
+      - uses: Atlasent/atlasent-action@v1
+  ship:
+    needs: gate${jobExtra}
+    steps:
+      - run: npm publish
+`;
+    assert.equal(status(up("")), "gated_upstream");
+    assert.equal(status(up("\n    if: always()")), "weak");
+    assert.equal(status(up("", "\n    continue-on-error: true")), "weak");
+    assert.equal(status(up("", "\n    if: github.event_name == 'push'")), "weak");
+  });
+});
