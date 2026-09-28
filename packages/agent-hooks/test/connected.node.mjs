@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { decide, NUDGE, evaluate } from '../hook.mjs';
 import { canonicalJson } from '../jcs.mjs';
 import { redactedPreview, assertNoSecrets, MASK } from '../redact.mjs';
-import { actionDigest, repoIdentity } from '../connected.mjs';
+import { actionDigest, repoIdentity, loadCredentials } from '../connected.mjs';
 import { mergePolicies, validatePolicy } from '../policy.mjs';
 
 const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
@@ -539,4 +539,13 @@ test('a repository still cannot choose the environment when the plugin setting i
   await run(s, rt, unattended(s.cwd));
   const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate'));
   assert.equal(ev.body.context.environment, 'production');
+});
+
+test("a key from the plugin or env never goes to credentials.json's base_url; the file's own key still does", () => {
+  const home = mkdtempSync(join(tmpdir(), 'ah-cred-'));
+  writeFileSync(join(home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1', base_url: 'https://legacy.example/functions/v1' }));
+  assert.deepEqual(loadCredentials(home, {}), { apiKey: 'ask_live_filekey1', baseUrl: 'https://legacy.example/functions/v1' });
+  assert.deepEqual(loadCredentials(home, { CLAUDE_PLUGIN_OPTION_API_KEY: 'ask_live_plugin1' }), { apiKey: 'ask_live_plugin1', baseUrl: 'https://api.atlasent.io/functions/v1' });
+  assert.equal(loadCredentials(home, { ATLASENT_HOOKS_API_KEY: 'ask_live_env1' }).baseUrl, 'https://api.atlasent.io/functions/v1');
+  assert.equal(loadCredentials(home, { CLAUDE_PLUGIN_OPTION_API_KEY: 'ask_live_plugin1', ATLASENT_HOOKS_BASE_URL: 'https://rt.example/functions/v1' }).baseUrl, 'https://rt.example/functions/v1');
 });

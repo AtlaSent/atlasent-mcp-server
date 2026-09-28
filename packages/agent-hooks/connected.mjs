@@ -48,10 +48,13 @@ export function loadCredentials(home, env = process.env) {
     if (!object(parsed)) throw Error('credentials.json must be an object');
     file = parsed;
   }
-  const apiKey = set(env.CLAUDE_PLUGIN_OPTION_API_KEY) ?? set(env.ATLASENT_HOOKS_API_KEY) ?? file.api_key;
+  const fromEnv = set(env.CLAUDE_PLUGIN_OPTION_API_KEY) ?? set(env.ATLASENT_HOOKS_API_KEY);
+  const apiKey = fromEnv ?? file.api_key;
   if (!apiKey) return null;
   if (typeof apiKey !== 'string' || !/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the Atlasent API key is not in ask_live_… / ask_test_… form');
-  const baseUrl = String(set(env.ATLASENT_HOOKS_BASE_URL) ?? file.base_url ?? DEFAULT_BASE).replace(/\/+$/, '');
+  // A key and its endpoint travel together: credentials.json's base_url applies only to
+  // the key stored beside it, so a key entered elsewhere never goes to a leftover host.
+  const baseUrl = String(set(env.ATLASENT_HOOKS_BASE_URL) ?? (fromEnv ? undefined : file.base_url) ?? DEFAULT_BASE).replace(/\/+$/, '');
   if (!/^https:\/\//.test(baseUrl) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(baseUrl)) throw Error('base_url must be https');
   return { apiKey, baseUrl };
 }
