@@ -532,7 +532,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 The same server can be configured in any other MCP-compatible host using its normal MCP server configuration mechanism (`command: npx`, `args: ["-y", "@atlasent/mcp-server"]`, and the same `env` block shown above).
 
-This server is also listed on [Glama](https://glama.ai/mcp/servers/Atlasent/atlasent-mcp-server) (built from this repo's [`Dockerfile`](./Dockerfile); listing ownership in [`glama.json`](./glama.json)) and distributed via the [official MCP Registry](https://registry.modelcontextprotocol.io) (`io.github.Atlasent/mcp-server`, manifest at [`server.json`](./server.json)) and [Smithery](https://smithery.ai) (config at [`smithery.yaml`](./smithery.yaml)) — a registry-aware host can discover and install it without a hand-written config block.
+This server is also listed on [Glama](https://glama.ai/mcp/servers/Atlasent/atlasent-mcp-server) (built from this repo's [`Dockerfile`](./Dockerfile); listing ownership in [`glama.json`](./glama.json)) and on the [official MCP Registry](https://registry.modelcontextprotocol.io) (`io.github.Atlasent/mcp-server`, manifest at [`server.json`](./server.json)), so a registry-aware host can discover and install it without a hand-written config block. `npm run bundle` builds an MCPB bundle of the same server for hosts that install from one. Where it is and isn't listed: [`docs/DISTRIBUTION.md`](./docs/DISTRIBUTION.md).
 
 ## Development
 
