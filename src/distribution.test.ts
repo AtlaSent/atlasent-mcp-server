@@ -78,6 +78,9 @@ describe("distribution metadata", () => {
       // Not every action class requires human approval, so no listing may
       // promise that every record names an approver.
       assert.doesNotMatch(read(f), /record of who approved it/i, f);
+      // A hold or deny for a missing approval had approval required and no
+      // approver; only a decision that relied on an approval names one.
+      assert.doesNotMatch(read(f), /when approval was required/i, f);
     }
   });
 });

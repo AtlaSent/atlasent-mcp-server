@@ -13,7 +13,7 @@ This MCP server brings it to AI agents (Claude, Cursor, Windsurf, any MCP host).
 
 1. **Connect it** to your agent with a few lines of config.
 2. **Risky actions wait** for a person to approve them. Everything else runs as normal.
-3. **Every decision gets a signed record**, including who approved it when approval was required.
+3. **Every decision gets a signed record**, including who approved it when the decision relied on an approval.
 
 Try it in 60 seconds with no account: `npx -y @atlasent/mcp-server` (local mode, a demo that protects nothing).
 
