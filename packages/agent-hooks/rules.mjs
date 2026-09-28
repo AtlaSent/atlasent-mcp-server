@@ -156,7 +156,7 @@ const MCP_DESTRUCTIVE = /(^|[_\-.])(delete|drop|destroy|remove|truncate|purge|te
 // Tools that only read (`list_releases`, `get_deployment`) are not destructive whatever
 // noun follows the verb.
 const MCP_READ_VERB = /^(list|get|read|search|describe|fetch|view|show|query|find|count|check|preview|diff|dry[_-]?run)([_\-.]|$)/i;
-const CONFIG_PATH = /(^|[\/\\])(\.atlasent[\/\\]hooks\.json|\.claude[\/\\]settings(\.local)?\.json|\.cursor[\/\\]hooks\.json)$/;
+const CONFIG_PATH = /(^|[\/\\])(\.atlasent[\/\\](hooks|credentials|pending)\.json|\.claude[\/\\]settings(\.local)?\.json|\.cursor[\/\\]hooks\.json)$/;
 
 // Commands that only search, read or print. When every segment is one of these, SQL or
 // a GraphQL mutation appearing in the text is being looked at, not executed.
@@ -245,7 +245,7 @@ export const RULES = [
       || (a[0] === 'helm' && ['upgrade', 'install', 'rollback'].includes(positional(a)[0]) && a.some(x => /prod/i.test(x)))
       || (git(a, 'push') && positional(a).slice(1).some(x => /^heroku$|^dokku$|^production$|^prod$/.test(x))) },
   { id: 'guard.self-edit', effect: 'ask', kind: 'tamper', description: 'Changing the guard\'s own configuration or the agent\'s hook settings',
-    text: t => /(\.atlasent[\/\\]hooks\.json|\.claude[\/\\]settings(\.local)?\.json|\.cursor[\/\\]hooks\.json)/.test(t) && /(>|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\bchmod\b|\btruncate\b|\bln\b|\bperl\s+-[a-z]*i|\bpython|\bnode\s+-e)/.test(t),
+    text: t => /(\.atlasent[\/\\](hooks|credentials|pending)\.json|\.claude[\/\\]settings(\.local)?\.json|\.cursor[\/\\]hooks\.json)/.test(t) && /(>|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\bchmod\b|\btruncate\b|\bln\b|\bperl\s+-[a-z]*i|\bpython|\bnode\s+-e)/.test(t),
     path: p => CONFIG_PATH.test(p) },
   { id: 'mcp.destructive', effect: 'ask', kind: 'destroy', description: 'An MCP tool whose name says it deletes, drops, resets, deploys or publishes',
     tool: name => { const m = /^mcp__.+?__(.+)$/.exec(name); return !!m && !MCP_READ_VERB.test(m[1]) && MCP_DESTRUCTIVE.test(m[1]); } },

@@ -1,6 +1,7 @@
 # Design: the guard waits for a person in the console
 
-Status: **PROPOSED** (2026-09-28). Nothing here is built yet.
+Status: **ACCEPTED** (2026-09-28; decisions below). Slice 1 (the hook) is
+implemented in `packages/agent-hooks/connected.mjs` and not yet staging-proven.
 
 ## The problem
 
@@ -224,33 +225,92 @@ returns 403, as `awaitApproval` in `src/engine.ts` already reports), and
 
 ## Decisions
 
-Decided items are recorded as decided. Open items carry the default this
-document is written against, so no slice has to guess. A slice must not start
-on an open item's default without the founder confirming it.
+All five were decided by the founder on 2026-09-28.
 
-1. **Open. Default: the retry path only.** Recommending the MCP wait tool
-   (`atlasent_await_approval`) comes later.
-2. **Open. Default: `agent.tool.invoke` for every rule.** Mapping deploys to
-   `production.deploy` is out of scope for the first version.
-3. ~~Is sending a redacted command preview acceptable for the free/individual
-   tier, or should it be opt-in per repo?~~ **Decided 2026-09-28:** on by
-   default in connected mode, with a per-repo opt-out (see "What goes to the
-   runtime").
-4. **Open. Default: Slack only in the first version** (as in "What the
-   person can do"). Phone push comes later.
-5. **Open. No default.** Does the deny note live in an existing field on the
-   approval record, or an additive column in `atlasent-api`? Slice 2 is
-   blocked on this.
+**Principle 1, clarified.** Atlasent governs authority. The hook does not
+hard-code "a human must always approve"; the governing policy decides what
+authority is enough for a given `agent.tool.invoke`. The **default policy
+seeded for new connected accounts** requires a human approval for unattended
+guarded actions. An organization can adopt a different policy only through the
+governed policy-change path. The hook never silently turns "unattended" into
+autonomous authority.
+
+1. **Both.** Re-running exactly the same action is the universal fallback. When
+   `atlasent_await_approval` is available, the agent is told to use it to wait
+   efficiently. The wait tool is convenience only; it grants nothing.
+2. **`agent.tool.invoke` for the generic first release.** A laptop command is
+   not mapped to `production.deploy` just because it deploys. Use
+   `production.deploy` only when the caller can truthfully satisfy its Canon
+   requirements: actor identity, target, change plan, safeguards and the other
+   required bindings.
+3. **Redacted preview on by default in connected mode**, with a repo/config
+   opt-out that sends only the hash and non-sensitive metadata. Raw secrets are
+   never sent, and the binding covers structured tool inputs, not only shell
+   strings.
+4. **Slack plus the console for V1.** Phone push comes later, and when added it
+   must go through the same runtime authority path, not a separate approval
+   mechanism.
+5. **Inspect the approval schema first.** Reuse an existing canonical
+   denial/reason field only if its semantics, immutability/audit behaviour and
+   API exposure are right. Otherwise add one bounded, additive field to the
+   canonical approval record. Do not overload an unrelated field and do not
+   create a separate notes store. The note is guidance and evidence; it never
+   grants authority. (The hook reads the note from the approval record
+   defensively and shows it to the agent; slice 2 fixes which field it is.)
+
+### The class configuration (founder decision, 2026-09-28)
+
+Found while verifying the runtime contracts: the Canon-seeded
+`agent.tool.invoke` class (`seed_ai_agent_safeguard`, ACT-0029) requires
+`identity` and `risk` assertions from a trusted issuer, and `v1-evaluate`
+denies `ASSERTION_UNVERIFIED` **before policy runs**. So that class can never
+produce a hold for the hook: the hook can mint the agent's verified actor
+identity but not a risk assertion.
+
+Decided: the connected default uses an **HITL variant** of `agent.tool.invoke`:
+
+| Flag | Canon (ACT-0029) | HITL variant |
+|---|---|---|
+| `requires_verified_actor` | true | **true** (the agent's minted `actor_identity.v1`) |
+| `required_assertion_classes` | `identity`, `risk` | **none** |
+| `requires_human_approval` | false | **true** |
+| `required_context_inputs` | `tool`, `environment` | same |
+| `enforcement_mode` / `fail_mode` | enforced / closed | same |
+
+The human approval stands in for the risk assertion on this path. **This is a
+declared deviation from the Canon gate flags** (Canon identity is not Canon
+conformance, IMPL-029) and must be recorded as such wherever the variant is
+seeded. It is provisioned on staging for the proof only; the production default
+seed comes back to the founder for explicit approval before any write.
+
+### What the implementation also settled
+
+- **Environment is the user's choice only.** A repository config cannot set
+  `connected.environment`, so an agent that can write to the repo cannot route
+  its actions to a laxer environment's policy. A repository may turn the
+  preview off (stricter), never on.
+- **Hook timeout raised to 30 s** in `hooks/hooks.json`, with an internal 20 s
+  budget and 6 s per call. The hook must answer before Claude Code gives up on
+  it, so it always finishes with a decision rather than being cut off.
+- **After a verified permit the hook steps aside** (no explicit allow): Claude
+  Code's own permission settings still apply, as for every other allow.
+- **The guard asks before the agent edits** `~/.atlasent/credentials.json` or
+  `pending.json`. A tampered pending pointer can at worst consume another
+  approval's permit, which then fails `PAYLOAD_MISMATCH`; it cannot allow.
 
 ## Slices
 
 1. **Hook, connected mode** (this repo): evaluate, pending store, re-run
-   claim/verify, redaction, `connect`, nudge, tests. Needs a staging key and
-   an `agent.tool.invoke` bundle that holds for `context.session_mode ==
-   "unattended"`.
+   claim/verify, redaction, `connect`, nudge, tests. **Implemented.** Staging
+   proof needs a staging org with the HITL variant above, a registered agent,
+   and a key bound to it (`evaluate:write`, `approvals:read`,
+   `verify:execute`). The proof must also establish that a console approval
+   satisfies the class's human-approval gate at claim time.
 2. **Console display** (`atlasent-console`): the request-type panel and the
    Deny-with-a-note wiring on `/approval-queue`.
 3. **Notification** (`atlasent-api` / console): Slack on a new hold for this
-   type.
+   type. `v1-evaluate` already calls `notifyOrgChatChannels` on a hold; check
+   whether it covers this type and gives the approver enough to act before
+   building anything new.
 4. **Policy seed:** an `agent.tool.invoke` template for new accounts that
    holds unattended guard requests. Written live, with explicit go-ahead.

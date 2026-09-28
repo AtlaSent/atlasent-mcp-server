@@ -5,7 +5,7 @@
       {
         "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
         "hooks": [
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli.mjs\" claude-code", "timeout": 10 }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli.mjs\" claude-code", "timeout": 30 }
         ]
       }
     ]

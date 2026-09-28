@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { appendFileSync, mkdirSync, openSync, closeSync } from 'node:fs';
+import { appendFileSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { classify, decisionOf } from './rules.mjs';
 import { loadPolicy, configPaths } from './policy.mjs';
+import { loadCredentials, connectedDecision } from './connected.mjs';
 
 const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 
@@ -59,8 +60,10 @@ export function evaluate({ host, input, env = process.env, now = () => new Date(
   if (effect === 'allow') return { effect, reason: null, rule: null };
   const unattended = UNATTENDED_MODES.has(input.permission_mode) || env.ATLASENT_HOOKS_UNATTENDED === '1';
   let reason = `AtlaSent guard: ${rule.description} [${rule.id}].`;
+  let unattendedAsk = false;
   if (effect === 'ask' && unattended && policy.unattended === 'deny') {
     effect = 'deny';
+    unattendedAsk = true;
     reason += ' Nobody is available to approve it in this permission mode, so it was blocked. Ask a person to run it, or run the agent in a mode that prompts.';
   } else if (effect === 'ask') {
     reason += ' A person must approve this before it runs.';
@@ -68,7 +71,51 @@ export function evaluate({ host, input, env = process.env, now = () => new Date(
     reason += ' This is blocked outright.';
   }
   audit({ ts: now().toISOString(), host, event: input.hook_event_name ?? null, session: typeof input.session_id === 'string' ? input.session_id : null, rule: rule.id, matched: hits.map(h => h.id), decision: effect, subject_sha256: subjectDigest(action) }, env);
-  return { effect, reason, rule: rule.id };
+  // Internal fields (not serialized to Claude Code) let decide() route an unattended
+  // ask to connected mode.
+  return { effect, reason, rule: rule.id, ...(unattendedAsk && { _unattendedAsk: { rule, policy } }) };
+}
+
+export const NUDGE = 'To have this wait for approval from your phone instead of stopping, connect Atlasent: atlasent-hooks connect';
+
+// Once per session, and only where the limit was actually hit: an unattended ask with
+// no key configured. Never in an attended prompt.
+function nudgeOnce(home, sessionId, env, now) {
+  if (env.ATLASENT_HOOKS_NUDGE === 'off' || typeof sessionId !== 'string' || !sessionId) return false;
+  const file = join(home, 'nudged.json');
+  let seen = {};
+  try { const v = JSON.parse(readFileSync(file, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) seen = v; } catch { /* first time */ }
+  if (seen[sessionId]) return false;
+  const cutoff = now().getTime() - 7 * 24 * 60 * 60 * 1000;
+  for (const [k, t] of Object.entries(seen)) if (!(Date.parse(t) > cutoff)) delete seen[k];
+  seen[sessionId] = now().toISOString();
+  try { mkdirSync(home, { recursive: true, mode: 0o700 }); writeFileSync(file, JSON.stringify(seen) + '\n', { mode: 0o600 }); } catch { return false; }
+  return true;
+}
+
+// Full decision, including connected mode. Never throws: any failure is a refusal.
+export async function decide({ host, input, env = process.env, now = () => new Date(), fetchImpl = globalThis.fetch }) {
+  const d = evaluate({ host, input, env, now });
+  if (!d._unattendedAsk) return d;
+  const { rule, policy } = d._unattendedAsk;
+  const home = dirname(configPaths(null, env).user);
+  let creds;
+  try {
+    creds = loadCredentials(home, env);
+  } catch (e) {
+    return { effect: 'deny', rule: rule.id, reason: `${d.reason} The Atlasent credentials are invalid (${String(e.message).slice(0, 120)}), so connected approval is unavailable.` };
+  }
+  if (!creds) {
+    return nudgeOnce(home, input.session_id, env, now) ? { ...d, reason: `${d.reason} ${NUDGE}` } : d;
+  }
+  let r;
+  try {
+    r = await connectedDecision({ input, rule, config: policy.connected ?? {}, creds, home, fetchImpl, now });
+  } catch (e) {
+    r = { effect: 'deny', outcome: 'error', reason: `${d.reason} Connected approval failed (${String(e?.message ?? e).slice(0, 120)}).` };
+  }
+  audit({ ts: now().toISOString(), host, event: 'connected', session: typeof input.session_id === 'string' ? input.session_id : null, rule: rule.id, decision: r.effect, outcome: r.outcome ?? null }, env);
+  return { effect: r.effect, reason: r.reason, rule: rule.id };
 }
 
 export function claudeCodeResponse(d) {

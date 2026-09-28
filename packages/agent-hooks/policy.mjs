@@ -11,11 +11,13 @@ const ID = /^[A-Za-z0-9_.-]{1,64}$/;
 //   "version": 1,
 //   "rules": { "deploy.release": "deny", "git.discard-work": "allow" },
 //   "custom": [{ "id": "my.prod-db", "pattern": "psql .*prod", "effect": "ask", "description": "..." }],
-//   "unattended": "deny"        // what an "ask" becomes when no human can answer
+//   "unattended": "deny",       // what an "ask" becomes when no human can answer
+//   "connected": { "environment": "production", "preview": "redacted" }
+//                               // used only when an Atlasent key is configured
 // }
 export function validatePolicy(p) {
   if (!object(p) || p.version !== 1) throw Error('config: "version": 1 is required');
-  for (const k of Object.keys(p)) if (!['version', 'rules', 'custom', 'unattended', '$comment'].includes(k)) throw Error(`config: unknown field "${k}"`);
+  for (const k of Object.keys(p)) if (!['version', 'rules', 'custom', 'unattended', 'connected', '$comment'].includes(k)) throw Error(`config: unknown field "${k}"`);
   const rules = p.rules ?? {};
   if (!object(rules)) throw Error('config: "rules" must be an object');
   for (const [id, e] of Object.entries(rules)) {
@@ -36,10 +38,16 @@ export function validatePolicy(p) {
   });
   const unattended = p.unattended ?? 'deny';
   if (!['deny', 'ask'].includes(unattended)) throw Error('config: "unattended" must be deny or ask');
-  return { rules, custom: compiled, unattended };
+  const c = p.connected ?? {};
+  if (!object(c)) throw Error('config: "connected" must be an object');
+  for (const k of Object.keys(c)) if (!['environment', 'preview'].includes(k)) throw Error(`config: connected has unknown field "${k}"`);
+  if (c.environment !== undefined && (typeof c.environment !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(c.environment))) throw Error('config: connected.environment must be a short lowercase name such as "production"');
+  if (c.preview !== undefined && !['redacted', 'off'].includes(c.preview)) throw Error('config: connected.preview must be redacted or off');
+  const connected = { ...(c.environment !== undefined && { environment: c.environment }), ...(c.preview !== undefined && { preview: c.preview }) };
+  return { rules, custom: compiled, unattended, connected };
 }
 
-export const DEFAULT_POLICY = Object.freeze({ rules: {}, custom: [], unattended: 'deny' });
+export const DEFAULT_POLICY = Object.freeze({ rules: {}, custom: [], unattended: 'deny', connected: {} });
 
 // User-level config first, project-level second; project settings win per rule, except
 // that a project can never make a rule LESS strict than the user set it. An agent that
@@ -50,7 +58,15 @@ export function mergePolicies(user, project) {
   for (const [id, e] of Object.entries(project.rules)) if (!(id in rules) || RANK[e] >= RANK[rules[id]]) rules[id] = e;
   const custom = [...user.custom, ...project.custom.filter(c => !user.custom.some(u => u.id === c.id))];
   const unattended = user.unattended === 'deny' || project.unattended === 'deny' ? 'deny' : 'ask';
-  return { rules, custom, unattended };
+  // Which environment's policy governs is the user's choice only: a repository the agent
+  // can write to must not be able to route its actions to a laxer environment. A
+  // repository may only make the preview stricter (turn it off).
+  const uc = user.connected ?? {}; const pc = project.connected ?? {};
+  const connected = {
+    ...(uc.environment !== undefined && { environment: uc.environment }),
+    preview: uc.preview === 'off' || pc.preview === 'off' ? 'off' : 'redacted',
+  };
+  return { rules, custom, unattended, connected };
 }
 
 export function configPaths(cwd, env = process.env) {
