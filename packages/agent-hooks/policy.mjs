@@ -15,6 +15,8 @@ const ID = /^[A-Za-z0-9_.-]{1,64}$/;
 //   "connected": { "environment": "production", "preview": "redacted" }
 //                               // used only when an Atlasent key is configured
 // }
+export const ENVIRONMENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+
 export function validatePolicy(p) {
   if (!object(p) || p.version !== 1) throw Error('config: "version": 1 is required');
   for (const k of Object.keys(p)) if (!['version', 'rules', 'custom', 'unattended', 'connected', '$comment'].includes(k)) throw Error(`config: unknown field "${k}"`);
@@ -41,7 +43,7 @@ export function validatePolicy(p) {
   const c = p.connected ?? {};
   if (!object(c)) throw Error('config: "connected" must be an object');
   for (const k of Object.keys(c)) if (!['environment', 'preview'].includes(k)) throw Error(`config: connected has unknown field "${k}"`);
-  if (c.environment !== undefined && (typeof c.environment !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(c.environment))) throw Error('config: connected.environment must be a short lowercase name such as "production"');
+  if (c.environment !== undefined && (typeof c.environment !== 'string' || !ENVIRONMENT_NAME.test(c.environment))) throw Error('config: connected.environment must be a short lowercase name such as "production"');
   if (c.preview !== undefined && !['redacted', 'off'].includes(c.preview)) throw Error('config: connected.preview must be redacted or off');
   const connected = { ...(c.environment !== undefined && { environment: c.environment }), ...(c.preview !== undefined && { preview: c.preview }) };
   return { rules, custom: compiled, unattended, connected };

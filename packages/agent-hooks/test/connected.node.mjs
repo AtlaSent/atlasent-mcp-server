@@ -479,3 +479,64 @@ test('CLI end to end: hold, approve, re-run allows; pending file is private', as
     server.close();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Plugin settings (userConfig): Claude Code exports them as CLAUDE_PLUGIN_OPTION_*
+// ---------------------------------------------------------------------------
+
+const withAuth = rt => {
+  const auth = [];
+  return { auth, fetchImpl: async (url, init) => { auth.push(init.headers?.authorization ?? init.headers?.Authorization); return rt.fetchImpl(url, init); } };
+};
+
+test('plugin api_key setting connects with no other credential, and is the key sent', async () => {
+  const s = setup({ key: null }); const rt = fakeRuntime(); const w = withAuth(rt);
+  s.env.CLAUDE_PLUGIN_OPTION_API_KEY = 'ask_test_fromplugin1';
+  const r = await decide({ host: 'claude-code', input: unattended(s.cwd), env: s.env, fetchImpl: w.fetchImpl });
+  assert.equal(r.effect, 'deny');
+  assert.ok(idOf(r.reason), r.reason);
+  assert.ok(rt.calls.length > 0);
+  assert.ok(w.auth.every(a => a === 'Bearer ask_test_fromplugin1'), JSON.stringify(w.auth));
+});
+
+test('a blank plugin api_key setting counts as unset: local guard, nothing sent', async () => {
+  const s = setup({ key: null }); const rt = fakeRuntime();
+  s.env.CLAUDE_PLUGIN_OPTION_API_KEY = '   ';
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.equal(rt.calls.length, 0);
+});
+
+test('plugin environment setting supplies connected.environment when the user file has none', async () => {
+  const s = setup({ environment: null }); const rt = fakeRuntime();
+  s.env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT = 'staging';
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.ok(idOf(r.reason), r.reason);
+  const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate'));
+  assert.equal(ev.body.context.environment, 'staging');
+});
+
+test("the user's own hooks.json environment wins over the plugin setting", async () => {
+  const s = setup({ environment: 'production' }); const rt = fakeRuntime();
+  s.env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT = 'staging';
+  await run(s, rt, unattended(s.cwd));
+  const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate'));
+  assert.equal(ev.body.context.environment, 'production');
+});
+
+test('an invalid plugin environment setting blocks and sends nothing', async () => {
+  const s = setup({ environment: null }); const rt = fakeRuntime();
+  s.env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT = 'Prod Env!';
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /environment setting/);
+  assert.equal(rt.calls.length, 0);
+});
+
+test('a repository still cannot choose the environment when the plugin setting is used', async () => {
+  const s = setup({ environment: null, project: { version: 1, connected: { environment: 'sandbox' } } }); const rt = fakeRuntime();
+  s.env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT = 'production';
+  await run(s, rt, unattended(s.cwd));
+  const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate'));
+  assert.equal(ev.body.context.environment, 'production');
+});

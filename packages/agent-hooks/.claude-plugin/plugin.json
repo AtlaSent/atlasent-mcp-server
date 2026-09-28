@@ -1,10 +1,26 @@
 {
   "name": "atlasent-guard",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Stops AI coding agents from destroying production: dropping databases, deleting volumes, force-pushing, terraform destroy and unreviewed deploys wait for a person. Local, no account.",
   "author": { "name": "AtlaSent", "url": "https://www.atlasent.io" },
   "homepage": "https://github.com/Atlasent/atlasent-mcp-server/tree/main/packages/agent-hooks#readme",
   "repository": "https://github.com/Atlasent/atlasent-mcp-server",
   "license": "Apache-2.0",
-  "keywords": ["security", "guardrails", "hooks", "production", "database", "terraform"]
+  "keywords": ["security", "guardrails", "hooks", "production", "database", "terraform"],
+  "userConfig": {
+    "api_key": {
+      "type": "string",
+      "title": "Atlasent agent API key (optional)",
+      "description": "Leave blank to stay local: no account, nothing sent. With a key (ask_live_… or ask_test_…), an unattended ask waits for a person in your organization instead of being refused. Stored securely by Claude Code.",
+      "sensitive": true,
+      "required": false
+    },
+    "environment": {
+      "type": "string",
+      "title": "Atlasent environment",
+      "description": "Which of your organization's environments decides held actions when a key is set. Your own ~/.atlasent/hooks.json \"connected.environment\" wins if present; a repository's config can never choose it.",
+      "default": "production",
+      "required": false
+    }
+  }
 }

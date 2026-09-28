@@ -32,8 +32,14 @@ const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 // Configuration
 // ---------------------------------------------------------------------------
 
-// Credentials live in <home>/credentials.json ({ "api_key", "base_url"? }), written by
-// `atlasent-hooks connect`. Env vars override for CI and tests. No key → not connected.
+// Where the key comes from, first match wins:
+//   1. the plugin's `api_key` setting (plugin.json userConfig, stored by Claude Code and
+//      exported to this hook as CLAUDE_PLUGIN_OPTION_API_KEY),
+//   2. ATLASENT_HOOKS_API_KEY (CI and tests),
+//   3. <home>/credentials.json ({ "api_key", "base_url"? }), written by `atlasent-hooks connect`.
+// A blank value counts as unset: an optional setting left empty is exported as "".
+// No key → not connected.
+const set = v => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
 export function loadCredentials(home, env = process.env) {
   let file = {};
   const path = join(home, 'credentials.json');
@@ -42,10 +48,10 @@ export function loadCredentials(home, env = process.env) {
     if (!object(parsed)) throw Error('credentials.json must be an object');
     file = parsed;
   }
-  const apiKey = env.ATLASENT_HOOKS_API_KEY ?? file.api_key;
+  const apiKey = set(env.CLAUDE_PLUGIN_OPTION_API_KEY) ?? set(env.ATLASENT_HOOKS_API_KEY) ?? file.api_key;
   if (!apiKey) return null;
   if (typeof apiKey !== 'string' || !/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the Atlasent API key is not in ask_live_… / ask_test_… form');
-  const baseUrl = String(env.ATLASENT_HOOKS_BASE_URL ?? file.base_url ?? DEFAULT_BASE).replace(/\/+$/, '');
+  const baseUrl = String(set(env.ATLASENT_HOOKS_BASE_URL) ?? file.base_url ?? DEFAULT_BASE).replace(/\/+$/, '');
   if (!/^https:\/\//.test(baseUrl) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(baseUrl)) throw Error('base_url must be https');
   return { apiKey, baseUrl };
 }
