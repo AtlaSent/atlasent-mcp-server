@@ -48,6 +48,7 @@ import { randomUUID } from "node:crypto";
 import { registerV2Tools } from "./v2Tools.js";
 import { registerComplianceTools } from "./complianceTools.js";
 import { registerVqpTools } from "./vqpTools.js";
+import { registerEvidenceGapTool } from "./evidenceGap.js";
 import { CANON_ACT_CATALOG, type ActSpecEntry } from "./canonCatalog.js";
 import { CANON_ACTION_GRAPH } from "./canonGraph.js";
 import { NO_MATCH_HINT, rankActions, type RetrievalResult } from "./actionRetrieval.js";
@@ -2109,6 +2110,12 @@ export function createServer(): McpServer {
   // VQP tools: generate snapshots, verify hash integrity, detect model drift.
   // -------------------------------------------------------------------------
   registerVqpTools(server);
+
+  // -------------------------------------------------------------------------
+  // Evidence-gap report: which CI steps change real systems with no gate in
+  // front of them. Offline and read-only; works without an API key.
+  // -------------------------------------------------------------------------
+  registerEvidenceGapTool(server, rateLimitOk);
 
   return server;
 }

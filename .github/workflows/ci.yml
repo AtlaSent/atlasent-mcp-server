@@ -21,6 +21,21 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - name: One license (Apache-2.0) across server, packages and plugin manifests
+        run: |
+          node scripts/check-package-licenses.mjs --self-test
+          node scripts/check-package-licenses.mjs
+      # The MCPB bundle (Smithery stdio listing, Claude Desktop) is the same
+      # dist/ packed with prod deps; build + validate it on one leg only.
+      - name: Build and validate the MCPB bundle
+        if: matrix.node-version == 22
+        run: node scripts/build-mcpb.mjs --out mcpb-out
+      - uses: actions/upload-artifact@v7
+        if: matrix.node-version == 22
+        with:
+          name: mcpb-bundle
+          path: mcpb-out/*.mcpb
+          retention-days: 30
 
   # atlasent-guard, the Claude Code plugin in packages/agent-hooks. Zero dependencies.
   # Its tests drive the real CLI with Claude Code's stdin payload, so this job proves

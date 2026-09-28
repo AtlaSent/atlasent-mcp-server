@@ -13,7 +13,7 @@ This MCP server brings it to AI agents (Claude, Cursor, Windsurf, any MCP host).
 
 1. **Connect it** to your agent with a few lines of config.
 2. **Risky actions wait** for a person to approve them. Everything else runs as normal.
-3. **Every action gets a signed receipt** your auditor can check, without trusting us.
+3. **Every decision gets a signed record**, including who approved it when approval was required.
 
 Try it in 60 seconds with no account: `npx -y @atlasent/mcp-server` (local mode, a demo that protects nothing).
 
@@ -303,6 +303,25 @@ The tool never invents an action type: every candidate is a Canon entry by refer
 
 Read-only lookup of canonical Atlasent concepts such as Authority, Policy, Decision, Permit, Verification, Evidence, Gate, and Trust Root.
 
+### `atlasent_evidence_gap_report`
+
+"Where are my deploys ungoverned?" Pass the text of your `.github/workflows/*.yml` files and get back every step that changes a real system (deploys, package and image publishes, database migrations, `terraform`/`pulumi` applies), each with a status:
+
+| `status` | Meaning |
+|---|---|
+| `bound` | A gate runs earlier in the job, and the step runs only `if: steps.<gate>.outputs.verified == 'true'`. |
+| `gated` | A gate runs earlier in the job; a deny fails the job before the step. |
+| `gated_upstream` | The gate is in a job this job `needs:`. Nothing re-verifies the permit where the step runs. |
+| `weak` | A gate exists but cannot stop the step: `continue-on-error`, its own `if:` (a `skip_gate` input, for example), or `mode: evaluate-only` with nothing consuming the permit. |
+| `ungoverned` | No gate at all. |
+
+```text
+Input:  { workflows: [{ path, content }], gate_actions? }
+Output: { summary, findings[], triggers, parse_errors[], not_checked[], next_step }
+```
+
+Works in local mode: no API key, no network, nothing executed. `gate_actions` names your own gate wrappers (a composite action, say); they are reported as custom gates whose internals were not inspected. The report always lists what it cannot see (repository settings, deploys outside CI, the inside of `./deploy.sh`), and a file it cannot parse is listed in `parse_errors`, never skipped. A clean report is not proof that nothing is ungoverned.
+
 ### `atlasent_integrity_audit`
 
 Read-only audit of the organization's Authority graph for internal inconsistency. Hosted mode only; the organization is derived server-side from the API key.
@@ -404,8 +423,7 @@ Keep these statements distinct:
    needs approval waits in the approval queue until someone approves it.
 
 Remote mode gives you what local mode cannot: Ed25519-signed, single-use permits,
-your organization's own policies, and a tamper-evident audit trail you can verify
-offline.
+your organization's own policies, and a tamper-evident audit trail.
 
 Remote example:
 
@@ -514,7 +532,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 The same server can be configured in any other MCP-compatible host using its normal MCP server configuration mechanism (`command: npx`, `args: ["-y", "@atlasent/mcp-server"]`, and the same `env` block shown above).
 
-This server is also listed on [Glama](https://glama.ai/mcp/servers/Atlasent/atlasent-mcp-server) (built from this repo's [`Dockerfile`](./Dockerfile); listing ownership in [`glama.json`](./glama.json)) and distributed via the [official MCP Registry](https://registry.modelcontextprotocol.io) (`io.github.Atlasent/mcp-server`, manifest at [`server.json`](./server.json)) and [Smithery](https://smithery.ai) (config at [`smithery.yaml`](./smithery.yaml)) — a registry-aware host can discover and install it without a hand-written config block.
+This server is also listed on [Glama](https://glama.ai/mcp/servers/Atlasent/atlasent-mcp-server) (built from this repo's [`Dockerfile`](./Dockerfile); listing ownership in [`glama.json`](./glama.json)) and on the [official MCP Registry](https://registry.modelcontextprotocol.io) (`io.github.Atlasent/mcp-server`, manifest at [`server.json`](./server.json)), so a registry-aware host can discover and install it without a hand-written config block. `npm run bundle` builds an MCPB bundle of the same server for hosts that install from one. Where it is and isn't listed: [`docs/DISTRIBUTION.md`](./docs/DISTRIBUTION.md).
 
 ## Development
 

@@ -35,6 +35,8 @@ src/
   v2Client.ts                   HTTP clients for Wave A endpoints; FeatureNotEnabledError on 404
   complianceTools.ts            SCIM, SIEM config, evidence export MCP tools
   vqpTools.ts                   VQP snapshot generation, verification, drift event tools
+  hostEnv.ts                    dropEmptyAtlasentEnv(): blank ATLASENT_* values from form-filled hosts (MCPB/Smithery) count as unset, so a blank base URL cannot bypass the hosted default
+  evidenceGap.ts                atlasent_evidence_gap_report: offline scan of CI workflow YAML for deploy/publish/migrate/apply steps with no (or a skippable) AtlaSent gate. Own block-YAML subset parser (no new dep); unparseable files go to parse_errors, never dropped. Tests in evidenceGap.test.ts carry mutants (continue-on-error, conditional gate, gate-after-step, evaluate-only, commented-out command) that must each change the status
   streamableHttp.ts             Streamable HTTP transport (MCP HTTP mode)
   index.ts                      CLI entry point; connects stdio transport
   server.test.ts                Unit tests: tools/list, evaluate (local + remote), verify_permit, deploy_service
@@ -46,8 +48,10 @@ src/
   integration.test.ts           Live-API tests; require ATLASENT_API_KEY + ATLASENT_BASE_URL, skip otherwise
   integration.write.test.ts     Live-API write tests (mutating tools)
 
-packages/agent-hooks/  Claude Code plugin `atlasent-guard` (PreToolUse hook): destructive/shipping shell + MCP calls ask, catastrophic ones deny, ask becomes deny when unattended. Zero deps, local only, no cloud call. Installed from this repo's root `.claude-plugin/marketplace.json`; npm name `@atlasent/agent-hooks` is NOT published (a publish needs a `package.release` template, same as mcp-gate). Tests drive the real CLI with Claude Code's stdin payload
+packages/agent-hooks/  Claude Code plugin `atlasent-guard` (PreToolUse hook): destructive/shipping shell + MCP calls ask, catastrophic ones deny, ask becomes deny when unattended. Zero deps, local only, no cloud call. Installed from this repo's root `.claude-plugin/marketplace.json`; npm name `@atlasent/agent-hooks` is NOT published (a publish needs its own `package.release` template seeded into the live bundle, as mcp-gate got in v10). Apache-2.0, with its own LICENSE + NOTICE because the plugin installs from this folder alone. Tests drive the real CLI with Claude Code's stdin payload
 .claude-plugin/        marketplace.json listing the plugins in this repo (source paths are relative to the repo root)
+mcpb/manifest.json     MCPB manifest: `npm run build && npm run bundle` packs the same dist/ (prod deps only) into atlasent-mcp-server-<version>.mcpb for Smithery stdio listings and Claude Desktop. CI builds + validates it on the Node 22 leg
+docs/DISTRIBUTION.md   canonical status of every listing surface (registry, npm, Glama, Smithery, plugin directory, ...): one product, thin per-marketplace metadata
 
 Dockerfile            stdio image; also what Glama builds to introspect tools (no creds -> local mode). CI `docker-smoke` job keeps it answering tools/list
 glama.json            Glama listing ownership (maintainers)
@@ -358,7 +362,7 @@ See `atlasent-api/docs/runbooks/CRON_VAULT_SECRETS.md` for the full setup proced
 
 ## npm publishing
 
-Scoped package `@atlasent/mcp-server`, `publishConfig.access: public`. Tag `v*` triggers `publish.yml`, which runs an AtlaSent `package.release` gate, then build, tests, and `npm publish --access public` via npm **trusted publishing** (OIDC; no stored token — see "Trusted publishing replaces NPM_TOKEN" below). The repo is public, so npm provenance is attached, alongside a cosign keyless-signed tarball uploaded as a build artifact. **Correction (2026-08-30):** this section previously claimed no `v*` tag had ever been pushed and no version had ever been published — that was based on an incomplete local git clone (`git tag -l` empty), not the live registry. Verified directly against `registry.npmjs.org`: **`2.11.0` has been published to npm since 2026-06-09** (via a manual `workflow_dispatch` run, not a tag-triggered one), and the `v2.11.0` git tag has existed on GitHub since 2026-06-10 (`create-v2-11-0-tag.yml` run #1, which pinned it to a specific historical commit SHA rather than the HEAD at dispatch time). Before assuming a tag or version is missing, check the live registry/GitHub state directly rather than a local checkout's `git tag -l`, which may not have fetched tags. **MCP Registry: listed since 2026-09-24** (`io.github.Atlasent/mcp-server` 2.12.2, verified via a live `registry.modelcontextprotocol.io/v0/servers?search=atlasent` query). Before then it had never been listed.
+Scoped package `@atlasent/mcp-server`, `publishConfig.access: public`. Tag `v*` triggers `publish.yml`, which runs an AtlaSent `package.release` gate, then build, tests, and `npm publish --access public` via npm **trusted publishing** (OIDC; no stored token — see "Trusted publishing replaces NPM_TOKEN" below). The repo is public, so npm provenance is attached, alongside a cosign keyless-signed tarball uploaded as a build artifact. **Correction (2026-08-30):** this section previously claimed no `v*` tag had ever been pushed and no version had ever been published — that was based on an incomplete local git clone (`git tag -l` empty), not the live registry. Verified directly against `registry.npmjs.org`: **`2.11.0` has been published to npm since 2026-06-09** (via a manual `workflow_dispatch` run, not a tag-triggered one), and the `v2.11.0` git tag has existed on GitHub since 2026-06-10 (`create-v2-11-0-tag.yml` run #1, which pinned it to a specific historical commit SHA rather than the HEAD at dispatch time). Before assuming a tag or version is missing, check the live registry/GitHub state directly rather than a local checkout's `git tag -l`, which may not have fetched tags. **MCP Registry: listed since 2026-09-24**, and every npm release since has reached it: 2.12.2 through 2.16.0 are all present, with 2.16.0 `isLatest: true` (checked 2026-09-28 against `registry.modelcontextprotocol.io/v0/servers/io.github.Atlasent%2Fmcp-server/versions`). **Read `_meta[...].isLatest`, not the first search hit:** `/v0/servers?search=atlasent` returns every version, oldest first, so the first entry is 2.12.2 and reads as "stuck at 2.12.2" when nothing is stuck. Before 2026-09-24 it had never been listed.
 
 ### Trusted publishing replaces NPM_TOKEN (2026-09-24)
 
@@ -453,8 +457,9 @@ GitHub org, so it changed with the move to `Atlasent`). After every successful n
 publish, `publish-mcp-registry.yml` publishes it to
 registry.modelcontextprotocol.io via `mcp-publisher` with GitHub OIDC (no
 stored secret). **Release checklist addition: bump BOTH version fields in
-`server.json` (top-level and `packages[0].version`) together with
-`package.json`** — the workflow fails closed on a mismatch. It also polls npm
+`server.json` (top-level and `packages[0].version`) AND `mcpb/manifest.json`'s
+`version` together with `package.json`** (`src/distribution.test.ts` and
+`scripts/build-mcpb.mjs` fail on any mismatch) — the workflow fails closed on a mismatch. It also polls npm
 until the new version resolves before publishing (fails closed after ~10 min):
 the registry rejects a version npm does not serve yet, which is what failed
 v2.12.2's first registry run. First-time
