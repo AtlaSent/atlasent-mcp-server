@@ -504,6 +504,22 @@ export interface Finding {
   confidence: "certain" | "possible";
   status: GapStatus;
   reason: string;
+  /** Present on gaps (ungoverned / weak): the concrete change for this step. */
+  fix?: Fix;
+}
+
+export interface Fix {
+  /** atlasent-action `action:` for this kind of step. */
+  action_type: string;
+  /** Step to insert before this one (ungoverned), as YAML. */
+  gate_step?: string;
+  /** Condition to put on this step so it runs only on a verified permit. */
+  bind_if: string;
+  /** What to change on an existing gate that cannot stop the step (weak). */
+  change?: string;
+  /** The job needs these permissions for a verified workload actor. */
+  job_permissions?: string;
+  note?: string;
 }
 
 export interface WorkflowInput {
@@ -525,6 +541,12 @@ export interface EvidenceGapReport {
   parse_errors: Array<{ workflow: string; line: number; error: string }>;
   not_checked: string[];
   next_step: string;
+  /** Present when there are gaps: how to get the key the gate steps need. */
+  setup?: {
+    sign_up_url: string;
+    steps: string[];
+    docs: string;
+  };
 }
 
 const NOT_CHECKED = [
@@ -545,6 +567,122 @@ function triggerNames(on: YValue | undefined): string[] {
   if (Array.isArray(on)) return on.filter((x): x is string => typeof x === "string");
   if (on && typeof on === "object") return Object.keys(on);
   return [];
+}
+
+// ---------------------------------------------------------------------------
+// The concrete next action for a gap
+// ---------------------------------------------------------------------------
+
+export const SIGN_UP_URL = "https://console.atlasent.io/auth/sign-up?utm_source=evidence-gap&utm_medium=mcp";
+const ACTION_DOCS = "https://github.com/Atlasent/atlasent-action#quick-start";
+const GATE_ID = "atlasent_gate";
+
+/**
+ * atlasent-action accepts only its GATE_PERMITTED_ACTIONS. database.migrate is
+ * a Canon action it does not accept yet, so a migration is gated as a
+ * production deploy and the fix says so.
+ */
+function actionTypeFor(category: Category): { action: string; note?: string } {
+  switch (category) {
+    case "publish":
+      return { action: "package.release" };
+    case "infrastructure":
+      return { action: "infrastructure.change" };
+    case "migrate":
+      return {
+        action: "production.deploy",
+        note: "The Canon action for a migration is database.migrate, which atlasent-action does not accept yet; gate it as production.deploy.",
+      };
+    default:
+      return { action: "production.deploy" };
+  }
+}
+
+function gateStepYaml(action: string): string {
+  return [
+    "- name: Atlasent gate",
+    `  id: ${GATE_ID}`,
+    "  uses: Atlasent/atlasent-action@v1",
+    "  env:",
+    "    ATLASENT_API_KEY: ${{ secrets.ATLASENT_API_KEY }}",
+    "    ATLASENT_BASE_URL: ${{ secrets.ATLASENT_BASE_URL }}",
+    "  with:",
+    `    action: ${action}`,
+    "    environment: production",
+    "    target-id: ${{ github.repository }}",
+  ].join("\n");
+}
+
+function bindIf(gateId: string, existingIf: string): string {
+  const verified = `steps.${gateId}.outputs.verified == 'true'`;
+  const cur = stripExpr(existingIf);
+  if (cur === "" || runsAfterFailure(cur)) return `if: ${verified}`;
+  return `if: \${{ (${cur}) && ${verified} }}`;
+}
+
+function hasIdTokenWrite(perms: YValue | undefined): boolean {
+  if (typeof perms === "string") return /write-all/.test(perms);
+  return !!perms && typeof perms === "object" && !Array.isArray(perms) && (perms as YMap)["id-token"] === "write";
+}
+
+function fixFor(
+  status: GapStatus,
+  category: Category,
+  step: YMap,
+  job: YMap,
+  doc: YMap,
+  weakGate: GateInfo | undefined,
+): Fix | undefined {
+  if (status !== "ungoverned" && status !== "weak") return undefined;
+  const { action, note } = actionTypeFor(category);
+  const stepIf = typeof step.if === "string" ? step.if : "";
+  const needsIdToken = action === "production.deploy" || action === "infrastructure.change";
+  const perms = job.permissions !== undefined ? job.permissions : doc.permissions;
+  const job_permissions =
+    needsIdToken && !hasIdTokenWrite(perms)
+      ? "Add `permissions: { contents: read, id-token: write }` to this job: the gate mints a verified GitHub workload identity for this action type."
+      : undefined;
+  const alwaysNote = runsAfterFailure(stripExpr(stepIf))
+    ? "Remove always()/failure()/cancelled() from this step's condition, or it still runs after a deny."
+    : undefined;
+  // The step may already be bound to a gate this report did not recognize
+  // (a wrapper action, or `uses: ./` inside atlasent-action itself).
+  const unrecognized = /\b(needs|steps)\.([\w-]+)\.outputs\.verified\b/.exec(stepIf);
+  if (unrecognized && status === "ungoverned") {
+    return {
+      action_type: action,
+      bind_if: `if: ${stepIf.trim()}`,
+      change:
+        `This step already checks ${unrecognized[1]}.${unrecognized[2]}.outputs.verified, but no gate was recognized there. ` +
+        "If that is your gate, pass its `uses:` value in `gate_actions` and run the report again; if not, add the gate step shown in the atlasent-action docs.",
+    };
+  }
+  if (status === "ungoverned") {
+    return {
+      action_type: action,
+      gate_step: gateStepYaml(action),
+      bind_if: bindIf(GATE_ID, stepIf),
+      ...(job_permissions ? { job_permissions } : {}),
+      ...(note || alwaysNote ? { note: [note, alwaysNote].filter(Boolean).join(" ") } : {}),
+    };
+  }
+  const gateId = weakGate?.id ?? GATE_ID;
+  const change = !weakGate
+    ? "The gate that should stop this step is in another job (or that job can be skipped). Put a gate in this job, before this step, or make the gate job always run and fail on a deny."
+    : weakGate.advisory
+      ? "Remove continue-on-error from the gate step, so a deny fails the job."
+      : weakGate.conditional
+        ? "Remove the gate step's own `if:` (for example a skip_gate input), so it cannot be skipped."
+        : weakGate.issuesOnly
+          ? "The gate only issues a permit (mode: evaluate-only). Add a step with `verify-permit: 'true'` before this one, or drop evaluate-only."
+          : alwaysNote ?? "Bind this step to the gate's verified output.";
+  return {
+    action_type: action,
+    bind_if: bindIf(gateId, stepIf),
+    change,
+    ...(!weakGate?.id && weakGate ? { note: "Give the gate step an `id:` so this step can reference its output." } : {}),
+    ...(job_permissions ? { job_permissions } : {}),
+  };
 }
 
 /**
@@ -632,6 +770,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
         const stepIf = typeof step.if === "string" ? step.if : "";
         let status: GapStatus;
         let reason: string;
+        let weakGate: GateInfo | undefined;
         const enforcing = earlier.filter(enforcingGate);
         const bound = enforcing.find((g) => g.id && requiresVerified(stepIf, g.id));
         const jobIf = typeof job.if === "string" ? job.if : "";
@@ -655,6 +794,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
           }
         } else if (earlier.length > 0) {
           const g = earlier[earlier.length - 1];
+          weakGate = g;
           status = "weak";
           reason = g.advisory
             ? "The gate step has continue-on-error, so a deny does not stop this step."
@@ -691,6 +831,10 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
           ...det,
           status,
           reason,
+          ...(() => {
+            const fix = fixFor(status, det.category, step, job, doc as YMap, weakGate);
+            return fix ? { fix } : {};
+          })(),
         });
       });
     }
@@ -711,8 +855,9 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
         : "No deploy, publish, migrate or infrastructure steps were recognized in these files. That is not proof there are none.";
   } else if (gaps > 0) {
     next =
-      "Put an AtlaSent gate (github.com/Atlasent/atlasent-action) in front of each ungoverned or weak step, " +
-      "and bind the step with `if: steps.<gate-id>.outputs.verified == 'true'`.";
+      `${gaps} step${gaps === 1 ? "" : "s"} can change a real system without an approval gate that stops ` +
+      `${gaps === 1 ? "it" : "them"}. Each one's \`fix\` has the exact change. To apply it: create a free Atlasent ` +
+      `account and API key (${SIGN_UP_URL}), add it as the ATLASENT_API_KEY repository secret, then make each fix.`;
   } else {
     next = "Every recognized step has a gate in front of it. Bind 'gated' steps to the gate's verified output to close the remaining distance.";
   }
@@ -731,6 +876,20 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
     parse_errors: parseErrors,
     not_checked: NOT_CHECKED,
     next_step: next,
+    ...(gaps > 0
+      ? {
+          setup: {
+            sign_up_url: SIGN_UP_URL,
+            steps: [
+              "Create a free account and an API key at the sign-up URL.",
+              "Add the key as the repository secret ATLASENT_API_KEY (and ATLASENT_BASE_URL if you were given one).",
+              "For each finding with a `fix`: insert `gate_step` before the step, add `bind_if` to the step, and apply `change`/`job_permissions` where present.",
+              "Run the report again: fixed steps show as bound.",
+            ],
+            docs: ACTION_DOCS,
+          },
+        }
+      : {}),
   };
 }
 

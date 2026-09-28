@@ -317,8 +317,10 @@ Read-only lookup of canonical Atlasent concepts such as Authority, Policy, Decis
 
 ```text
 Input:  { workflows: [{ path, content }], gate_actions? }
-Output: { summary, findings[], triggers, parse_errors[], not_checked[], next_step }
+Output: { summary, findings[], triggers, parse_errors[], not_checked[], next_step, setup? }
 ```
+
+Every gap (`ungoverned` or `weak`) carries a `fix`: the `atlasent-action` step to insert before it (with the action type that fits: `production.deploy`, `package.release` or `infrastructure.change`), the exact `if:` that binds the step to the gate's verified permit, and any change the existing gate needs (drop `continue-on-error`, drop a `skip_gate` condition, add `id-token: write`). When there are gaps, `setup` gives the sign-up link for the API key the gate needs. Apply the fix and run the report again: the step shows as `bound`.
 
 Works in local mode: no API key, no network, nothing executed. `gate_actions` names your own gate wrappers (a composite action, say); they are reported as custom gates whose internals were not inspected. The report always lists what it cannot see (repository settings, deploys outside CI, the inside of `./deploy.sh`), and a file it cannot parse is listed in `parse_errors`, never skipped. A clean report is not proof that nothing is ungoverned.
 

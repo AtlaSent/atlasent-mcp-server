@@ -356,3 +356,104 @@ jobs:
     assert.equal(status(up("", "\n    if: github.event_name == 'push'")), "weak");
   });
 });
+
+describe("next action for a gap: a concrete fix, not sales copy", () => {
+  /** Insert the fix's gate step before the flagged step and bind it, as a person would. */
+  function applyFix(src: string, stepLine: number, fix: { gate_step?: string; bind_if: string }): string {
+    const lines = src.split("\n");
+    const idx = stepLine - 1;
+    const indent = lines[idx].length - lines[idx].trimStart().length;
+    const pad = " ".repeat(indent);
+    const gate = fix.gate_step ? fix.gate_step.split("\n").map((l) => pad + l) : [];
+    // The step keeps its line; its binding goes right under the "- " line.
+    return [...lines.slice(0, idx), ...gate, lines[idx], `${pad}  ${fix.bind_if}`, ...lines.slice(idx + 1)].join("\n");
+  }
+
+  it("an ungoverned step gets a gate step and binding that, applied, make it bound", () => {
+    const src = `
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm publish --access public
+`;
+    const r = analyzeWorkflows(wf(src));
+    const f = r.findings[0];
+    assert.equal(f.status, "ungoverned");
+    assert.ok(f.fix, "a gap carries a fix");
+    assert.equal(f.fix!.action_type, "package.release");
+    assert.match(f.fix!.gate_step!, /uses: Atlasent\/atlasent-action@v1/);
+    assert.equal(f.fix!.bind_if, "if: steps.atlasent_gate.outputs.verified == 'true'");
+    const fixed = applyFix(src, f.line, f.fix!);
+    const again = analyzeWorkflows(wf(fixed));
+    assert.equal(again.findings.length, 1, fixed);
+    assert.equal(again.findings[0].status, "bound", fixed);
+    assert.equal(again.findings[0].fix, undefined);
+  });
+
+  it("maps each kind of step to an action type atlasent-action accepts", () => {
+    const kind = (run: string) => analyzeWorkflows(wf(`jobs:\n  d:\n    steps:\n      - run: ${run}\n`)).findings[0].fix!;
+    assert.equal(kind("helm upgrade --install api ./chart").action_type, "production.deploy");
+    assert.equal(kind("terraform apply plan.tfplan").action_type, "infrastructure.change");
+    const mig = kind("prisma migrate deploy");
+    assert.equal(mig.action_type, "production.deploy");
+    assert.match(mig.note!, /database\.migrate/);
+  });
+
+  it("asks for id-token: write only when the job lacks it and the action needs a verified workload", () => {
+    const withPerms = `jobs:\n  d:\n    permissions:\n      contents: read\n      id-token: write\n    steps:\n      - run: kubectl apply -f k.yaml\n`;
+    assert.equal(analyzeWorkflows(wf(withPerms)).findings[0].fix!.job_permissions, undefined);
+    assert.match(
+      analyzeWorkflows(wf(`jobs:\n  d:\n    steps:\n      - run: kubectl apply -f k.yaml\n`)).findings[0].fix!.job_permissions!,
+      /id-token: write/,
+    );
+    assert.equal(analyzeWorkflows(wf(`jobs:\n  d:\n    steps:\n      - run: npm publish\n`)).findings[0].fix!.job_permissions, undefined);
+  });
+
+  it("a weak gate gets the specific change, bound to the existing gate id", () => {
+    const src = `
+jobs:
+  d:
+    steps:
+      - id: gate
+        if: \${{ !inputs.skip_gate }}
+        uses: Atlasent/atlasent-action@v1
+      - run: npm publish
+`;
+    const f = analyzeWorkflows(wf(src)).findings[0];
+    assert.equal(f.status, "weak");
+    assert.match(f.fix!.change!, /skip_gate|own `if:`/);
+    assert.equal(f.fix!.bind_if, "if: steps.gate.outputs.verified == 'true'");
+    assert.equal(f.fix!.gate_step, undefined, "fix the existing gate, do not add a second one");
+  });
+
+  it("keeps an existing condition when binding, and drops always()", () => {
+    const f1 = analyzeWorkflows(wf(`jobs:\n  d:\n    steps:\n      - if: github.ref == 'refs/heads/main'\n        run: npm publish\n`)).findings[0];
+    assert.equal(f1.fix!.bind_if, "if: ${{ (github.ref == 'refs/heads/main') && steps.atlasent_gate.outputs.verified == 'true' }}");
+    const f2 = analyzeWorkflows(wf(`jobs:\n  d:\n    steps:\n      - if: always()\n        run: npm publish\n`)).findings[0];
+    assert.equal(f2.fix!.bind_if, "if: steps.atlasent_gate.outputs.verified == 'true'");
+    assert.match(f2.fix!.note!, /always/);
+  });
+
+  it("next_step and setup point at an attributable sign-up only when there are gaps", () => {
+    const gap = analyzeWorkflows(wf(`jobs:\n  d:\n    steps:\n      - run: npm publish\n`));
+    assert.match(gap.next_step, /utm_source=evidence-gap/);
+    assert.match(gap.next_step, /ATLASENT_API_KEY/);
+    assert.equal(gap.setup!.sign_up_url, "https://console.atlasent.io/auth/sign-up?utm_source=evidence-gap&utm_medium=mcp");
+    const clean = analyzeWorkflows(
+      wf(`jobs:\n  d:\n    steps:\n      - id: g\n        uses: Atlasent/atlasent-action@v1\n      - if: steps.g.outputs.verified == 'true'\n        run: npm publish\n`),
+    );
+    assert.equal(clean.setup, undefined);
+    assert.doesNotMatch(clean.next_step, /sign-up/);
+  });
+
+  it("does not suggest a second gate for a step already bound to an unrecognized one", () => {
+    const f = analyzeWorkflows(
+      wf(`jobs:\n  gate:\n    steps:\n      - uses: ./\n  ship:\n    needs: gate\n    steps:\n      - if: needs.gate.outputs.verified == 'true'\n        run: npm publish\n`),
+    ).findings[0];
+    assert.equal(f.status, "ungoverned");
+    assert.equal(f.fix!.gate_step, undefined);
+    assert.match(f.fix!.change!, /gate_actions/);
+  });
+});

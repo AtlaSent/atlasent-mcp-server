@@ -9,6 +9,9 @@
   says whether an AtlaSent gate stands in front of it: `bound`, `gated`,
   `gated_upstream`, `weak` or `ungoverned`. Runs offline in local mode, with
   no account, and reports what it cannot see rather than implying a clean bill.
+- Each gap comes with a concrete fix: the gate step to insert, the `if:` that
+  binds the step to the verified permit, and the change an existing gate needs.
+  Applying it turns the step `bound` on the next run.
 
 ## v2.16.0 — 2026-09-27
 
