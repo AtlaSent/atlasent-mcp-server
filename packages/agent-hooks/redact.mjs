@@ -10,6 +10,8 @@ export const MASK = '[REDACTED]';
 // "PGPASSWORD="); the rest of the match is masked.
 const PATTERNS = [
   /(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  // A key cut off before its END marker (a truncated or partial paste) is masked to the end.
+  /(-----BEGIN [A-Z ]*PRIVATE KEY-----)(?!\[REDACTED\])(?![\s\S]*-----END [A-Z ]*PRIVATE KEY-----)[\s\S]+$/g,
   /(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi,
   /(\bBasic\s+)[A-Za-z0-9+/=]{8,}/g,
   /()\bask_(?:live|test)_[A-Za-z0-9_-]{6,}/g,
@@ -21,7 +23,7 @@ const PATTERNS = [
   /()\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
   /(:\/\/[^\s:@/]+:)[^\s@/]+(?=@)/g,
   /(\b[A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY)[A-Z0-9_]*\s*=\s*)("[^"]*"|'[^']*'|[^\s;&|]+)/g,
-  /(--(?:password|passwd|token|secret|api-key|apikey)(?:=|\s+))("[^"]*"|'[^']*'|[^\s]+)/gi,
+  /(--[a-z0-9-]*?(?:password|passwd|token|secret|api-?key|access-?key|private-?key|credentials?)(?:=|\s+))("[^"]*"|'[^']*'|[^\s]+)/gi,
   /((?:^|\s)-p)(?!\s)([^\s]+)/g,
 ];
 
