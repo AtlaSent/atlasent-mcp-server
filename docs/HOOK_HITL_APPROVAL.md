@@ -20,7 +20,7 @@ account. The limit is one the user just ran into, and connecting removes it.
 
 1. **Fail closed.** A network error, timeout, malformed response, unknown
    decision or missing permit leads to deny, exactly as today. Nothing in this
-   design can turn a local deny into an allow unless a person has approved.
+   design can turn a local deny into an allow unless the runtime has established the approval/authority required by the governing policy.
 2. **One approval, one command.** A permit is single-use and bound to the
    SHA-256 of the full command text. If the agent changes the command, it gets
    a new request and not the old permit.
@@ -92,7 +92,7 @@ setup. The retry path works without it.
 | `context.session_mode` | `unattended` |
 | `resource_id` / `context.target_id` | the rule id plus repo (see "Target binding" in `CLAUDE.md`) |
 
-**Redaction happens before sending and is tested:** bearer tokens, `ask_*`,
+**Founder decision:** the redacted preview is allowed by default in connected mode, with a per-repo/configuration opt-out that sends only the bound hash and non-sensitive metadata. Raw command text is never sent.\n\n**Redaction happens before sending and is tested:** bearer tokens, `ask_*`,
 `sk-*`, AWS keys, `PGPASSWORD=`, URL userinfo, and `--password`/`-p` values.
 If redaction fails, the hook denies and sends nothing. The local audit log
 keeps storing only the hash.
