@@ -17,7 +17,8 @@ else runs exactly as before.
     mutation such as volumeDelete) [http.delete]. A person must approve this before it runs.
 ```
 
-Local. No account, no network, no dependencies. Apache-2.0 licensed.
+Local by default: no account, no network, no dependencies. Apache-2.0 licensed.
+(An optional connected mode, below, sends held actions to Atlasent only after you add a key.)
 
 ## Install (30 seconds)
 
@@ -68,6 +69,38 @@ To see what it would do with any command, from a checkout of this repository:
 If Claude Code runs with `--dangerously-skip-permissions` (`bypassPermissions`) or
 `dontAsk`, there is no one to answer a prompt. In those modes every "ask" becomes a
 **deny**. Unattended agents are exactly where the incidents happen.
+
+### Optional: wait for a person instead of stopping
+
+With an Atlasent account, an unattended "ask" goes to your organization's policy instead
+of being refused on the spot. By default a person decides in the Atlasent console (and in
+Slack if it's connected), and the agent carries on once they approve.
+
+```sh
+atlasent-hooks connect                                        # shows how to get an agent key
+atlasent-hooks connect --environment production < key.txt     # saves it (0600), key via stdin
+```
+
+How it works:
+
+1. The guard sends the held action to Atlasent: the tool, a **redacted** preview, and a
+   SHA-256 of the whole action (tool name plus complete input). Tokens, passwords, keys
+   and URL credentials are masked before anything leaves your machine. If redaction
+   fails, nothing is sent and the action is blocked. To send only the hash and metadata,
+   set `"connected": { "preview": "off" }`. A repository config may turn the preview off,
+   but only your own config picks the environment.
+2. The agent is told the action is held and to run exactly the same action again later.
+3. A person approves once, or denies with a note the agent reads on its next try.
+4. On the re-run, the guard claims a single-use permit and verifies it here, bound to that
+   exact action, repository, environment and agent. A changed action is a new request.
+
+Every failure blocks: network errors, timeouts, unexpected answers, a permit that
+doesn't verify. The guard never turns "unattended" into permission on its own. Whether a
+person is needed is decided by your organization's policy in Atlasent. When the permit
+verifies, the guard steps aside and Claude Code's own permission settings still apply.
+
+Without a key, nothing changes and nothing is sent. The first unattended block in a
+session adds one line saying connected mode exists (`ATLASENT_HOOKS_NUDGE=off` removes it).
 
 ## Configure
 
