@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { classify, decisionOf } from './rules.mjs';
-import { loadPolicy, configPaths } from './policy.mjs';
+import { loadPolicy, configPaths, ENVIRONMENT_NAME } from './policy.mjs';
 import { loadCredentials, connectedDecision } from './connected.mjs';
 
 const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -108,9 +108,22 @@ export async function decide({ host, input, env = process.env, now = () => new D
   if (!creds) {
     return nudgeOnce(home, input.session_id, env, now) ? { ...d, reason: `${d.reason} ${NUDGE}` } : d;
   }
+  // Environment: the user's own hooks.json first, then the plugin's `environment`
+  // setting (user-owned, exported as CLAUDE_PLUGIN_OPTION_ENVIRONMENT). Never a
+  // repository config: see mergePolicies.
+  const config = { ...(policy.connected ?? {}) };
+  if (config.environment === undefined) {
+    const fromPlugin = typeof env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT === 'string' ? env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT.trim() : '';
+    if (fromPlugin !== '') {
+      if (!ENVIRONMENT_NAME.test(fromPlugin)) {
+        return { effect: 'deny', rule: rule.id, reason: `${d.reason} The plugin's Atlasent environment setting is not a short lowercase name such as "production", so connected approval is unavailable and nothing was sent.` };
+      }
+      config.environment = fromPlugin;
+    }
+  }
   let r;
   try {
-    r = await connectedDecision({ input, rule, config: policy.connected ?? {}, creds, home, fetchImpl, now });
+    r = await connectedDecision({ input, rule, config, creds, home, fetchImpl, now });
   } catch (e) {
     r = { effect: 'deny', outcome: 'error', reason: `${d.reason} Connected approval failed (${String(e?.message ?? e).slice(0, 120)}).` };
   }

@@ -76,6 +76,10 @@ With an Atlasent account, an unattended "ask" goes to your organization's policy
 of being refused on the spot. By default a person decides in the Atlasent console (and in
 Slack if it's connected), and the agent carries on once they approve.
 
+Installed as a plugin: enter an agent key in the plugin's **Atlasent agent API key**
+setting (Claude Code asks for it when you enable the plugin, and stores it securely).
+Leave it blank to stay local. With the npm CLI instead:
+
 ```sh
 atlasent-hooks connect                                        # shows how to get an agent key
 atlasent-hooks connect --environment production < key.txt     # saves it (0600), key via stdin

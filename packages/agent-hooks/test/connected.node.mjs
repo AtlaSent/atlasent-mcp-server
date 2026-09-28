@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { decide, NUDGE, evaluate } from '../hook.mjs';
 import { canonicalJson } from '../jcs.mjs';
 import { redactedPreview, assertNoSecrets, MASK } from '../redact.mjs';
-import { actionDigest, repoIdentity } from '../connected.mjs';
+import { actionDigest, repoIdentity, loadCredentials } from '../connected.mjs';
 import { mergePolicies, validatePolicy } from '../policy.mjs';
 
 const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
@@ -478,6 +478,76 @@ test('CLI end to end: hold, approve, re-run allows; pending file is private', as
   } finally {
     server.close();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Plugin settings (userConfig): Claude Code exports them as CLAUDE_PLUGIN_OPTION_*
+// ---------------------------------------------------------------------------
+
+const withAuth = rt => {
+  const auth = [];
+  return { auth, fetchImpl: async (url, init) => { auth.push(init.headers?.authorization ?? init.headers?.Authorization); return rt.fetchImpl(url, init); } };
+};
+
+test('plugin api_key setting connects with no other credential, and is the key sent', async () => {
+  const s = setup({ key: null }); const rt = fakeRuntime(); const w = withAuth(rt);
+  s.env.CLAUDE_PLUGIN_OPTION_API_KEY = 'ask_test_fromplugin1';
+  const r = await decide({ host: 'claude-code', input: unattended(s.cwd), env: s.env, fetchImpl: w.fetchImpl });
+  assert.equal(r.effect, 'deny');
+  assert.ok(idOf(r.reason), r.reason);
+  assert.ok(rt.calls.length > 0);
+  assert.ok(w.auth.every(a => a === 'Bearer ask_test_fromplugin1'), JSON.stringify(w.auth));
+});
+
+test('a blank plugin api_key setting counts as unset: local guard, nothing sent', async () => {
+  const s = setup({ key: null }); const rt = fakeRuntime();
+  s.env.CLAUDE_PLUGIN_OPTION_API_KEY = '   ';
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.equal(rt.calls.length, 0);
+});
+
+test('plugin environment setting supplies connected.environment when the user file has none', async () => {
+  const s = setup({ environment: null }); const rt = fakeRuntime();
+  s.env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT = 'staging';
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.ok(idOf(r.reason), r.reason);
+  const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate'));
+  assert.equal(ev.body.context.environment, 'staging');
+});
+
+test("the user's own hooks.json environment wins over the plugin setting", async () => {
+  const s = setup({ environment: 'production' }); const rt = fakeRuntime();
+  s.env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT = 'staging';
+  await run(s, rt, unattended(s.cwd));
+  const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate'));
+  assert.equal(ev.body.context.environment, 'production');
+});
+
+test('an invalid plugin environment setting blocks and sends nothing', async () => {
+  const s = setup({ environment: null }); const rt = fakeRuntime();
+  s.env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT = 'Prod Env!';
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /environment setting/);
+  assert.equal(rt.calls.length, 0);
+});
+
+test('a repository still cannot choose the environment when the plugin setting is used', async () => {
+  const s = setup({ environment: null, project: { version: 1, connected: { environment: 'sandbox' } } }); const rt = fakeRuntime();
+  s.env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT = 'production';
+  await run(s, rt, unattended(s.cwd));
+  const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate'));
+  assert.equal(ev.body.context.environment, 'production');
+});
+
+test("a key from the plugin or env never goes to credentials.json's base_url; the file's own key still does", () => {
+  const home = mkdtempSync(join(tmpdir(), 'ah-cred-'));
+  writeFileSync(join(home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1', base_url: 'https://legacy.example/functions/v1' }));
+  assert.deepEqual(loadCredentials(home, {}), { apiKey: 'ask_live_filekey1', baseUrl: 'https://legacy.example/functions/v1' });
+  assert.deepEqual(loadCredentials(home, { CLAUDE_PLUGIN_OPTION_API_KEY: 'ask_live_plugin1' }), { apiKey: 'ask_live_plugin1', baseUrl: 'https://api.atlasent.io/functions/v1' });
+  assert.equal(loadCredentials(home, { ATLASENT_HOOKS_API_KEY: 'ask_live_env1' }).baseUrl, 'https://api.atlasent.io/functions/v1');
+  assert.equal(loadCredentials(home, { CLAUDE_PLUGIN_OPTION_API_KEY: 'ask_live_plugin1', ATLASENT_HOOKS_BASE_URL: 'https://rt.example/functions/v1' }).baseUrl, 'https://rt.example/functions/v1');
 });
 
 // Stop conditions: the agent must be able to tell "wait for a person" from "no".
