@@ -419,11 +419,25 @@ function stripExpr(cond: string): string {
  * failure means the step can run without a verified permit.
  */
 function requiresVerified(cond: string, id: string): boolean {
+  return positiveVerifiedRefs(cond).some((r) => r.kind === "steps" && r.id === id);
+}
+
+/**
+ * The `steps.<id>` / `needs.<job>` verified outputs a condition positively
+ * requires: `<ref>.outputs.verified == 'true'` alone or ANDed with other terms.
+ * Any `||`, negation, other comparison or always()/failure()/cancelled() in
+ * the condition means nothing is required, so the result is empty.
+ */
+function positiveVerifiedRefs(cond: string): Array<{ kind: "steps" | "needs"; id: string }> {
   const c = stripExpr(cond);
-  if (c.includes("||") || runsAfterFailure(c)) return false;
-  const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const positive = new RegExp(`^\\(?\\s*steps\\.${esc}\\.outputs\\.verified\\s*==\\s*(['"])true\\1\\s*\\)?$`);
-  return c.split("&&").some((part) => positive.test(part.trim()));
+  if (c === "" || c.includes("||") || runsAfterFailure(c)) return [];
+  const positive = /^\(?\s*(steps|needs)\.([\w-]+)\.outputs\.verified\s*==\s*(['"])true\3\s*\)?$/;
+  const refs: Array<{ kind: "steps" | "needs"; id: string }> = [];
+  for (const part of c.split("&&")) {
+    const m = positive.exec(part.trim());
+    if (m) refs.push({ kind: m[1] as "steps" | "needs", id: m[2] });
+  }
+  return refs;
 }
 
 const GATE_SCRIPT = /(?:^|[\s/])([\w.-]*(?:atlasent|permit|deploy|release)[-_]gate[\w.-]*\.(?:sh|bash|py|js|mjs|cjs|ts))\b/gi;
@@ -504,6 +518,25 @@ export interface Finding {
   confidence: "certain" | "possible";
   status: GapStatus;
   reason: string;
+  /** Present on gaps (ungoverned / weak): the concrete change for this step. */
+  fix?: Fix;
+}
+
+export interface Fix {
+  /** atlasent-action `action:` for this kind of step. */
+  action_type: string;
+  /** Step to insert before this one (ungoverned), as YAML. */
+  gate_step?: string;
+  /**
+   * Condition to put on this step so it runs only on a verified permit.
+   * Absent when the existing condition cannot be rewritten safely (see note).
+   */
+  bind_if?: string;
+  /** What to change on an existing gate that cannot stop the step (weak). */
+  change?: string;
+  /** The job needs these permissions for a verified workload actor. */
+  job_permissions?: string;
+  note?: string;
 }
 
 export interface WorkflowInput {
@@ -525,6 +558,12 @@ export interface EvidenceGapReport {
   parse_errors: Array<{ workflow: string; line: number; error: string }>;
   not_checked: string[];
   next_step: string;
+  /** Present when there are gaps: how to get the key the gate steps need. */
+  setup?: {
+    sign_up_url: string;
+    steps: string[];
+    docs: string;
+  };
 }
 
 const NOT_CHECKED = [
@@ -545,6 +584,157 @@ function triggerNames(on: YValue | undefined): string[] {
   if (Array.isArray(on)) return on.filter((x): x is string => typeof x === "string");
   if (on && typeof on === "object") return Object.keys(on);
   return [];
+}
+
+// ---------------------------------------------------------------------------
+// The concrete next action for a gap
+// ---------------------------------------------------------------------------
+
+export const SIGN_UP_URL = "https://console.atlasent.io/auth/sign-up?utm_source=evidence-gap&utm_medium=mcp";
+const ACTION_DOCS = "https://github.com/Atlasent/atlasent-action#quick-start";
+const GATE_ID = "atlasent_gate";
+
+/**
+ * atlasent-action accepts only its GATE_PERMITTED_ACTIONS. database.migrate is
+ * a Canon action it does not accept yet, so a migration is gated as a
+ * production deploy and the fix says so.
+ */
+function actionTypeFor(category: Category): { action: string; note?: string } {
+  switch (category) {
+    case "publish":
+      return { action: "package.release" };
+    case "infrastructure":
+      return { action: "infrastructure.change" };
+    case "migrate":
+      return {
+        action: "production.deploy",
+        note: "The Canon action for a migration is database.migrate, which atlasent-action does not accept yet; gate it as production.deploy.",
+      };
+    default:
+      return { action: "production.deploy" };
+  }
+}
+
+function gateStepYaml(action: string, id: string): string {
+  return [
+    "- name: Atlasent gate",
+    `  id: ${id}`,
+    "  uses: Atlasent/atlasent-action@v1",
+    "  env:",
+    "    ATLASENT_API_KEY: ${{ secrets.ATLASENT_API_KEY }}",
+    "    ATLASENT_BASE_URL: ${{ secrets.ATLASENT_BASE_URL }}",
+    "  with:",
+    `    action: ${action}`,
+    "    environment: production",
+    "    target-id: ${{ github.repository }}",
+  ].join("\n");
+}
+
+/**
+ * The condition that runs the step only on a verified permit, keeping every
+ * other term of its existing condition. always(), !cancelled() and success()
+ * terms are dropped (they only widen when the step runs). Returns null when
+ * that cannot be done safely: a failure()/cancelled() handler, or a status
+ * function inside an `||`, whose meaning a rewrite would change.
+ */
+function bindIf(gateId: string, existingIf: string): string | null {
+  const verified = `steps.${gateId}.outputs.verified == 'true'`;
+  const cur = stripExpr(existingIf);
+  if (cur === "") return `if: ${verified}`;
+  if (!runsAfterFailure(cur)) return `if: \${{ (${cur}) && ${verified} }}`;
+  if (cur.includes("||")) return null;
+  const widening = /^\(?\s*(always\s*\(\s*\)|!\s*cancelled\s*\(\s*\)|success\s*\(\s*\))\s*\)?$/;
+  const kept = cur.split("&&").map((t) => t.trim()).filter((t) => t !== "" && !widening.test(t));
+  if (kept.some((t) => runsAfterFailure(t))) return null;
+  return kept.length === 0 ? `if: ${verified}` : `if: \${{ ${kept.map((t) => `(${t})`).join(" && ")} && ${verified} }}`;
+}
+
+/** A gate step id not used by any step in the job, nor by another fix for it. */
+function allocateGateId(used: Set<string>): string {
+  let id = GATE_ID;
+  for (let n = 2; used.has(id); n++) id = `${GATE_ID}_${n}`;
+  used.add(id);
+  return id;
+}
+
+function hasIdTokenWrite(perms: YValue | undefined): boolean {
+  if (typeof perms === "string") return /write-all/.test(perms);
+  return !!perms && typeof perms === "object" && !Array.isArray(perms) && (perms as YMap)["id-token"] === "write";
+}
+
+function fixFor(
+  status: GapStatus,
+  category: Category,
+  step: YMap,
+  job: YMap,
+  doc: YMap,
+  weakGate: GateInfo | undefined,
+  usedIds: Set<string>,
+): Fix | undefined {
+  if (status !== "ungoverned" && status !== "weak") return undefined;
+  const { action, note } = actionTypeFor(category);
+  const stepIf = typeof step.if === "string" ? step.if : "";
+  const needsIdToken = action === "production.deploy" || action === "infrastructure.change";
+  const perms = job.permissions !== undefined ? job.permissions : doc.permissions;
+  const job_permissions =
+    needsIdToken && !hasIdTokenWrite(perms)
+      ? "Add `permissions: { contents: read, id-token: write }` to this job: the gate mints a verified GitHub workload identity for this action type."
+      : undefined;
+  const notes: string[] = note ? [note] : [];
+  const withBinding = (gateId: string): Pick<Fix, "bind_if"> => {
+    const b = bindIf(gateId, stepIf);
+    if (b) {
+      if (runsAfterFailure(stripExpr(stepIf))) notes.push("always()/success()/!cancelled() dropped from the condition: with them the step still runs after a deny.");
+      return { bind_if: b };
+    }
+    notes.push(
+      `This step's condition uses failure()/cancelled() or an || that a rewrite would change. Edit it by hand so it requires steps.${gateId}.outputs.verified == 'true' and cannot run after a deny.`,
+    );
+    return {};
+  };
+  const tail = () => ({
+    ...(job_permissions ? { job_permissions } : {}),
+    ...(notes.length ? { note: notes.join(" ") } : {}),
+  });
+
+  // Already bound to a gate this report did not recognize (a wrapper action,
+  // or `uses: ./` inside atlasent-action itself). Only a positive binding
+  // counts: `!= 'true'`, a negation or an `||` is not one, and gets a gate.
+  const ref = positiveVerifiedRefs(stepIf)[0];
+  if (ref && status === "ungoverned") {
+    return {
+      action_type: action,
+      change:
+        `This step already requires ${ref.kind}.${ref.id}.outputs.verified == 'true', but no gate was recognized there. ` +
+        "If that is your gate, pass its `uses:` value in `gate_actions` and run the report again; if not, add a gate step in its place.",
+      ...tail(),
+    };
+  }
+  // Ungoverned, or weak because the only gate is in another job that cannot
+  // stop this one: a gate in THIS job, before the step, is the fix. It gets
+  // an id no step in the job uses, so several fixes in one job never collide.
+  if (status === "ungoverned" || !weakGate) {
+    const id = allocateGateId(usedIds);
+    return {
+      action_type: action,
+      gate_step: gateStepYaml(action, id),
+      ...withBinding(id),
+      ...(status === "weak"
+        ? { change: "The gate in the job this one needs cannot stop it (it can be skipped or continue on error, or this job runs after it fails). Add this gate in this job, before the step." }
+        : {}),
+      ...tail(),
+    };
+  }
+  const gateId = weakGate.id ?? GATE_ID;
+  if (!weakGate.id) notes.push("Give the gate step an `id:` so this step can reference its output.");
+  const change = weakGate.advisory
+    ? "Remove continue-on-error from the gate step, so a deny fails the job."
+    : weakGate.conditional
+      ? "Remove the gate step's own `if:` (for example a skip_gate input), so it cannot be skipped."
+      : weakGate.issuesOnly
+        ? "The gate only issues a permit (mode: evaluate-only). Add a step with `verify-permit: 'true'` before this one, or drop evaluate-only."
+        : "Bind this step to the gate's verified output.";
+  return { action_type: action, change, ...withBinding(gateId), ...tail() };
 }
 
 /**
@@ -620,6 +810,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
       const job = jobVal as YMap;
       const steps = stepsOf(job);
       const gates: GateInfo[] = [];
+      const usedIds = new Set(steps.map((st) => st.id).filter((x): x is string => typeof x === "string"));
       steps.forEach((s, i) => {
         const g = gateInfo(s, i, gateActions);
         if (g) gates.push(g);
@@ -632,6 +823,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
         const stepIf = typeof step.if === "string" ? step.if : "";
         let status: GapStatus;
         let reason: string;
+        let weakGate: GateInfo | undefined;
         const enforcing = earlier.filter(enforcingGate);
         const bound = enforcing.find((g) => g.id && requiresVerified(stepIf, g.id));
         const jobIf = typeof job.if === "string" ? job.if : "";
@@ -655,6 +847,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
           }
         } else if (earlier.length > 0) {
           const g = earlier[earlier.length - 1];
+          weakGate = g;
           status = "weak";
           reason = g.advisory
             ? "The gate step has continue-on-error, so a deny does not stop this step."
@@ -691,6 +884,10 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
           ...det,
           status,
           reason,
+          ...(() => {
+            const fix = fixFor(status, det.category, step, job, doc as YMap, weakGate, usedIds);
+            return fix ? { fix } : {};
+          })(),
         });
       });
     }
@@ -711,8 +908,9 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
         : "No deploy, publish, migrate or infrastructure steps were recognized in these files. That is not proof there are none.";
   } else if (gaps > 0) {
     next =
-      "Put an AtlaSent gate (github.com/Atlasent/atlasent-action) in front of each ungoverned or weak step, " +
-      "and bind the step with `if: steps.<gate-id>.outputs.verified == 'true'`.";
+      `${gaps} step${gaps === 1 ? "" : "s"} can change a real system without an approval gate that stops ` +
+      `${gaps === 1 ? "it" : "them"}. Each one's \`fix\` has the exact change. To apply it: create a free Atlasent ` +
+      `account and API key (${SIGN_UP_URL}), add it as the ATLASENT_API_KEY repository secret, then make each fix.`;
   } else {
     next = "Every recognized step has a gate in front of it. Bind 'gated' steps to the gate's verified output to close the remaining distance.";
   }
@@ -731,6 +929,20 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
     parse_errors: parseErrors,
     not_checked: NOT_CHECKED,
     next_step: next,
+    ...(gaps > 0
+      ? {
+          setup: {
+            sign_up_url: SIGN_UP_URL,
+            steps: [
+              "Create a free account and an API key at the sign-up URL.",
+              "Add the key as the repository secret ATLASENT_API_KEY (and ATLASENT_BASE_URL if you were given one).",
+              "For each finding with a `fix`: insert `gate_step` before the step, add `bind_if` to the step, and apply `change`/`job_permissions` where present.",
+              "Run the report again: fixed steps show as bound.",
+            ],
+            docs: ACTION_DOCS,
+          },
+        }
+      : {}),
   };
 }
 
