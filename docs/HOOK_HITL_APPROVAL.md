@@ -92,7 +92,9 @@ setup. The retry path works without it.
 | `context.session_mode` | `unattended` |
 | `resource_id` / `context.target_id` | the rule id plus repo (see "Target binding" in `CLAUDE.md`) |
 
-**Founder decision:** the redacted preview is allowed by default in connected mode, with a per-repo/configuration opt-out that sends only the bound hash and non-sensitive metadata. Raw command text is never sent.\n\n**Redaction happens before sending and is tested:** bearer tokens, `ask_*`,
+**Founder decision:** the redacted preview is allowed by default in connected mode, with a per-repo/configuration opt-out that sends only the bound hash and non-sensitive metadata. Raw command text is never sent.
+
+**Redaction happens before sending and is tested:** bearer tokens, `ask_*`,
 `sk-*`, AWS keys, `PGPASSWORD=`, URL userinfo, and `--password`/`-p` values.
 If redaction fails, the hook denies and sends nothing. The local audit log
 keeps storing only the hash.
@@ -173,8 +175,10 @@ sign-up (`utm_source=agent-hooks`) and saves a key restricted to
 1. The retry path only, or also recommend the MCP wait tool?
 2. `agent.tool.invoke` for every rule in the first version (recommended), or
    map deploys to `production.deploy`?
-3. Is sending a redacted command preview acceptable for the free/individual
-   tier, or should it be opt-in per repo?
+3. ~~Is sending a redacted command preview acceptable for the free/individual
+   tier, or should it be opt-in per repo?~~ **Decided 2026-09-28:** on by
+   default in connected mode, with a per-repo opt-out (see "What goes to the
+   runtime").
 4. Is Slack the only notification channel in the first version, or is phone
    push needed before launch?
 5. Where does the "Deny with a note" text live on the approval record: an
