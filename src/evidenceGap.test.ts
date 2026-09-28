@@ -359,7 +359,7 @@ jobs:
 
 describe("next action for a gap: a concrete fix, not sales copy", () => {
   /** Insert the fix's gate step before the flagged step and bind it, as a person would. */
-  function applyFix(src: string, stepLine: number, fix: { gate_step?: string; bind_if: string }): string {
+  function applyFix(src: string, stepLine: number, fix: { gate_step?: string; bind_if?: string }): string {
     const lines = src.split("\n");
     const idx = stepLine - 1;
     const indent = lines[idx].length - lines[idx].trimStart().length;
@@ -455,5 +455,69 @@ jobs:
     assert.equal(f.status, "ungoverned");
     assert.equal(f.fix!.gate_step, undefined);
     assert.match(f.fix!.change!, /gate_actions/);
+  });
+
+  it("keeps every other term when it drops always(), and declines when a rewrite would change meaning", () => {
+    const fix = (cond: string) =>
+      analyzeWorkflows(wf(`jobs:\n  d:\n    steps:\n      - if: ${cond}\n        run: npm publish\n`)).findings[0].fix!;
+    assert.equal(
+      fix("${{ always() && github.ref == 'refs/heads/main' }}").bind_if,
+      "if: ${{ (github.ref == 'refs/heads/main') && steps.atlasent_gate.outputs.verified == 'true' }}",
+    );
+    const handler = fix("failure()");
+    assert.equal(handler.bind_if, undefined, "a failure() handler is not rewritten");
+    assert.match(handler.note!, /by hand/);
+    assert.equal(fix("${{ always() || github.ref == 'refs/heads/main' }}").bind_if, undefined);
+  });
+
+  it("only a positive binding to an unrecognized gate suppresses the gate step", () => {
+    const fix = (cond: string) =>
+      analyzeWorkflows(wf(`jobs:\n  d:\n    steps:\n      - if: ${cond}\n        run: npm publish\n`)).findings[0].fix!;
+    assert.equal(fix("needs.g.outputs.verified == 'true'").gate_step, undefined);
+    for (const unsafe of [
+      "needs.g.outputs.verified != 'true'",
+      "${{ !steps.g.outputs.verified }}",
+      "needs.g.outputs.verified == 'true' || github.actor == 'x'",
+    ]) {
+      assert.ok(fix(unsafe).gate_step, unsafe);
+    }
+  });
+
+  it("a weak upstream gate gets a gate in this job, and applying it makes the step bound", () => {
+    const src = `
+jobs:
+  gate:
+    if: github.event_name == 'push'
+    steps:
+      - uses: Atlasent/atlasent-action@v1
+  ship:
+    needs: gate
+    steps:
+      - run: npm publish
+`;
+    const f = analyzeWorkflows(wf(src)).findings[0];
+    assert.equal(f.status, "weak");
+    assert.ok(f.fix!.gate_step);
+    const again = analyzeWorkflows(wf(applyFix(src, f.line, f.fix!)));
+    assert.equal(again.findings[0].status, "bound");
+  });
+
+  it("several gaps in one job get distinct gate ids that avoid existing step ids; applying all binds all", () => {
+    let src = `
+jobs:
+  d:
+    steps:
+      - id: atlasent_gate
+        run: echo unrelated
+      - run: npm publish
+      - run: docker push ghcr.io/x/y:1
+`;
+    const fixes = analyzeWorkflows(wf(src)).findings.map((f) => ({ line: f.line, fix: f.fix! }));
+    const ids = fixes.map((x) => /id: (\S+)/.exec(x.fix.gate_step!)![1]);
+    assert.deepEqual(ids, ["atlasent_gate_2", "atlasent_gate_3"]);
+    // Apply bottom-up so earlier line numbers stay valid.
+    for (const x of [...fixes].sort((a, b) => b.line - a.line)) src = applyFix(src, x.line, x.fix);
+    const again = analyzeWorkflows(wf(src));
+    assert.deepEqual(again.findings.map((f) => f.status), ["bound", "bound"]);
   });
 });

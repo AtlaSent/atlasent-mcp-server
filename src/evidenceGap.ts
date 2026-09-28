@@ -419,11 +419,25 @@ function stripExpr(cond: string): string {
  * failure means the step can run without a verified permit.
  */
 function requiresVerified(cond: string, id: string): boolean {
+  return positiveVerifiedRefs(cond).some((r) => r.kind === "steps" && r.id === id);
+}
+
+/**
+ * The `steps.<id>` / `needs.<job>` verified outputs a condition positively
+ * requires: `<ref>.outputs.verified == 'true'` alone or ANDed with other terms.
+ * Any `||`, negation, other comparison or always()/failure()/cancelled() in
+ * the condition means nothing is required, so the result is empty.
+ */
+function positiveVerifiedRefs(cond: string): Array<{ kind: "steps" | "needs"; id: string }> {
   const c = stripExpr(cond);
-  if (c.includes("||") || runsAfterFailure(c)) return false;
-  const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const positive = new RegExp(`^\\(?\\s*steps\\.${esc}\\.outputs\\.verified\\s*==\\s*(['"])true\\1\\s*\\)?$`);
-  return c.split("&&").some((part) => positive.test(part.trim()));
+  if (c === "" || c.includes("||") || runsAfterFailure(c)) return [];
+  const positive = /^\(?\s*(steps|needs)\.([\w-]+)\.outputs\.verified\s*==\s*(['"])true\3\s*\)?$/;
+  const refs: Array<{ kind: "steps" | "needs"; id: string }> = [];
+  for (const part of c.split("&&")) {
+    const m = positive.exec(part.trim());
+    if (m) refs.push({ kind: m[1] as "steps" | "needs", id: m[2] });
+  }
+  return refs;
 }
 
 const GATE_SCRIPT = /(?:^|[\s/])([\w.-]*(?:atlasent|permit|deploy|release)[-_]gate[\w.-]*\.(?:sh|bash|py|js|mjs|cjs|ts))\b/gi;
@@ -513,8 +527,11 @@ export interface Fix {
   action_type: string;
   /** Step to insert before this one (ungoverned), as YAML. */
   gate_step?: string;
-  /** Condition to put on this step so it runs only on a verified permit. */
-  bind_if: string;
+  /**
+   * Condition to put on this step so it runs only on a verified permit.
+   * Absent when the existing condition cannot be rewritten safely (see note).
+   */
+  bind_if?: string;
   /** What to change on an existing gate that cannot stop the step (weak). */
   change?: string;
   /** The job needs these permissions for a verified workload actor. */
@@ -598,10 +615,10 @@ function actionTypeFor(category: Category): { action: string; note?: string } {
   }
 }
 
-function gateStepYaml(action: string): string {
+function gateStepYaml(action: string, id: string): string {
   return [
     "- name: Atlasent gate",
-    `  id: ${GATE_ID}`,
+    `  id: ${id}`,
     "  uses: Atlasent/atlasent-action@v1",
     "  env:",
     "    ATLASENT_API_KEY: ${{ secrets.ATLASENT_API_KEY }}",
@@ -613,11 +630,31 @@ function gateStepYaml(action: string): string {
   ].join("\n");
 }
 
-function bindIf(gateId: string, existingIf: string): string {
+/**
+ * The condition that runs the step only on a verified permit, keeping every
+ * other term of its existing condition. always(), !cancelled() and success()
+ * terms are dropped (they only widen when the step runs). Returns null when
+ * that cannot be done safely: a failure()/cancelled() handler, or a status
+ * function inside an `||`, whose meaning a rewrite would change.
+ */
+function bindIf(gateId: string, existingIf: string): string | null {
   const verified = `steps.${gateId}.outputs.verified == 'true'`;
   const cur = stripExpr(existingIf);
-  if (cur === "" || runsAfterFailure(cur)) return `if: ${verified}`;
-  return `if: \${{ (${cur}) && ${verified} }}`;
+  if (cur === "") return `if: ${verified}`;
+  if (!runsAfterFailure(cur)) return `if: \${{ (${cur}) && ${verified} }}`;
+  if (cur.includes("||")) return null;
+  const widening = /^\(?\s*(always\s*\(\s*\)|!\s*cancelled\s*\(\s*\)|success\s*\(\s*\))\s*\)?$/;
+  const kept = cur.split("&&").map((t) => t.trim()).filter((t) => t !== "" && !widening.test(t));
+  if (kept.some((t) => runsAfterFailure(t))) return null;
+  return kept.length === 0 ? `if: ${verified}` : `if: \${{ ${kept.map((t) => `(${t})`).join(" && ")} && ${verified} }}`;
+}
+
+/** A gate step id not used by any step in the job, nor by another fix for it. */
+function allocateGateId(used: Set<string>): string {
+  let id = GATE_ID;
+  for (let n = 2; used.has(id); n++) id = `${GATE_ID}_${n}`;
+  used.add(id);
+  return id;
 }
 
 function hasIdTokenWrite(perms: YValue | undefined): boolean {
@@ -632,6 +669,7 @@ function fixFor(
   job: YMap,
   doc: YMap,
   weakGate: GateInfo | undefined,
+  usedIds: Set<string>,
 ): Fix | undefined {
   if (status !== "ungoverned" && status !== "weak") return undefined;
   const { action, note } = actionTypeFor(category);
@@ -642,47 +680,61 @@ function fixFor(
     needsIdToken && !hasIdTokenWrite(perms)
       ? "Add `permissions: { contents: read, id-token: write }` to this job: the gate mints a verified GitHub workload identity for this action type."
       : undefined;
-  const alwaysNote = runsAfterFailure(stripExpr(stepIf))
-    ? "Remove always()/failure()/cancelled() from this step's condition, or it still runs after a deny."
-    : undefined;
-  // The step may already be bound to a gate this report did not recognize
-  // (a wrapper action, or `uses: ./` inside atlasent-action itself).
-  const unrecognized = /\b(needs|steps)\.([\w-]+)\.outputs\.verified\b/.exec(stepIf);
-  if (unrecognized && status === "ungoverned") {
-    return {
-      action_type: action,
-      bind_if: `if: ${stepIf.trim()}`,
-      change:
-        `This step already checks ${unrecognized[1]}.${unrecognized[2]}.outputs.verified, but no gate was recognized there. ` +
-        "If that is your gate, pass its `uses:` value in `gate_actions` and run the report again; if not, add the gate step shown in the atlasent-action docs.",
-    };
-  }
-  if (status === "ungoverned") {
-    return {
-      action_type: action,
-      gate_step: gateStepYaml(action),
-      bind_if: bindIf(GATE_ID, stepIf),
-      ...(job_permissions ? { job_permissions } : {}),
-      ...(note || alwaysNote ? { note: [note, alwaysNote].filter(Boolean).join(" ") } : {}),
-    };
-  }
-  const gateId = weakGate?.id ?? GATE_ID;
-  const change = !weakGate
-    ? "The gate that should stop this step is in another job (or that job can be skipped). Put a gate in this job, before this step, or make the gate job always run and fail on a deny."
-    : weakGate.advisory
-      ? "Remove continue-on-error from the gate step, so a deny fails the job."
-      : weakGate.conditional
-        ? "Remove the gate step's own `if:` (for example a skip_gate input), so it cannot be skipped."
-        : weakGate.issuesOnly
-          ? "The gate only issues a permit (mode: evaluate-only). Add a step with `verify-permit: 'true'` before this one, or drop evaluate-only."
-          : alwaysNote ?? "Bind this step to the gate's verified output.";
-  return {
-    action_type: action,
-    bind_if: bindIf(gateId, stepIf),
-    change,
-    ...(!weakGate?.id && weakGate ? { note: "Give the gate step an `id:` so this step can reference its output." } : {}),
-    ...(job_permissions ? { job_permissions } : {}),
+  const notes: string[] = note ? [note] : [];
+  const withBinding = (gateId: string): Pick<Fix, "bind_if"> => {
+    const b = bindIf(gateId, stepIf);
+    if (b) {
+      if (runsAfterFailure(stripExpr(stepIf))) notes.push("always()/success()/!cancelled() dropped from the condition: with them the step still runs after a deny.");
+      return { bind_if: b };
+    }
+    notes.push(
+      `This step's condition uses failure()/cancelled() or an || that a rewrite would change. Edit it by hand so it requires steps.${gateId}.outputs.verified == 'true' and cannot run after a deny.`,
+    );
+    return {};
   };
+  const tail = () => ({
+    ...(job_permissions ? { job_permissions } : {}),
+    ...(notes.length ? { note: notes.join(" ") } : {}),
+  });
+
+  // Already bound to a gate this report did not recognize (a wrapper action,
+  // or `uses: ./` inside atlasent-action itself). Only a positive binding
+  // counts: `!= 'true'`, a negation or an `||` is not one, and gets a gate.
+  const ref = positiveVerifiedRefs(stepIf)[0];
+  if (ref && status === "ungoverned") {
+    return {
+      action_type: action,
+      change:
+        `This step already requires ${ref.kind}.${ref.id}.outputs.verified == 'true', but no gate was recognized there. ` +
+        "If that is your gate, pass its `uses:` value in `gate_actions` and run the report again; if not, add a gate step in its place.",
+      ...tail(),
+    };
+  }
+  // Ungoverned, or weak because the only gate is in another job that cannot
+  // stop this one: a gate in THIS job, before the step, is the fix. It gets
+  // an id no step in the job uses, so several fixes in one job never collide.
+  if (status === "ungoverned" || !weakGate) {
+    const id = allocateGateId(usedIds);
+    return {
+      action_type: action,
+      gate_step: gateStepYaml(action, id),
+      ...withBinding(id),
+      ...(status === "weak"
+        ? { change: "The gate in the job this one needs cannot stop it (it can be skipped or continue on error, or this job runs after it fails). Add this gate in this job, before the step." }
+        : {}),
+      ...tail(),
+    };
+  }
+  const gateId = weakGate.id ?? GATE_ID;
+  if (!weakGate.id) notes.push("Give the gate step an `id:` so this step can reference its output.");
+  const change = weakGate.advisory
+    ? "Remove continue-on-error from the gate step, so a deny fails the job."
+    : weakGate.conditional
+      ? "Remove the gate step's own `if:` (for example a skip_gate input), so it cannot be skipped."
+      : weakGate.issuesOnly
+        ? "The gate only issues a permit (mode: evaluate-only). Add a step with `verify-permit: 'true'` before this one, or drop evaluate-only."
+        : "Bind this step to the gate's verified output.";
+  return { action_type: action, change, ...withBinding(gateId), ...tail() };
 }
 
 /**
@@ -758,6 +810,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
       const job = jobVal as YMap;
       const steps = stepsOf(job);
       const gates: GateInfo[] = [];
+      const usedIds = new Set(steps.map((st) => st.id).filter((x): x is string => typeof x === "string"));
       steps.forEach((s, i) => {
         const g = gateInfo(s, i, gateActions);
         if (g) gates.push(g);
@@ -832,7 +885,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
           status,
           reason,
           ...(() => {
-            const fix = fixFor(status, det.category, step, job, doc as YMap, weakGate);
+            const fix = fixFor(status, det.category, step, job, doc as YMap, weakGate, usedIds);
             return fix ? { fix } : {};
           })(),
         });
