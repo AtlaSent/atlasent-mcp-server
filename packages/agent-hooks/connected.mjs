@@ -189,6 +189,8 @@ const noteOf = j => {
 
 // A deny is a policy decision, not a wait: retrying the same action gets the same answer.
 const DENY_HINT = 'This is a policy decision, not a wait for approval. Do not retry it unchanged; change the approach or ask the user.';
+// Needs a person, but no approval request was opened for it: route to the user, then re-run.
+const APPROVAL_NEEDED_HINT = 'It needs approval from a person in Atlasent. Stop and ask the user to get it approved; once they confirm, run exactly the same action again. Do not change the action to get around it.';
 const decisionIdOf = j => {
   for (const k of ['evaluation_id', 'decision_id', 'request_id']) {
     const v = j?.[k];
@@ -305,7 +307,10 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
     }
     if (d === 'allow') return deny('evaluate_failed', `Atlasent allowed this but returned no permit, so there is nothing to verify.${decisionRef} It was blocked.`);
     const code = typeof r.json.deny_code === 'string' ? ` (${r.json.deny_code})` : '';
-    return deny('denied', `Atlasent denied this${code}${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}.${decisionRef} ${DENY_HINT}`);
+    // INSUFFICIENT_APPROVALS is not a terminal refusal: a person's approval resolves it
+    // (src/engine.ts routes it via requires_human_approval). It is still blocked now.
+    const hint = r.json.deny_code === 'INSUFFICIENT_APPROVALS' ? APPROVAL_NEEDED_HINT : DENY_HINT;
+    return deny(r.json.deny_code === 'INSUFFICIENT_APPROVALS' ? 'needs_approval' : 'denied', `Atlasent denied this${code}${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}.${decisionRef} ${hint}`);
   } catch (e) {
     return deny('error', `Atlasent could not be reached or answered unexpectedly (${String(e?.message ?? e).slice(0, 160)}), so it was blocked.`);
   }

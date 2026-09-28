@@ -606,3 +606,13 @@ test('redaction masks credential CLI flags and over-long private keys', () => {
   assert.doesNotMatch(redactedPreview({ tool_name: 'Write', tool_input: { file_path: 'k', content: key } }), /QQQQ/);
   assert.doesNotMatch(redactedPreview({ tool_name: 'Write', tool_input: { file_path: 'k', content: '-----BEGIN PRIVATE KEY-----\n' + 'Q'.repeat(100) } }), /QQQQ/);
 });
+
+test('stop conditions: INSUFFICIENT_APPROVALS routes to a person rather than telling the agent to give up', async () => {
+  const s = setup();
+  const r = await run(s, fakeRuntime({ evaluate: () => ({ status: 200, json: { decision: 'deny', deny_code: 'INSUFFICIENT_APPROVALS', deny_reason: 'needs a person', evaluation_id: 'ev_12' } }) }), unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /needs approval from a person in Atlasent/);
+  assert.match(r.reason, /run exactly the same action again/);
+  assert.doesNotMatch(r.reason, /not a wait for approval/);
+  assert.ok(!existsSync(join(s.home, 'pending.json')), 'no approval request exists, so nothing is remembered');
+});
