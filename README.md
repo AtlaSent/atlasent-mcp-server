@@ -13,7 +13,7 @@ This MCP server brings it to AI agents (Claude, Cursor, Windsurf, any MCP host).
 
 1. **Connect it** to your agent with a few lines of config.
 2. **Risky actions wait** for a person to approve them. Everything else runs as normal.
-3. **Every action gets a signed receipt** your auditor can check, without trusting us.
+3. **Every action gets a signed record** of who approved it.
 
 Try it in 60 seconds with no account: `npx -y @atlasent/mcp-server` (local mode, a demo that protects nothing).
 
@@ -404,8 +404,7 @@ Keep these statements distinct:
    needs approval waits in the approval queue until someone approves it.
 
 Remote mode gives you what local mode cannot: Ed25519-signed, single-use permits,
-your organization's own policies, and a tamper-evident audit trail you can verify
-offline.
+your organization's own policies, and a tamper-evident audit trail.
 
 Remote example:
 
