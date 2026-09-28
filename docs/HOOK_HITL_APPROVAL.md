@@ -21,9 +21,10 @@ account. The limit is one the user just ran into, and connecting removes it.
 1. **Fail closed.** A network error, timeout, malformed response, unknown
    decision or missing permit leads to deny, exactly as today. Nothing in this
    design can turn a local deny into an allow unless the runtime has established the approval/authority required by the governing policy.
-2. **One approval, one command.** A permit is single-use and bound to the
-   SHA-256 of the full command text. If the agent changes the command, it gets
-   a new request and not the old permit.
+2. **One approval, one action.** A permit is single-use and bound to the
+   SHA-256 of the whole proposed action: the tool name and its complete input
+   (see "The exact action being approved"). If the agent changes anything, it
+   gets a new request and not the old permit.
 3. **Evaluation happens on the runtime, not the laptop.** The hook asks
    `v1-evaluate`. It never decides "approved" from local state.
 4. **Opt-in and local by default.** With no key configured, the guard behaves
@@ -38,7 +39,8 @@ Claude Code ──PreToolUse──▶ guard (hook, 10 s timeout)
                                │  rule = ask, session unattended, key configured
                                ▼
                          POST /v1-evaluate  (agent.tool.invoke,
-                               │             execution_payload_hash = sha256(command))
+                               │             execution_payload_hash = sha256(action),
+                               │             verified agent actor identity)
                                ▼
                            decision = hold ──▶ approval_request (runtime)
                                │                       │
@@ -48,10 +50,11 @@ Claude Code ──PreToolUse──▶ guard (hook, 10 s timeout)
                                                        │
                                         person: Approve once │ Deny with note
                                                        ▼
-Claude Code re-runs the SAME command ─▶ guard finds pending <id> for this hash
+Claude Code re-runs the SAME action ─▶ guard finds pending <id> for this hash
                                │  GET status ─▶ approved
                                │  POST /v1/approvals/<id>/claim-permit
-                               │  POST /v1-verify-permit (presents payload hash)
+                               │  POST /v1-verify-permit (presents payload hash
+                               │                          + target_id)
                                ▼
                          verified ─▶ allow, once.
                          denied  ─▶ deny, with the approver's note as the reason
@@ -69,28 +72,64 @@ away with a reason Claude reads:
 > again.
 
 The pending request is stored in `~/.atlasent/pending.json` (mode `0600`),
-keyed by command hash. When the same command is run again, the hook makes one
+keyed by the action hash (defined below). When the same command is run again, the hook makes one
 fast status check. Nothing is cached as "approved". The runtime's permit is
 the only proof.
 
-Open question: should the hook also offer a small MCP tool
-(`atlasent_await_approval` already exists in this repo), so the agent can
-wait in one call instead of retrying? That's better for agents but adds
-setup. The retry path works without it.
+Whether to also point agents at the MCP wait tool (`atlasent_await_approval`)
+is decision 1 below.
 
 ## What goes to the runtime
 
 `POST /v1-evaluate`, `action_type: "agent.tool.invoke"`:
 
+### The exact action being approved
+
+Guarded calls are not all shell commands. MCP tools, `Write` and `Edit` carry
+a tool name and structured input. The hook therefore binds the **whole
+proposed action**, not a command string:
+
+```
+action = canonical_json({ "tool_name": <tool_name>, "tool_input": <tool_input> })
+digest = sha256(action)   // bare lowercase hex
+```
+
+`canonical_json` is RFC 8785 (JCS): keys sorted at every depth, no
+whitespace. `tool_name` and `tool_input` are exactly what Claude Code puts in
+the PreToolUse payload. For `Bash` this is `{command, description?, …}`; for
+an MCP tool it is the tool's full argument object; for `Write` it includes the
+file path and full content. Two actions that differ in any argument get
+different digests. The pending store, the retry match and the permit binding
+all use this one digest. The preview is derived from the same object.
+
+`POST /v1-evaluate`, `action_type: "agent.tool.invoke"`:
+
 | Field | Value |
 |---|---|
-| `execution_payload_hash` (top level, bare 64-hex) | `sha256(full command text)`, per the AC-5 rules in `CLAUDE.md` |
-| `context.tool` | `Bash`, `mcp__…`, etc. |
+| `execution_payload_hash` (top level, bare 64-hex) | `digest` above, per the AC-5 rules in `CLAUDE.md` |
+| `actor_identity` (top level) | the agent's verified identity, minted through `/v1-agent-actor-identity` (see below) |
+| `context.tool` | `tool_name`, e.g. `Bash` or `mcp__…`. Required input for this class |
+| `context.environment` | from connected config (`~/.atlasent/hooks.json` → `connected.environment`, overridable per repo). Required input for this class. If it isn't set, the hook denies locally and sends nothing |
 | `context.rule` | the guard rule id, e.g. `deploy.release` |
-| `context.command_preview` | the command with secrets redacted, max 2 KB |
+| `context.action_preview` | `action` with secrets redacted, max 2 KB (omitted under the per-repo opt-out) |
 | `context.repo` | git remote URL if there is one; otherwise a hash of the cwd |
 | `context.session_mode` | `unattended` |
-| `resource_id` / `context.target_id` | the rule id plus repo (see "Target binding" in `CLAUDE.md`) |
+| `resource_id` (top level) | `target_id` = `<rule id>@<repo>` |
+| `context.target_id` | the same `target_id` |
+| `context.target` | `{ "id": target_id }` |
+
+All three target placements are required, because each is read by a
+different runtime check (see "Target binding" in `CLAUDE.md`). At
+`/v1-verify-permit` the hook presents the same `target_id` together with
+`payload_hash = digest`. Leaving out either one skips that check.
+
+**Verified actor.** `agent.tool.invoke` has `requires_verified_actor: true`.
+A self-declared `actor_id` is not enough, so the hook mints the agent's own
+`actor_identity.v1` through `/v1-agent-actor-identity`, as
+`mintAgentActorIdentity` in `src/engine.ts` already does. That endpoint signs
+only for an API key bound to a registered agent (CROSS-056), so
+`atlasent-hooks connect` must register the local agent and issue a key bound
+to it. If minting fails, the hook denies and does not evaluate.
 
 **Founder decision:** the redacted preview is allowed by default in connected mode, with a per-repo/configuration opt-out that sends only the bound hash and non-sensitive metadata. Raw command text is never sent.
 
@@ -99,11 +138,9 @@ setup. The retry path works without it.
 If redaction fails, the hook denies and sends nothing. The local audit log
 keeps storing only the hash.
 
-Open question: `agent.tool.invoke` is the right general class. Should
-`deploy.release` instead map to `production.deploy`? That type is a mandatory
-change-control type and needs a `change_plan` plus a verified actor, which a
-laptop command usually can't supply. The first version uses
-`agent.tool.invoke` for every rule.
+Why `agent.tool.invoke` rather than `production.deploy` for deploys (decision
+2 below): `production.deploy` is a mandatory change-control type and needs a
+`change_plan`, which a laptop command usually can't supply.
 
 ## What the person can do in the console
 
@@ -116,7 +153,7 @@ type:
   session.
 - **Why it's held:** "Unattended agent run; guard rule `deploy.release`".
 - **Actions:**
-  - **Approve once** — mints a single-use permit bound to this command's hash.
+  - **Approve once** — mints a single-use permit bound to this action's digest.
   - **Deny with a note** — the note becomes the deny reason the agent reads
     on its next retry (for example, "use `--dry-run` first" or "not on
     Friday"). This is how a person *relieves the problem* without approving
@@ -151,38 +188,59 @@ configured**, the deny reason includes one line, once per session:
 
 The line never appears in an attended "ask" prompt, and
 `ATLASENT_HOOKS_NUDGE=off` turns it off. `atlasent-hooks connect` opens
-sign-up (`utm_source=agent-hooks`) and saves a key restricted to
-`evaluate:write` + `verify:execute` in `~/.atlasent/credentials` (`0600`).
+sign-up (`utm_source=agent-hooks`), registers the local agent, and saves a
+key bound to that agent in `~/.atlasent/credentials` (`0600`). The key's scopes
+are exactly what the flow uses: `evaluate:write` (the hold),
+`approvals:read` (status poll and `claim-permit`; without it every retry
+returns 403, as `awaitApproval` in `src/engine.ts` already reports), and
+`verify:execute` (the boundary check).
 
 ## Tests the change must ship with
 
 - A network error, timeout, 5xx, malformed body or unknown decision leads to
   deny, and nothing is written to `pending.json`.
-- A changed command after approval gets a new request, and the old permit is
-  not used.
+- A changed action after approval gets a new request, and the old permit is
+  not used. This covers a changed `Bash` command, a changed MCP argument, and a
+  changed `Write` content with the same path.
+- Digest stability: the same `tool_input` with its keys in a different order
+  produces the same digest.
+- Missing `connected.environment`, or a failed actor-identity mint, leads to a
+  local deny with nothing evaluated.
+- Evaluate carries all three target placements, and verify presents the same
+  `target_id` and `payload_hash`. Assert this on the wire body, not on a
+  helper's arguments.
 - A second run of the same command after one successful allow is denied
   (single use).
 - A redaction fixture for each secret shape, plus "redaction throws" leading
   to deny with nothing sent.
-- With no key configured, the output is byte-identical to today (regression
-  pin).
+- With no key configured **and the nudge not shown** (`ATLASENT_HOOKS_NUDGE=off`,
+  or already shown this session, or an attended session), the output is
+  byte-identical to today (regression pin). When the nudge is shown, the
+  decision and every field other than the reason text are identical to today,
+  and the reason is today's reason plus exactly the nudge line.
 - The deny-with-note text reaches the agent.
 - With the key missing, the nudge appears once per session and never in
   attended mode.
 
-## Open decisions (founder)
+## Decisions
 
-1. The retry path only, or also recommend the MCP wait tool?
-2. `agent.tool.invoke` for every rule in the first version (recommended), or
-   map deploys to `production.deploy`?
+Decided items are recorded as decided. Open items carry the default this
+document is written against, so no slice has to guess. A slice must not start
+on an open item's default without the founder confirming it.
+
+1. **Open. Default: the retry path only.** Recommending the MCP wait tool
+   (`atlasent_await_approval`) comes later.
+2. **Open. Default: `agent.tool.invoke` for every rule.** Mapping deploys to
+   `production.deploy` is out of scope for the first version.
 3. ~~Is sending a redacted command preview acceptable for the free/individual
    tier, or should it be opt-in per repo?~~ **Decided 2026-09-28:** on by
    default in connected mode, with a per-repo opt-out (see "What goes to the
    runtime").
-4. Is Slack the only notification channel in the first version, or is phone
-   push needed before launch?
-5. Where does the "Deny with a note" text live on the approval record: an
-   existing field, or an additive column in `atlasent-api`?
+4. **Open. Default: Slack only in the first version** (as in "What the
+   person can do"). Phone push comes later.
+5. **Open. No default.** Does the deny note live in an existing field on the
+   approval record, or an additive column in `atlasent-api`? Slice 2 is
+   blocked on this.
 
 ## Slices
 
