@@ -148,7 +148,10 @@ export function pendingStore(home, now) {
     const all = readJson(path);
     const t = now().getTime();
     for (const [k, v] of Object.entries(all)) {
-      const ok = object(v) && typeof v.request_id === 'string' && UUID_RE.test(v.request_id) &&
+      // Entries written before 0.2.6 carry only { approval_request_id, created_at }; keep
+      // them so an upgrade does not orphan an approval a person already granted.
+      const legacyHeld = object(v) && v.request_id === undefined && typeof v.approval_request_id === 'string' && v.approval_request_id;
+      const ok = object(v) && ((typeof v.request_id === 'string' && UUID_RE.test(v.request_id)) || legacyHeld) &&
         (v.approval_request_id === undefined || typeof v.approval_request_id === 'string') &&
         (v.binding === undefined || BINDINGS.has(v.binding)) &&
         t - Date.parse(v.created_at) < PENDING_TTL_MS;
@@ -329,6 +332,8 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       }
       // Approved. Claim exactly once; whatever happens next, this pointer is spent.
       pending.del(digest);
+      // No recorded binding: a pre-0.2.6 entry, which was always bound to the digest.
+      if (held.binding === undefined) held.binding = 'digest';
       if (!BINDINGS.has(held.binding)) return deny('approval_unbound', `Approval ${id} has no recorded action binding here, so its permit cannot be checked. Run the action again to ask afresh.`);
       if (polled.json.action_type !== undefined && polled.json.action_type !== ACTION_TYPE) return deny('approval_mismatch', `Approval ${id} is for a different action type, so it was not used.`);
       const assertion = checkedAssertion(await api.mintIdentity(environment), environment);
@@ -378,6 +383,8 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       pending.del(digest);
       return deny('evaluate_failed', `AtlaSent already recorded an earlier try of this request (${httpFailure(r)}). It was blocked. Run exactly the same action again.`);
     }
+    // A 200 is a recorded evaluation: never re-present its request_id.
+    if (r.status === 200 && !r.json) pending.del(digest);
     // Not a decision: keep the attempt, so re-running presents the same request_id.
     if (r.status !== 200 || !r.json) return deny('evaluate_failed', `AtlaSent could not evaluate this (${httpFailure(r)}). It was blocked.`);
     const d = r.json.decision;
@@ -397,6 +404,7 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       return deny('held_unrecorded', `AtlaSent held this for approval, but no approval request was recorded, so there is nothing for a person to approve.${decisionRef} It was blocked. Do not retry it automatically; tell the user.`);
     }
     if (d !== 'allow' && d !== 'deny') {
+      pending.del(digest);
       return deny('evaluate_failed', `AtlaSent answered with an unrecognized decision${typeof d === 'string' ? ` ("${d.slice(0, 40)}")` : ''}.${decisionRef} It was blocked.`);
     }
     if (d === 'allow' && typeof r.json.permit_token === 'string' && r.json.permit_token) {

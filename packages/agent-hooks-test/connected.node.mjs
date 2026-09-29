@@ -897,3 +897,21 @@ test('a pending entry whose binding was tampered to "digest" still cannot verify
   assert.equal(r.effect, 'deny');
   assert.match(r.reason, /PAYLOAD_MISMATCH/);
 });
+
+test('an unrecognized or unreadable 200 answer spends the attempt (Codex P2)', async () => {
+  for (const evaluate of [() => ({ status: 200, json: { decision: 'maybe' } }), () => ({ status: 200, raw: 'not json' })]) {
+    const s = setup(); const rt = fakeRuntime({ evaluate });
+    assert.equal((await run(s, rt, unattended(s.cwd))).effect, 'deny');
+    assert.deepEqual(pendingEntries(s.home), {});
+  }
+});
+
+test('a pre-0.2.6 pending approval survives the upgrade and is claimed (Codex P2)', async () => {
+  const s = setup(); const rt = fakeRuntime({ noProvenanceControl: true });
+  await run(s, rt, unattended(s.cwd)); rt.approve('apr_1');
+  const f = join(s.home, 'pending.json'); const p = JSON.parse(readFileSync(f, 'utf8'));
+  for (const e of Object.values(p)) { delete e.request_id; delete e.binding; }
+  writeFileSync(f, JSON.stringify(p));
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'allow', r.reason);
+});
