@@ -320,8 +320,8 @@ need any of the following:
 
 | Stage | Status | Concrete deliverable | Exit criteria (all must hold) |
 |---|---|---|---|
-| **D1** Hook, connected mode | **Source-complete** (`cc308c6`); one runtime blocker found, fix proposed (see below) | `packages/agent-hooks/connected.mjs` + `redact.mjs` + `jcs.mjs`, `atlasent-hooks connect`, 52 tests | ✅ 52/52 hook tests pass, mutation-checked. ✅ Every error, timeout or malformed answer denies, and the no-key path is byte-identical. ✅ Wire bodies are asserted: all 3 target placements plus a top-level digest at evaluate, and target, digest, environment and agent at verify. ⛔ The runtime has to carry the digest through the approval (A1 below). Until it does, D1 cannot reach "allow once" against a real runtime. |
-| **D2** Staging acceptance | Blocked on A1 | One recorded acceptance run on staging runtime `lwnqpmnxpeyhpxvastku`: `docs/acceptance/HITL_HOOK_STAGING_<date>.md` plus a script that replays it | Using a real connected staging identity: (a) an unattended guarded action returns HOLD, a legitimate console approval follows, the permit is bound to the exact action, and exactly one verified execution happens. (b) A changed action cannot reuse the permit: changed command, MCP argument and Write content each get a new approval. (c) Every negative case in the founder list is observed live: wrong agent, target or environment; insufficient approval; expired approval or permit; consumed permit; replay; a different session or key claiming; malformed or timed-out runtime; redaction failure; mismatched hash. Each one denies. (d) The record lists the decision id, approval id, evaluation → re-evaluation → permit lineage, actor, target, environment, action hash and verify/consume evidence, and **no secrets**. (e) The approval satisfied the class's human-approval gate at claim time. |
+| **D1** Hook, connected mode | **Source-complete** (`cc308c6`). The runtime blockers A1, A3 and A4 below are fixed and merged | `packages/agent-hooks/connected.mjs` + `redact.mjs` + `jcs.mjs`, `atlasent-hooks connect`, 52 tests | ✅ 52/52 hook tests pass, mutation-checked. ✅ Every error, timeout or malformed answer denies, and the no-key path is byte-identical. ✅ Wire bodies are asserted: all 3 target placements plus a top-level digest at evaluate, and target, digest, environment and agent at verify. ⛔ The runtime has to carry the digest through the approval (A1 below). Until it does, D1 cannot reach "allow once" against a real runtime. |
+| **D2** Staging acceptance | **In progress.** Runtime fixes merged; staging fixtures created (see "D2 staging state" below); live run not yet executed | One recorded acceptance run on staging runtime `lwnqpmnxpeyhpxvastku`: `docs/acceptance/HITL_HOOK_STAGING_<date>.md` plus a script that replays it | Using a real connected staging identity: (a) an unattended guarded action returns HOLD, a legitimate console approval follows, the permit is bound to the exact action, and exactly one verified execution happens. (b) A changed action cannot reuse the permit: changed command, MCP argument and Write content each get a new approval. (c) Every negative case in the founder list is observed live: wrong agent, target or environment; insufficient approval; expired approval or permit; consumed permit; replay; a different session or key claiming; malformed or timed-out runtime; redaction failure; mismatched hash. Each one denies. (d) The record lists the decision id, approval id, evaluation → re-evaluation → permit lineage, actor, target, environment, action hash and verify/consume evidence, and **no secrets**. (e) The approval satisfied the class's human-approval gate at claim time. |
 | **D3** Console `/approval-queue` panel | After D2 | `atlasent-console` request-type panel for `agent.tool.invoke` holds. It shows the agent, represented org, rule/action, redacted preview, repo/target, environment, hold reason and authority required, with **Approve once** and **Deny with note** | Both buttons call `v1-approvals` resolve and nothing else: no console-side decision state (runtime-authority guard green). The deny note reaches the agent on its next retry, shown end to end on staging. The note field has been decided (A2 below). Orphan-component, permission-gating and lint-baseline guards are green. |
 | **D4** Slack notification | After D3 | A new eligible hold notifies the org's Slack, deep-linked to the D3 approval. The existing `notifyOrgChatChannels` hold path is extended only if it lacks what the approver needs | On staging, a hold posts one message with the approval link and the redacted preview, and no secrets. A Slack message cannot approve anything: if interactive, it calls the same `v1-approvals` resolve with the same authority checks, proven by a test where a Slack user without authority is refused. |
 | **D5** Default policy, prepared | After D4 | Exact proposed `agent.tool.invoke` HITL-variant class + bundle for new connected accounts. It covers the actions and contexts affected, the human-approval requirement, self-approval posture, individual vs team, independent approval, and rollback | Seeded on **staging only**. A staging run shows that unattended guarded actions HOLD and need a human, and that the rollback works. The deviation from the Canon gate flags (IMPL-029) is recorded. A decision packet goes to the founder. **Stop.** |
@@ -372,6 +372,57 @@ claimed through an approval, the claimed permit is now bound to that digest.
 Before, it was bound to the server's hash and could never match. This moves
 only toward stricter, correct binding.
 
+### Status of A1 (2026-09-29)
+
+**Merged** as atlasent-api#3780 with founder approval, and deployed to staging.
+
+### A3 — `requires_human_approval` hard-denied instead of queueing (fixed)
+
+For every class outside the lifecycle-escalate allowlist, a missing human
+approval denied with `INSUFFICIENT_APPROVALS` and created **no**
+`approval_requests` row. Nothing reached the approver. A rule-based `hold` was
+no substitute, because re-evaluating it after approval yields `hold` again.
+
+Founder decision (2026-09-29): add `agent.tool.invoke` to the allowlist with
+`independentApprovalRequired: false`, so the owner may approve their own
+agent's action; teams use `requires_independent_approval`. It is recorded as a
+declared Canon deviation (ACT-0029 is `allow`), in
+`LIFECYCLE_ESCALATE_CANON_DEVIATIONS`. Canon-conformant orgs are unchanged.
+Merged in atlasent-api#3781.
+
+### A4 — an agent's hold lost its approval row (fixed)
+
+`approval_requests.requestor_id` is a UUID column on the clean chain and on
+staging. The hold insert wrote `actor_id` (`agent:<uuid>`) there, got 22P02,
+and failed silently, so no `approval_request_id` came back. The insert now
+retries once with a NULL requester, only on 22P02. Merged in atlasent-api#3781.
+
+### D2 staging state (2026-09-29)
+
+All of this lives on runtime staging `lwnqpmnxpeyhpxvastku`, on one dedicated
+acceptance org named "HITL D2 acceptance (staging)". Credentials are held
+outside the repository.
+
+- **Approver:** an email-password account with `organization_users` role
+  `approver`.
+- **Agent:** a registered `agent_identities` row, plus an `ask_test_` key bound
+  to it with `evaluate:write`, `verify:execute` and `approvals:read`.
+- **Class:** the HITL variant of `agent.tool.invoke` (verified actor, human
+  approval, no assertion classes, enforced, fail-closed), with an allow bundle
+  on `context.tool` and `context.environment`.
+- **Stand-in IdP (founder-approved):** an org-scoped `identity` and `approval`
+  issuer, an Ed25519 key held outside the repository, with role `qa_reviewer`.
+  In production this is the org's own OIDC IdP, reached through the console's
+  `/approve` page.
+- **Actor root:** an org-scoped row trusting the staging agent-key mint (kid
+  `agent-actor-ed25519-2026-09-28`). The mint was configured on staging, but
+  global `ACTOR_TRUSTED_ISSUERS` did not include it; evaluate answered
+  `ACTOR_UNVERIFIED`. The row was inserted directly because
+  `provision_org_trusted_issuer` was broken on staging at the time (fixed later
+  in atlasent-api#3784).
+- **Next:** run the hook against staging for the happy path, the changed-action
+  case and the negative cases, then write the acceptance record.
+
 ### A2 — Deny note field (decision 5, inspected)
 
 `approval_requests.reason` is exposed on `GET /v1/approvals/:id`, and resolve
@@ -382,7 +433,7 @@ means "why this was requested" or "what the approver said" depending on when
 you read it, and the request reason is lost in place. That fails the
 immutability test.
 
-Proposal for D3: one bounded additive column on the canonical record,
+**Implemented** (founder-approved 2026-09-29, atlasent-api#3781). It is written by an explicit signal, not inferred from `reason`, and it is audited. The original proposal read: one bounded additive column on the canonical record,
 `approval_requests.resolution_note text` (≤ 2000 chars, CHECK on length),
 written once at resolve by the same UPDATE, never updated after (write-once
 trigger), exposed on GET, and included in the `approval.resolved` audit payload.
