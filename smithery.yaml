@@ -17,14 +17,14 @@ startCommand:
     properties:
       apiKey:
         type: string
-        description: "Atlasent API key: sign up free at console.atlasent.io and choose Connect an AI agent. Leave blank for the local demo mode."
+        description: "AtlaSent API key: sign up free at console.atlasent.io and choose Connect an AI agent. Leave blank for the local demo mode."
       baseUrl:
         type: string
-        description: "Atlasent API base URL. Leave blank to use the hosted SaaS endpoint (api.atlasent.io)."
+        description: "AtlaSent API base URL. Leave blank to use the hosted SaaS endpoint (api.atlasent.io)."
         default: "https://api.atlasent.io/functions/v1"
       mode:
         type: string
-        description: "local (default with no apiKey: offline rules engine, unsigned permits, dev only) or remote (hosted Atlasent API)"
+        description: "local (default with no apiKey: offline rules engine, unsigned permits, dev only) or remote (hosted AtlaSent API)"
         enum: ["remote", "local"]
 
   commandFunction: |-

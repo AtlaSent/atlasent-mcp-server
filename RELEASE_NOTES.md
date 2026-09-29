@@ -198,7 +198,7 @@ carries everything below.
   dev container, `CONTRIBUTING.md` rewrite, Code of Conduct, RFC template.
 - Generic REST tools resolve against the gateway root rather than
   `/functions/v1` (#126).
-- Package metadata points at the `Atlasent` GitHub org.
+- Package metadata points at the `AtlaSent` GitHub org.
 
 Use MCP `tools/list` on the installed version for the exact tool set rather
 than trusting this doc.

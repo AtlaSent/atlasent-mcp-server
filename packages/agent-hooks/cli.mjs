@@ -5,7 +5,7 @@
 //   atlasent-hooks check "<cmd>"    show what the guard would do with a shell command
 //   atlasent-hooks rules            list the built-in rules
 //   atlasent-hooks init             write a starter ~/.atlasent/hooks.json (never overwrites)
-//   atlasent-hooks connect          connect to Atlasent so unattended asks wait for approval
+//   atlasent-hooks connect          connect to AtlaSent so unattended asks wait for approval
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { decide, claudeCodeResponse } from './hook.mjs';
@@ -50,7 +50,7 @@ if (mode === 'claude-code') {
   const environment = opt('--environment');
   if (!environment || process.stdin.isTTY) {
     console.error([
-      'Connect the guard to Atlasent so an unattended "ask" waits for a person instead of stopping:',
+      'Connect the guard to AtlaSent so an unattended "ask" waits for a person instead of stopping:',
       '  1. Sign up and connect an agent: https://console.atlasent.io/auth/sign-up?utm_source=agent-hooks&utm_medium=cli',
       '     Copy the agent key it shows you (ask_live_… or ask_test_…).',
       '  2. Run:  atlasent-hooks connect --environment production < key.txt',
@@ -70,7 +70,7 @@ if (mode === 'claude-code') {
       mkdirSync(home, { recursive: true, mode: 0o700 });
       writeFileSync(join(home, 'credentials.json'), JSON.stringify({ api_key: creds.apiKey, ...(baseUrl && { base_url: creds.baseUrl }) }) + '\n', { mode: 0o600 });
       writeFileSync(file, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
-      console.error(`Connected. Unattended asks now go to Atlasent (${environment}). Credentials: ${join(home, 'credentials.json')}`);
+      console.error(`Connected. Unattended asks now go to AtlaSent (${environment}). Credentials: ${join(home, 'credentials.json')}`);
     } catch (e) {
       console.error(`Not connected: ${e.message}`);
       process.exitCode = 1;

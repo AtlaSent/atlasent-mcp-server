@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Atlasent/mcp-server",
   "title": "AtlaSent MCP Server",
-  "description": "Atlasent for AI agents: with an API key, actions wait for approval with signed proof. No key: demo.",
+  "description": "AtlaSent for AI agents: with an API key, actions wait for approval with signed proof. No key: demo.",
   "version": "2.16.0",
   "websiteUrl": "https://github.com/Atlasent/atlasent-mcp-server",
   "repository": {
@@ -19,13 +19,13 @@
       "environmentVariables": [
         {
           "name": "ATLASENT_API_KEY",
-          "description": "Atlasent API key: sign up free at console.atlasent.io and choose Connect an AI agent. Leave blank for the local demo mode.",
+          "description": "AtlaSent API key: sign up free at console.atlasent.io and choose Connect an AI agent. Leave blank for the local demo mode.",
           "isRequired": false,
           "isSecret": true
         },
         {
           "name": "ATLASENT_BASE_URL",
-          "description": "Atlasent API base URL. Defaults to the hosted SaaS endpoint.",
+          "description": "AtlaSent API base URL. Defaults to the hosted SaaS endpoint.",
           "isRequired": false
         },
         {

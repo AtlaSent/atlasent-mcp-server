@@ -551,7 +551,7 @@ test("npm CLI: an env key never goes to credentials.json's base_url; the file's 
   assert.equal(loadCredentials(home, { CLAUDE_PLUGIN_OPTION_API_KEY: 'ask_live_plugin1' }).apiKey, 'ask_live_filekey1');
 });
 
-test('plugin: only its own key setting counts, always sent to the Atlasent API', () => {
+test('plugin: only its own key setting counts, always sent to the AtlaSent API', () => {
   const home = mkdtempSync(join(tmpdir(), 'ah-cred-'));
   writeFileSync(join(home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1', base_url: 'https://legacy.example/functions/v1' }));
   const others = { ATLASENT_HOOKS_API_KEY: 'ask_live_env1', ATLASENT_HOOKS_BASE_URL: 'https://rt.example/functions/v1' };
@@ -624,7 +624,7 @@ test('stop conditions: HOLD is retryable after approval, DENY and unrecorded hol
   const odd = await run(s4, fakeRuntime({ evaluate: () => ({ status: 200, json: { decision: 'maybe' } }) }), unattended(s4.cwd));
   assert.equal(odd.effect, 'deny');
   assert.match(odd.reason, /unrecognized decision/);
-  assert.doesNotMatch(odd.reason, /Atlasent denied this/);
+  assert.doesNotMatch(odd.reason, /AtlaSent denied this/);
 
   const s5 = setup();
   const noPermit = await run(s5, fakeRuntime({ evaluate: () => ({ status: 200, json: { decision: 'allow' } }) }), unattended(s5.cwd));
@@ -654,7 +654,7 @@ test('stop conditions: INSUFFICIENT_APPROVALS routes to a person rather than tel
   const s = setup();
   const r = await run(s, fakeRuntime({ evaluate: () => ({ status: 200, json: { decision: 'deny', deny_code: 'INSUFFICIENT_APPROVALS', deny_reason: 'needs a person', evaluation_id: 'ev_12' } }) }), unattended(s.cwd));
   assert.equal(r.effect, 'deny');
-  assert.match(r.reason, /needs approval from a person in Atlasent/);
+  assert.match(r.reason, /needs approval from a person in AtlaSent/);
   assert.match(r.reason, /run exactly the same action again/);
   assert.doesNotMatch(r.reason, /not a wait for approval/);
   assert.ok(!existsSync(join(s.home, 'pending.json')), 'no approval request exists, so nothing is remembered');

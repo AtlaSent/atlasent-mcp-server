@@ -1,4 +1,4 @@
-// Connected mode: an unattended "ask" goes to the organization's Atlasent policy
+// Connected mode: an unattended "ask" goes to the organization's AtlaSent policy
 // instead of becoming a flat refusal. See docs/HOOK_HITL_APPROVAL.md.
 //
 // The hook cannot wait minutes for a person inside one PreToolUse call, so:
@@ -36,7 +36,7 @@ const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 //   Plugin (hooks.json passes --plugin): ONLY the plugin's own `api_key` setting
 //     (plugin.json userConfig, stored by Claude Code, exported as
 //     CLAUDE_PLUGIN_OPTION_API_KEY). No other credential on the machine is read, and
-//     the key goes only to the Atlasent API.
+//     the key goes only to the AtlaSent API.
 //   npm CLI: ATLASENT_HOOKS_API_KEY (CI and tests), else <home>/credentials.json
 //     ({ "api_key", "base_url"? }), written by `atlasent-hooks connect`.
 // A blank value counts as unset: an optional setting left empty is exported as "".
@@ -46,7 +46,7 @@ export function loadCredentials(home, env = process.env, { plugin = false } = {}
   if (plugin) {
     const apiKey = set(env.CLAUDE_PLUGIN_OPTION_API_KEY);
     if (!apiKey) return null;
-    if (!/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the Atlasent API key is not in ask_live_… / ask_test_… form');
+    if (!/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the AtlaSent API key is not in ask_live_… / ask_test_… form');
     return { apiKey, baseUrl: DEFAULT_BASE };
   }
   let file = {};
@@ -59,7 +59,7 @@ export function loadCredentials(home, env = process.env, { plugin = false } = {}
   const fromEnv = set(env.ATLASENT_HOOKS_API_KEY);
   const apiKey = fromEnv ?? file.api_key;
   if (!apiKey) return null;
-  if (typeof apiKey !== 'string' || !/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the Atlasent API key is not in ask_live_… / ask_test_… form');
+  if (typeof apiKey !== 'string' || !/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the AtlaSent API key is not in ask_live_… / ask_test_… form');
   // A key and its endpoint travel together: credentials.json's base_url applies only to
   // the key stored beside it, so an env key never goes to a leftover host.
   const baseUrl = String(set(env.ATLASENT_HOOKS_BASE_URL) ?? (fromEnv ? undefined : file.base_url) ?? DEFAULT_BASE).replace(/\/+$/, '');
@@ -169,7 +169,7 @@ function client(creds, fetchImpl, deadline) {
 // The minted assertion must be an agent identity for exactly this binding; the runtime
 // checks the signature. Returns the assertion or throws.
 function checkedAssertion(r, environment) {
-  if (r.status === 404) throw Error('this Atlasent runtime has no agent identity endpoint');
+  if (r.status === 404) throw Error('this AtlaSent runtime has no agent identity endpoint');
   if (r.status !== 200) throw Error(`agent identity was refused (${typeof r.json?.error === 'string' ? r.json.error : `HTTP ${r.status}`}); the key must be bound to a registered agent`);
   const a = r.json?.assertion;
   if (!object(a) || a.version !== 'actor_identity.v1' || a.subject?.principal_kind !== 'agent' ||
@@ -198,7 +198,7 @@ const noteOf = j => {
 // A deny is a policy decision, not a wait: retrying the same action gets the same answer.
 const DENY_HINT = 'This is a policy decision, not a wait for approval. Do not retry it unchanged; change the approach or ask the user.';
 // Needs a person, but no approval request was opened for it: route to the user, then re-run.
-const APPROVAL_NEEDED_HINT = 'It needs approval from a person in Atlasent. Stop and ask the user to get it approved; once they confirm, run exactly the same action again. Do not change the action to get around it.';
+const APPROVAL_NEEDED_HINT = 'It needs approval from a person in AtlaSent. Stop and ask the user to get it approved; once they confirm, run exactly the same action again. Do not change the action to get around it.';
 const decisionIdOf = j => {
   for (const k of ['evaluation_id', 'decision_id', 'request_id']) {
     const v = j?.[k];
@@ -251,7 +251,7 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       if (polled.status === 404) { pending.del(digest); return deny('approval_missing', `Approval ${id} was not found. Run the action again to ask for approval afresh.`); }
       if (polled.status !== 200 || typeof polled.json?.status !== 'string') return deny('approval_unreadable', `Approval ${id} could not be read, so it stays blocked.`);
       const status = polled.json.status;
-      if (status === 'pending') return deny('waiting', `Still waiting for a person to decide approval ${id} in Atlasent. ${RETRY_HINT}`);
+      if (status === 'pending') return deny('waiting', `Still waiting for a person to decide approval ${id} in AtlaSent. ${RETRY_HINT}`);
       if (!APPROVED.has(status)) {
         pending.del(digest);
         const note = noteOf(polled.json);
@@ -292,34 +292,34 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       ...(typeof input.session_id === 'string' && { agent_session: { host: 'claude-code', session_id: input.session_id.slice(0, 200) } }),
     };
     const r = await api.evaluate(body);
-    if (r.status !== 200 || !r.json) return deny('evaluate_failed', `Atlasent could not evaluate this (HTTP ${r.status})${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}. It was blocked.`);
+    if (r.status !== 200 || !r.json) return deny('evaluate_failed', `AtlaSent could not evaluate this (HTTP ${r.status})${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}. It was blocked.`);
     const d = r.json.decision;
     const decisionRef = decisionIdOf(r.json) ? ` Decision ${decisionIdOf(r.json)}.` : '';
     if ((d === 'hold' || d === 'escalate') && typeof r.json.approval_request_id === 'string' && r.json.approval_request_id) {
       const id = r.json.approval_request_id;
       pending.set(digest, id);
-      return deny('held', `Held for approval (${id}). A person has been asked in Atlasent.${decisionRef} ${RETRY_HINT}`);
+      return deny('held', `Held for approval (${id}). A person has been asked in AtlaSent.${decisionRef} ${RETRY_HINT}`);
     }
     if (d === 'hold' || d === 'escalate') {
       // The runtime held it but recorded no approval request (a non-fatal path on
       // its side). Nobody can approve it, so re-running would only hold again.
-      return deny('held_unrecorded', `Atlasent held this for approval, but no approval request was recorded, so there is nothing for a person to approve.${decisionRef} It was blocked. Do not retry it automatically; tell the user.`);
+      return deny('held_unrecorded', `AtlaSent held this for approval, but no approval request was recorded, so there is nothing for a person to approve.${decisionRef} It was blocked. Do not retry it automatically; tell the user.`);
     }
     if (d !== 'allow' && d !== 'deny') {
-      return deny('evaluate_failed', `Atlasent answered with an unrecognized decision${typeof d === 'string' ? ` ("${d.slice(0, 40)}")` : ''}.${decisionRef} It was blocked.`);
+      return deny('evaluate_failed', `AtlaSent answered with an unrecognized decision${typeof d === 'string' ? ` ("${d.slice(0, 40)}")` : ''}.${decisionRef} It was blocked.`);
     }
     if (d === 'allow' && typeof r.json.permit_token === 'string' && r.json.permit_token) {
       // The governing policy allowed without a person. That is the policy's call; the
       // permit still has to verify here.
       return await verifyAndAllow(r.json.permit_token, assertion.subject.principal_id);
     }
-    if (d === 'allow') return deny('evaluate_failed', `Atlasent allowed this but returned no permit, so there is nothing to verify.${decisionRef} It was blocked.`);
+    if (d === 'allow') return deny('evaluate_failed', `AtlaSent allowed this but returned no permit, so there is nothing to verify.${decisionRef} It was blocked.`);
     const code = typeof r.json.deny_code === 'string' ? ` (${r.json.deny_code})` : '';
     // INSUFFICIENT_APPROVALS is not a terminal refusal: a person's approval resolves it
     // (src/engine.ts routes it via requires_human_approval). It is still blocked now.
     const hint = r.json.deny_code === 'INSUFFICIENT_APPROVALS' ? APPROVAL_NEEDED_HINT : DENY_HINT;
-    return deny(r.json.deny_code === 'INSUFFICIENT_APPROVALS' ? 'needs_approval' : 'denied', `Atlasent denied this${code}${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}.${decisionRef} ${hint}`);
+    return deny(r.json.deny_code === 'INSUFFICIENT_APPROVALS' ? 'needs_approval' : 'denied', `AtlaSent denied this${code}${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}.${decisionRef} ${hint}`);
   } catch (e) {
-    return deny('error', `Atlasent could not be reached or answered unexpectedly (${String(e?.message ?? e).slice(0, 160)}), so it was blocked.`);
+    return deny('error', `AtlaSent could not be reached or answered unexpectedly (${String(e?.message ?? e).slice(0, 160)}), so it was blocked.`);
   }
 }

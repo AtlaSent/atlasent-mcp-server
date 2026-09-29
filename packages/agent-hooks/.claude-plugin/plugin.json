@@ -10,14 +10,14 @@
   "userConfig": {
     "api_key": {
       "type": "string",
-      "title": "Atlasent agent API key (optional)",
+      "title": "AtlaSent agent API key (optional)",
       "description": "Leave blank to stay local: no account, nothing sent. With a key (ask_live_… or ask_test_…), an unattended ask waits for a person in your organization instead of being refused. Stored securely by Claude Code.",
       "sensitive": true,
       "required": false
     },
     "environment": {
       "type": "string",
-      "title": "Atlasent environment",
+      "title": "AtlaSent environment",
       "description": "Which of your organization's environments decides held actions when a key is set. Your own ~/.atlasent/hooks.json \"connected.environment\" wins if present; a repository's config can never choose it.",
       "default": "production",
       "required": false

@@ -76,8 +76,8 @@ export function evaluate({ host, input, env = process.env, now = () => new Date(
   return { effect, reason, rule: rule.id, ...(unattendedAsk && { _unattendedAsk: { rule, policy } }) };
 }
 
-export const NUDGE = 'To have this wait for approval from your phone instead of stopping, connect Atlasent: atlasent-hooks connect';
-export const NUDGE_PLUGIN = "To have this wait for approval from your phone instead of stopping, enter an Atlasent agent key in this plugin's settings.";
+export const NUDGE = 'To have this wait for approval from your phone instead of stopping, connect AtlaSent: atlasent-hooks connect';
+export const NUDGE_PLUGIN = "To have this wait for approval from your phone instead of stopping, enter an AtlaSent agent key in this plugin's settings.";
 
 // Once per session, and only where the limit was actually hit: an unattended ask with
 // no key configured. Never in an attended prompt.
@@ -106,7 +106,7 @@ export async function decide({ host, input, env = process.env, now = () => new D
   try {
     creds = loadCredentials(home, env, { plugin });
   } catch (e) {
-    return { effect: 'deny', rule: rule.id, reason: `${d.reason} The Atlasent credentials are invalid (${String(e.message).slice(0, 120)}), so connected approval is unavailable.` };
+    return { effect: 'deny', rule: rule.id, reason: `${d.reason} The AtlaSent credentials are invalid (${String(e.message).slice(0, 120)}), so connected approval is unavailable.` };
   }
   if (!creds) {
     return nudgeOnce(home, input.session_id, env, now) ? { ...d, reason: `${d.reason} ${plugin ? NUDGE_PLUGIN : NUDGE}` } : d;
@@ -119,7 +119,7 @@ export async function decide({ host, input, env = process.env, now = () => new D
     const fromPlugin = typeof env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT === 'string' ? env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT.trim() : '';
     if (fromPlugin !== '') {
       if (!ENVIRONMENT_NAME.test(fromPlugin)) {
-        return { effect: 'deny', rule: rule.id, reason: `${d.reason} The plugin's Atlasent environment setting is not a short lowercase name such as "production", so connected approval is unavailable and nothing was sent.` };
+        return { effect: 'deny', rule: rule.id, reason: `${d.reason} The plugin's AtlaSent environment setting is not a short lowercase name such as "production", so connected approval is unavailable and nothing was sent.` };
       }
       config.environment = fromPlugin;
     }
