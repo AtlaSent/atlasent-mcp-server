@@ -181,3 +181,14 @@ test('hooks.json command: a guard that cannot start blocks (exit 2)', () => {
   assert.equal(r.status, 2);
   assert.match(r.stderr, /fail-closed/);
 });
+
+// guard.sh runs through `sh`, which cannot parse CRLF. A Windows checkout with
+// core.autocrlf=true converts text files to CRLF unless .gitattributes pins LF, and the
+// plugin installs by git clone, so without the pin every checked action is blocked
+// (exit 2) on Windows even with Node installed.
+test('guard.sh is pinned to LF line endings for Windows checkouts', () => {
+  const r = spawnSync('git', ['check-attr', 'eol', '--', 'hooks/guard.sh'], { cwd: PLUGIN_ROOT, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /: eol: lf$/m);
+  assert.doesNotMatch(readFileSync(join(PLUGIN_ROOT, 'hooks', 'guard.sh'), 'utf8'), /\r/);
+});
