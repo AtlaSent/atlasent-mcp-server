@@ -233,6 +233,12 @@ stable and will not change without a major version bump.
   `terraform destroy`, volume deletes, `git push --force` and production
   deploys. With nobody to ask, they are refused. Everything else runs as
   normal. Runs locally and needs no account.
+- 0.2.2: without Node.js on `PATH` the guard now blocks, with a message saying
+  to install Node, instead of silently letting every action through while
+  showing as enabled. Also flags `gh repo delete`, `gh release delete`,
+  `gh api -X DELETE`, and `find … -delete` or `find … -exec rm` when nothing
+  narrows what they match. A commit message or PR body that mentions SQL no
+  longer triggers an approval prompt.
 
 ### `@atlasent/mcp-gate` 0.1.0 (tag `gate-v0.1.0`) — 2026-09-25
 

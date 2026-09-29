@@ -29,7 +29,8 @@ In Claude Code:
 /plugin install atlasent-guard@atlasent
 ```
 
-Restart Claude Code. Requires Node 18 or later on your `PATH`.
+Restart Claude Code. Requires Node 18 or later on your `PATH`. Without it, the guard
+blocks every checked action and says why, rather than silently protecting nothing.
 
 Try it: ask Claude to run `terraform destroy` or `git push --force`. You get a prompt
 instead of a teardown.
@@ -40,12 +41,12 @@ instead of a teardown.
 |---|---|---|
 | `fs.rm-root` | **deny** | `rm -rf /`, `rm -rf ~`, `sudo bash -c "rm -rf /usr"` |
 | `disk.format` | **deny** | `mkfs.ext4 /dev/sda1`, `dd of=/dev/nvme0n1` |
-| `fs.rm-broad` | ask | `rm -rf .`, `rm -rf .git`, `rm -rf ~/projects/app` (not `rm -rf node_modules`) |
+| `fs.rm-broad` | ask | `rm -rf .`, `rm -rf .git`, `rm -rf ~/projects/app`, `find . -delete` (not `rm -rf node_modules`, not `find . -name '*.pyc' -delete`) |
 | `sql.destructive` | ask | `DROP TABLE`, `TRUNCATE`, `DELETE FROM x` with no `WHERE`, `DROP COLUMN`, `FLUSHALL`, `db.dropDatabase()` — in `psql -c`, heredocs, pipes, or a database MCP tool's `query` |
 | `db.reset` | ask | `supabase db reset`, `prisma migrate reset`, `dropdb`, `rails db:drop`, `manage.py flush` |
 | `iac.destroy` | ask | `terraform destroy`, `tofu apply -destroy`, `pulumi destroy`, `cdk destroy` |
 | `k8s.delete` | ask | `kubectl delete`, `kubectl drain`, `--replicas=0`, `helm uninstall` |
-| `cloud.delete` | ask | `aws rds delete-db-instance`, `aws s3 rb`, `aws s3 rm --recursive`, `gcloud … delete`, `az … delete` |
+| `cloud.delete` | ask | `aws rds delete-db-instance`, `aws s3 rb`, `aws s3 rm --recursive`, `gcloud … delete`, `az … delete`, `gh repo delete`, `gh release delete`, `gh api -X DELETE` |
 | `paas.destroy` | ask | `railway down`, `railway volume delete`, `fly apps destroy`, `heroku pg:reset`, `vercel rm`, `supabase projects delete` |
 | `container.destroy` | ask | `docker volume rm`, `docker system prune --volumes`, `docker compose down -v` |
 | `http.delete` | ask | `curl -X DELETE …`, a GraphQL `mutation { volumeDelete(…) }` sent with curl |
@@ -58,7 +59,8 @@ instead of a teardown.
 
 It unwraps `sudo`, `env`, `timeout`, `npx`, `VAR=value`, chains (`&&`, `;`, `|`),
 `$(…)`, and `bash -c "…"`, so a destructive command inside a longer one is still seen.
-`grep "DROP TABLE" docs/` is not flagged; `echo "DROP TABLE x" | psql` is.
+`grep "DROP TABLE" docs/` and a commit message that mentions `DROP TABLE` are not
+flagged; `echo "DROP TABLE x" | psql` is.
 
 To see what it would do with any command, from a checkout of this repository:
 `node packages/agent-hooks/cli.mjs check "<command>"`. (The npm package

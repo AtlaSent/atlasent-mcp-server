@@ -5,7 +5,11 @@
       {
         "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
         "hooks": [
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli.mjs\" claude-code --plugin", "timeout": 30 }
+          {
+            "type": "command",
+            "command": "command -v node >/dev/null 2>&1 || { echo \"AtlaSent guard needs Node.js 18 or later on PATH and could not find it, so this action was blocked (fail-closed). Install Node from https://nodejs.org and restart Claude Code, or disable the atlasent-guard plugin.\" >&2; exit 2; }; node \"${CLAUDE_PLUGIN_ROOT}/cli.mjs\" claude-code --plugin || { echo \"AtlaSent guard could not run (is Node.js 18 or later installed?), so this action was blocked (fail-closed).\" >&2; exit 2; }",
+            "timeout": 30
+          }
         ]
       }
     ]
