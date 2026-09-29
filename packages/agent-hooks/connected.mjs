@@ -12,7 +12,7 @@
 // only path to allow. The hook never turns "unattended" into autonomy on its own: if
 // the governing policy allows without a person, that is the policy's decision.
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { canonicalJson } from './jcs.mjs';
@@ -65,12 +65,6 @@ export function loadCredentials(home, env = process.env, { plugin = false } = {}
   const baseUrl = String(set(env.ATLASENT_HOOKS_BASE_URL) ?? (fromEnv ? undefined : file.base_url) ?? DEFAULT_BASE).replace(/\/+$/, '');
   if (!/^https:\/\//.test(baseUrl) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(baseUrl)) throw Error('base_url must be https');
   return { apiKey, baseUrl };
-}
-
-// "/v1/approvals/…" is served at the API root, "/v1-evaluate" under /functions/v1
-// (same split as src/engine.ts restBaseUrl).
-function restBase(baseUrl) {
-  return baseUrl.endsWith('/functions/v1') ? baseUrl.slice(0, -'/functions/v1'.length) : baseUrl;
 }
 
 // ---------------------------------------------------------------------------
@@ -156,13 +150,15 @@ function client(creds, fetchImpl, deadline) {
     return { status: res.status, json: object(json) ? json : null };
   };
   const fn = p => `${creds.baseUrl}${p}`;
-  const rest = p => `${restBase(creds.baseUrl)}${p}`;
   return {
     mintIdentity: environment => call('POST', fn('/v1-agent-actor-identity'), { action_type: ACTION_TYPE, environment }),
     evaluate: body => call('POST', fn('/v1-evaluate'), body),
     verify: body => call('POST', fn('/v1-verify-permit'), body),
-    approval: id => call('GET', rest(`/v1/approvals/${encodeURIComponent(id)}`)),
-    claim: (id, body) => call('POST', rest(`/v1/approvals/${encodeURIComponent(id)}/claim-permit`), body),
+    // Approvals are the v1-approvals function, like every other call here. The
+    // "/v1/approvals/…" gateway form at the API root is not served by any deployed
+    // host (it answers 404 on production and staging), so it must not be used.
+    approval: id => call('GET', fn(`/v1-approvals/${encodeURIComponent(id)}`)),
+    claim: (id, body) => call('POST', fn(`/v1-approvals/${encodeURIComponent(id)}/claim-permit`), body),
   };
 }
 
@@ -283,6 +279,12 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       ...(preview !== null && { action_preview: preview }),
     };
     const body = {
+      // The runtime refuses (HTTP 400, source_provenance_request_id_required) to admit
+      // source provenance without a caller-chosen request_id, and an active global
+      // incident defense puts every agent.* action on that path. Fresh per attempt:
+      // the guard never retries an evaluate, and reusing one across different bodies
+      // would be refused as idempotency_key_reused.
+      request_id: randomUUID(),
       action_type: ACTION_TYPE,
       actor_identity: assertion,
       resource_id: targetId,

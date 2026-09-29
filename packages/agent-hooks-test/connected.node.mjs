@@ -42,7 +42,9 @@ function fakeRuntime(opts = {}) {
       approvals.set(id, { status: 'pending', action_type: body.action_type, environment: body.context.environment, binding: { payload: body.execution_payload_hash, target: body.resource_id, env: body.context.environment, actor: body.actor_identity.subject.principal_id } });
       return { status: 200, json: { decision: 'hold', approval_request_id: id } };
     }
-    const m = /\/v1\/approvals\/([^/]+)(\/claim-permit)?$/.exec(path);
+    // Only the path the real runtime serves: the v1-approvals function under
+    // /functions/v1. The "/v1/approvals/…" gateway form 404s on every deployed host.
+    const m = /^\/functions\/v1\/v1-approvals\/([^/]+)(\/claim-permit)?$/.exec(path);
     if (m) {
       const a = approvals.get(decodeURIComponent(m[1]));
       if (opts.approvalStatus) return { status: opts.approvalStatus, json: {} };
@@ -123,6 +125,7 @@ test('evaluate wire body binds the whole action, target in all three places, env
   const input = unattended(s.cwd);
   await run(s, rt, input);
   const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate')).body;
+  assert.match(ev.request_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, 'a fresh request_id is sent');
   assert.equal(ev.action_type, 'agent.tool.invoke');
   assert.equal(ev.execution_payload_hash, createHash('sha256').update(canonicalJson({ tool_name: 'Bash', tool_input: { command: 'fly deploy' } })).digest('hex'));
   assert.match(ev.execution_payload_hash, /^[0-9a-f]{64}$/);

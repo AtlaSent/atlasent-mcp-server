@@ -1264,8 +1264,10 @@ export async function verifyPermitV1(params: VerifyPermitV1Params): Promise<unkn
 // approval, claim the one permit the runtime minted for it. It cannot
 // approve anything. Same protocol as atlasent-action's
 // waitForApprovalResolution (packages/enforce):
-//   GET  /v1/approvals/{id}              status poll; never carries a token
-//   POST /v1/approvals/{id}/claim-permit one-time atomic claim on "approved"
+//   GET  /v1-approvals/{id}              status poll; never carries a token
+//   POST /v1-approvals/{id}/claim-permit one-time atomic claim on "approved"
+// Both are the v1-approvals function under ATLASENT_BASE_URL (/functions/v1). The
+// "/v1/approvals/…" gateway form at the API root 404s on every deployed host.
 // Fail-closed throughout: any terminal status other than "approved", an
 // "approved" with no claimable permit, an auth/not-found error, or running
 // out of time all mean NO permit.
@@ -1502,7 +1504,7 @@ export async function awaitApproval(params: AwaitApprovalParams): Promise<AwaitA
     const pathId = encodeURIComponent(id);
     let polled: { status: number; json: Record<string, unknown> | null };
     try {
-      polled = await rawRequest("GET", `/v1/approvals/${pathId}`);
+      polled = await rawRequest("GET", `/v1-approvals/${pathId}`);
     } catch {
       // Transient network failure: retry within the bounded window.
       await sleep();
@@ -1561,7 +1563,7 @@ export async function awaitApproval(params: AwaitApprovalParams): Promise<AwaitA
       // re-evaluation minted nothing, error) is no permit.
       let claimed: { status: number; json: Record<string, unknown> | null };
       try {
-        claimed = await rawRequest("POST", `/v1/approvals/${pathId}/claim-permit`, claimBody);
+        claimed = await rawRequest("POST", `/v1-approvals/${pathId}/claim-permit`, claimBody);
       } catch {
         return notApproved(["Approved, but the permit could not be claimed (network error)."], rowStatus);
       }

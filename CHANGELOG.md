@@ -243,6 +243,14 @@ stable and will not change without a major version bump.
   into `hooks/guard.sh`, which `hooks.json` runs by a literal path. The Claude
   plugin directory's validator blocks a hook command it cannot follow, and
   0.2.2's inline chain was one. Behavior is unchanged.
+- 0.2.4 (connected mode): approval polls and permit claims now go to the
+  `v1-approvals` function under `/functions/v1`. The `/v1/approvals/…` form the
+  guard used 404s on every deployed host. Each evaluate also sends a fresh
+  `request_id`, which the runtime requires before it will consider source
+  provenance. Connected mode still cannot reach an approval: an active global
+  incident defense denies every `agent.*` action that lacks signed upstream
+  source provenance (`ASSERTION_UNVERIFIED`), which the guard cannot supply,
+  and the agent identity endpoint is not deployed to production.
 
 ### `@atlasent/mcp-gate` 0.1.0 (tag `gate-v0.1.0`) — 2026-09-25
 

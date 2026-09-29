@@ -59,11 +59,11 @@ describe("awaitApproval", () => {
   it("returns the claimed permit once a person approves (after pending polls)", async () => {
     let polls = 0;
     route((m, p) => {
-      if (m === "GET" && p === "/v1/approvals/apr_1") {
+      if (m === "GET" && p === "/functions/v1/v1-approvals/apr_1") {
         polls += 1;
         return { status: 200, body: { status: polls < 3 ? "pending" : "approved" } };
       }
-      if (m === "POST" && p === "/v1/approvals/apr_1/claim-permit") {
+      if (m === "POST" && p === "/functions/v1/v1-approvals/apr_1/claim-permit") {
         return { status: 200, body: { claimed: true, permit_token: "pt.v4.abc" } };
       }
       return { status: 500, body: {} };
@@ -71,7 +71,7 @@ describe("awaitApproval", () => {
     const r = await awaitApproval(FAST);
     assert.deepEqual(r, { outcome: "approved", permit_token: "pt.v4.abc", approval_request_id: "apr_1" });
     // REST family is served at the gateway root, not under /functions/v1.
-    assert.ok(calls.includes("GET /v1/approvals/apr_1"));
+    assert.ok(calls.includes("GET /functions/v1/v1-approvals/apr_1"));
     assert.equal(calls.filter((c) => c.startsWith("POST")).length, 1, "claims exactly once");
   });
 
@@ -160,7 +160,7 @@ describe("atlasent_await_approval tool", () => {
 // ---------------------------------------------------------------------------
 
 const MINT = "/functions/v1/v1-agent-actor-identity";
-const CLAIM = "/v1/approvals/apr_1/claim-permit";
+const CLAIM = "/functions/v1/v1-approvals/apr_1/claim-permit";
 const AWAITING = {
   status: "approved_awaiting_claim",
   action_type: "production.deploy",
@@ -182,7 +182,7 @@ describe("awaitApproval — approved_awaiting_claim (IMPL-026B)", () => {
   it("mints a fresh agent identity for the held action and claims with { actor_identity }", async () => {
     const a = assertionFor();
     route((m, p) => {
-      if (m === "GET" && p === "/v1/approvals/apr_1") return { status: 200, body: AWAITING };
+      if (m === "GET" && p === "/functions/v1/v1-approvals/apr_1") return { status: 200, body: AWAITING };
       if (m === "POST" && p === MINT) return { status: 200, body: { kind: "actor_identity.v1", assertion: a } };
       if (m === "POST" && p === CLAIM) return { status: 200, body: { claimed: true, permit_token: "pt.v4.agent" } };
       return { status: 500, body: {} };
