@@ -117,7 +117,7 @@ test('plugin manifest and hook registration are wired to this CLI', () => {
   // computed path, an inline program, or a chain of commands. It follows a plain shell
   // script named by a literal ${CLAUDE_PLUGIN_ROOT} path, so the command is exactly that.
   assert.equal(entry.hooks[0].command, 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"');
-  // --plugin makes the plugin's own key setting the only credential read.
+  // --plugin makes the plugin local only: no credential is read, nothing is sent.
   const script = readFileSync(new URL('../agent-hooks/hooks/guard.sh', import.meta.url), 'utf8');
   assert.match(script, /^node "\$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs" claude-code --plugin \|\| \{$/m);
   // Same rule inside the script: no command substitution and no variable but CLAUDE_PLUGIN_ROOT.

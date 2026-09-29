@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { decide, NUDGE, NUDGE_PLUGIN, evaluate } from '../agent-hooks/hook.mjs';
+import { decide, NUDGE, evaluate } from '../agent-hooks/hook.mjs';
 import { canonicalJson } from '../agent-hooks/jcs.mjs';
 import { redactedPreview, assertNoSecrets, MASK } from '../agent-hooks/redact.mjs';
 import { actionDigest, repoIdentity, loadCredentials } from '../agent-hooks/connected.mjs';
@@ -42,7 +42,9 @@ function fakeRuntime(opts = {}) {
       approvals.set(id, { status: 'pending', action_type: body.action_type, environment: body.context.environment, binding: { payload: body.execution_payload_hash, target: body.resource_id, env: body.context.environment, actor: body.actor_identity.subject.principal_id } });
       return { status: 200, json: { decision: 'hold', approval_request_id: id } };
     }
-    const m = /\/v1\/approvals\/([^/]+)(\/claim-permit)?$/.exec(path);
+    // Only the path the real runtime serves: the v1-approvals function under
+    // /functions/v1. The "/v1/approvals/…" gateway form 404s on every deployed host.
+    const m = /^\/functions\/v1\/v1-approvals\/([^/]+)(\/claim-permit)?$/.exec(path);
     if (m) {
       const a = approvals.get(decodeURIComponent(m[1]));
       if (opts.approvalStatus) return { status: opts.approvalStatus, json: {} };
@@ -126,6 +128,7 @@ test('evaluate wire body binds the whole action, target in all three places, env
   const input = unattended(s.cwd);
   await run(s, rt, input);
   const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate')).body;
+  assert.match(ev.request_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, 'a fresh request_id is sent');
   assert.equal(ev.action_type, 'agent.tool.invoke');
   assert.equal(ev.execution_payload_hash, createHash('sha256').update(canonicalJson({ tool_name: 'Bash', tool_input: { command: 'fly deploy' } })).digest('hex'));
   assert.match(ev.execution_payload_hash, /^[0-9a-f]{64}$/);
@@ -432,8 +435,6 @@ test('the nudge is OFF by default until connected mode is staging-proven', async
   const local = evaluate({ host: 'claude-code', input, env: s.env });
   const r = await decide({ host: 'claude-code', input, env: s.env, fetchImpl: rt.fetchImpl });
   assert.equal(r.reason, local.reason, 'no nudge advertising a path that cannot work yet');
-  const p = await decide({ host: 'claude-code', input, env: s.env, fetchImpl: rt.fetchImpl, plugin: true });
-  assert.ok(!p.reason.includes(NUDGE_PLUGIN));
 });
 
 test('no key, nudge switched on: today\'s reason plus exactly one line, once per session, never when attended', async () => {
@@ -505,16 +506,6 @@ const withAuth = rt => {
   return { auth, fetchImpl: async (url, init) => { auth.push(init.headers?.authorization ?? init.headers?.Authorization); return rt.fetchImpl(url, init); } };
 };
 
-test('plugin api_key setting connects with no other credential, and is the key sent', async () => {
-  const s = setup({ key: null }); const rt = fakeRuntime(); const w = withAuth(rt);
-  s.env.CLAUDE_PLUGIN_OPTION_API_KEY = 'ask_test_fromplugin1';
-  const r = await decide({ host: 'claude-code', input: unattended(s.cwd), env: s.env, fetchImpl: w.fetchImpl, plugin: true });
-  assert.equal(r.effect, 'deny');
-  assert.ok(idOf(r.reason), r.reason);
-  assert.ok(rt.calls.length > 0);
-  assert.ok(w.auth.every(a => a === 'Bearer ask_test_fromplugin1'), JSON.stringify(w.auth));
-});
-
 test('a blank plugin api_key setting counts as unset: local guard, nothing sent', async () => {
   const s = setup({ key: null }); const rt = fakeRuntime();
   s.env.CLAUDE_PLUGIN_OPTION_API_KEY = '   ';
@@ -567,45 +558,54 @@ test("npm CLI: an env key never goes to credentials.json's base_url; the file's 
   assert.equal(loadCredentials(home, { CLAUDE_PLUGIN_OPTION_API_KEY: 'ask_live_plugin1' }).apiKey, 'ask_live_filekey1');
 });
 
-test('plugin: only its own key setting counts, always sent to the AtlaSent API', () => {
+// The plugin is local only (0.2.5): connected mode is not offered there until the
+// runtime can complete it. No credential of any kind is read, nothing is sent, and there
+// is no nudge pointing to a setting that does not exist.
+test('plugin: loadCredentials never returns a credential', () => {
   const home = mkdtempSync(join(tmpdir(), 'ah-cred-'));
-  writeFileSync(join(home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1', base_url: 'https://legacy.example/functions/v1' }));
-  const others = { ATLASENT_HOOKS_API_KEY: 'ask_live_env1', ATLASENT_HOOKS_BASE_URL: 'https://rt.example/functions/v1' };
-  assert.equal(loadCredentials(home, others, { plugin: true }), null);
-  assert.equal(loadCredentials(home, { ...others, CLAUDE_PLUGIN_OPTION_API_KEY: '' }, { plugin: true }), null);
-  assert.deepEqual(loadCredentials(home, { ...others, CLAUDE_PLUGIN_OPTION_API_KEY: 'ask_live_plugin1' }, { plugin: true }), { apiKey: 'ask_live_plugin1', baseUrl: 'https://api.atlasent.io/functions/v1' });
-  assert.throws(() => loadCredentials(home, { CLAUDE_PLUGIN_OPTION_API_KEY: 'sk-not-atlasent' }, { plugin: true }), /ask_live_/);
+  writeFileSync(join(home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1' }));
+  const every = { ATLASENT_HOOKS_API_KEY: 'ask_live_env1', ATLASENT_HOOKS_BASE_URL: 'https://rt.example/functions/v1', CLAUDE_PLUGIN_OPTION_API_KEY: 'ask_live_plugin1' };
+  assert.equal(loadCredentials(home, every, { plugin: true }), null);
+  // Not even a malformed value is looked at.
+  assert.equal(loadCredentials(home, { CLAUDE_PLUGIN_OPTION_API_KEY: 'sk-not-atlasent' }, { plugin: true }), null);
+  writeFileSync(join(home, 'credentials.json'), '{not json');
+  assert.equal(loadCredentials(home, every, { plugin: true }), null);
 });
 
-test('plugin: a machine credential (env or credentials.json) is never read or sent', async () => {
+test('plugin: with every kind of key present, nothing is sent and the local refusal stands', async () => {
   const s = setup(); const rt = fakeRuntime();
   writeFileSync(join(s.home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1' }));
-  const r = await decide({ host: 'claude-code', input: unattended(s.cwd), env: { ...s.env, ATLASENT_HOOKS_NUDGE: 'on' }, fetchImpl: rt.fetchImpl, plugin: true });
+  const env = { ...s.env, CLAUDE_PLUGIN_OPTION_API_KEY: KEY, ATLASENT_HOOKS_NUDGE: 'on' };
+  const r = await decide({ host: 'claude-code', input: unattended(s.cwd), env, fetchImpl: rt.fetchImpl, plugin: true });
   assert.equal(rt.calls.length, 0);
   assert.equal(r.effect, 'deny');
-  assert.ok(r.reason.endsWith(NUDGE_PLUGIN), r.reason);
-  assert.ok(!r.reason.includes('atlasent-hooks connect'));
-  // The plugin path never opens credentials.json: an unreadable one changes nothing.
-  writeFileSync(join(s.home, 'credentials.json'), '{not json');
-  const r2 = await decide({ host: 'claude-code', input: unattended(s.cwd), env: { ...s.env, CLAUDE_PLUGIN_OPTION_API_KEY: KEY }, fetchImpl: rt.fetchImpl, plugin: true });
-  assert.ok(idOf(r2.reason), r2.reason);
+  assert.equal(r.reason, evaluate({ host: 'claude-code', input: unattended(s.cwd), env }).reason, 'no nudge, no connected text');
+  assert.ok(!/key|connect|AtlaSent API/i.test(r.reason.replace(/^AtlaSent guard: /, '')), r.reason);
+  // Positive control: the npm path with the same environment does connect.
+  const npm = await run(s, rt, unattended(s.cwd));
+  assert.ok(rt.calls.length > 0 && idOf(npm.reason), npm.reason);
 });
 
-test('CLI --plugin (the registered plugin command) ignores a machine key and says where to enter one', async () => {
+test('plugin manifest offers no key or environment setting', () => {
+  const plugin = JSON.parse(readFileSync(new URL('../agent-hooks/.claude-plugin/plugin.json', import.meta.url), 'utf8'));
+  assert.equal(plugin.userConfig, undefined);
+});
+
+test('CLI --plugin (the registered plugin command) never reads a machine key or reaches the network', async () => {
   const s = setup();
   writeFileSync(join(s.home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1' }));
   const run = argv => new Promise((resolve, reject) => {
-    const p = spawn(process.execPath, [CLI, ...argv], { env: { PATH: process.env.PATH, ...s.env, ATLASENT_HOOKS_NUDGE: 'on', ATLASENT_HOOKS_BASE_URL: 'https://127.0.0.1:1/functions/v1' } });
+    const p = spawn(process.execPath, [CLI, ...argv], { env: { PATH: process.env.PATH, ...s.env, CLAUDE_PLUGIN_OPTION_API_KEY: KEY, ATLASENT_HOOKS_NUDGE: 'on', ATLASENT_HOOKS_BASE_URL: 'https://127.0.0.1:1/functions/v1' } });
     let out = ''; let err = '';
     p.stdout.on('data', c => { out += c; }); p.stderr.on('data', c => { err += c; });
     p.on('close', code => code === 0 ? resolve(JSON.parse(out)) : reject(Error(err)));
     p.stdin.end(JSON.stringify(unattended(s.cwd)));
   });
   const plugin = (await run(['claude-code', '--plugin'])).hookSpecificOutput.permissionDecisionReason;
-  assert.ok(plugin.endsWith(NUDGE_PLUGIN), plugin);
+  assert.match(plugin, /Nobody is available to approve it/);
+  assert.doesNotMatch(plugin, /Connected approval|could not be reached|key/i);
   // Positive control: without --plugin the same machine key is used (and the unreachable host blocks).
   const npm = (await run(['claude-code'])).hookSpecificOutput.permissionDecisionReason;
-  assert.ok(!npm.includes(NUDGE_PLUGIN), npm);
   assert.match(npm, /Connected approval failed|could not|unavailable/i);
 });
 

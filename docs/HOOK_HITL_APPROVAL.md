@@ -1,5 +1,14 @@
 # Design: the guard waits for a person in the console
 
+> **Status (2026-09-29): not available in the plugin.** The `atlasent-guard` plugin is
+> local only from 0.2.5: no key setting, no credential read, nothing sent. A live run
+> against the runtime found two runtime blockers: `v1-agent-actor-identity` is
+> staging-only, and an active global incident defense denies every `agent.*` action
+> that lacks signed upstream source provenance (`ASSERTION_UNVERIFIED`), which this
+> design does not produce. The approval never becomes reachable. The npm CLI path
+> keeps the code. Offer it in the plugin again only after a live end-to-end run
+> through hold, approve, claim and verify.
+
 Status: **ACCEPTED** (2026-09-28; decisions below). Slice 1 (the hook) is
 implemented in `packages/agent-hooks/connected.mjs`. **It is not usable and not
 commercially ready.**

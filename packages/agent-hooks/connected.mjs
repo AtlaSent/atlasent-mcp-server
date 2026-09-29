@@ -33,22 +33,19 @@ const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 // ---------------------------------------------------------------------------
 
 // Where the key comes from depends on how the hook was installed.
-//   Plugin (hooks.json passes --plugin): ONLY the plugin's own `api_key` setting
-//     (plugin.json userConfig, stored by Claude Code, exported as
-//     CLAUDE_PLUGIN_OPTION_API_KEY). No other credential on the machine is read, and
-//     the key goes only to the AtlaSent API.
+//   Plugin (hooks.json passes --plugin): NONE. Connected mode is not offered in the
+//     plugin yet (0.2.5): the runtime cannot complete it today (the agent identity
+//     endpoint is staging-only, and an active global incident defense denies agent.*
+//     actions without signed source provenance). A plugin install is local only: no
+//     credential of any kind is read and nothing is ever sent. Re-enabling means
+//     restoring plugin.json's userConfig and this branch, with a live end-to-end run.
 //   npm CLI: ATLASENT_HOOKS_API_KEY (CI and tests), else <home>/credentials.json
 //     ({ "api_key", "base_url"? }), written by `atlasent-hooks connect`.
 // A blank value counts as unset: an optional setting left empty is exported as "".
 // No key → not connected.
 const set = v => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
 export function loadCredentials(home, env = process.env, { plugin = false } = {}) {
-  if (plugin) {
-    const apiKey = set(env.CLAUDE_PLUGIN_OPTION_API_KEY);
-    if (!apiKey) return null;
-    if (!/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the AtlaSent API key is not in ask_live_… / ask_test_… form');
-    return { apiKey, baseUrl: DEFAULT_BASE };
-  }
+  if (plugin) return null;
   let file = {};
   const path = join(home, 'credentials.json');
   if (existsSync(path)) {
@@ -65,12 +62,6 @@ export function loadCredentials(home, env = process.env, { plugin = false } = {}
   const baseUrl = String(set(env.ATLASENT_HOOKS_BASE_URL) ?? (fromEnv ? undefined : file.base_url) ?? DEFAULT_BASE).replace(/\/+$/, '');
   if (!/^https:\/\//.test(baseUrl) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(baseUrl)) throw Error('base_url must be https');
   return { apiKey, baseUrl };
-}
-
-// "/v1/approvals/…" is served at the API root, "/v1-evaluate" under /functions/v1
-// (same split as src/engine.ts restBaseUrl).
-function restBase(baseUrl) {
-  return baseUrl.endsWith('/functions/v1') ? baseUrl.slice(0, -'/functions/v1'.length) : baseUrl;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,13 +166,15 @@ function client(creds, fetchImpl, deadline) {
     return { status: res.status, json: object(json) ? json : null };
   };
   const fn = p => `${creds.baseUrl}${p}`;
-  const rest = p => `${restBase(creds.baseUrl)}${p}`;
   return {
     mintIdentity: environment => call('POST', fn('/v1-agent-actor-identity'), { action_type: ACTION_TYPE, environment }),
     evaluate: body => call('POST', fn('/v1-evaluate'), body),
     verify: body => call('POST', fn('/v1-verify-permit'), body),
-    approval: id => call('GET', rest(`/v1/approvals/${encodeURIComponent(id)}`)),
-    claim: (id, body) => call('POST', rest(`/v1/approvals/${encodeURIComponent(id)}/claim-permit`), body),
+    // Approvals are the v1-approvals function, like every other call here. The
+    // "/v1/approvals/…" gateway form at the API root is not served by any deployed
+    // host (it answers 404 on production and staging), so it must not be used.
+    approval: id => call('GET', fn(`/v1-approvals/${encodeURIComponent(id)}`)),
+    claim: (id, body) => call('POST', fn(`/v1-approvals/${encodeURIComponent(id)}/claim-permit`), body),
   };
 }
 

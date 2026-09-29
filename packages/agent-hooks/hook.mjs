@@ -77,7 +77,6 @@ export function evaluate({ host, input, env = process.env, now = () => new Date(
 }
 
 export const NUDGE = 'To have this wait for approval from your phone instead of stopping, connect AtlaSent: atlasent-hooks connect';
-export const NUDGE_PLUGIN = "To have this wait for approval from your phone instead of stopping, enter an AtlaSent agent key in this plugin's settings.";
 
 // OFF by default until connected mode is proven end to end on staging
 // (docs/HOOK_HITL_APPROVAL.md, "Status"). Every agent.tool.invoke evaluation must
@@ -104,8 +103,8 @@ function nudgeOnce(home, sessionId, env, now) {
 }
 
 // Full decision, including connected mode. Never throws: any failure is a refusal.
-// plugin: installed as the Claude Code plugin, so the only credential is the plugin's
-// own setting (see loadCredentials).
+// plugin: installed as the Claude Code plugin, which is local only: no credential is
+// read and nothing is sent (see loadCredentials).
 export async function decide({ host, input, env = process.env, now = () => new Date(), fetchImpl = globalThis.fetch, plugin = false }) {
   const d = evaluate({ host, input, env, now });
   if (!d._unattendedAsk) return d;
@@ -118,7 +117,9 @@ export async function decide({ host, input, env = process.env, now = () => new D
     return { effect: 'deny', rule: rule.id, reason: `${d.reason} The AtlaSent credentials are invalid (${String(e.message).slice(0, 120)}), so connected approval is unavailable.` };
   }
   if (!creds) {
-    return nudgeOnce(home, input.session_id, env, now) ? { ...d, reason: `${d.reason} ${plugin ? NUDGE_PLUGIN : NUDGE}` } : d;
+    // The plugin offers no connected mode, so it has nothing to point to.
+    if (plugin) return d;
+    return nudgeOnce(home, input.session_id, env, now) ? { ...d, reason: `${d.reason} ${NUDGE}` } : d;
   }
   // Environment: the user's own hooks.json first, then the plugin's `environment`
   // setting (user-owned, exported as CLAUDE_PLUGIN_OPTION_ENVIRONMENT). Never a

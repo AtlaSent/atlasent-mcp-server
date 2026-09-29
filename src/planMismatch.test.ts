@@ -44,8 +44,8 @@ function route(fn: Route): void {
 const EVAL = "/functions/v1/v1-evaluate";
 const BRIEF = "/functions/v1/v1-change-brief";
 const MINT = "/functions/v1/v1-agent-actor-identity";
-const claimPath = (id: string) => `/v1/approvals/${id}/claim-permit`;
-const statusPath = (id: string) => `/v1/approvals/${id}`;
+const claimPath = (id: string) => `/functions/v1/v1-approvals/${id}/claim-permit`;
+const statusPath = (id: string) => `/functions/v1/v1-approvals/${id}`;
 
 const P1 = { operation: "deploy", revision: "aaa111" };
 const P2 = { operation: "deploy", revision: "bbb222" };
