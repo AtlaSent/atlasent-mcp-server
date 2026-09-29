@@ -33,22 +33,19 @@ const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 // ---------------------------------------------------------------------------
 
 // Where the key comes from depends on how the hook was installed.
-//   Plugin (hooks.json passes --plugin): ONLY the plugin's own `api_key` setting
-//     (plugin.json userConfig, stored by Claude Code, exported as
-//     CLAUDE_PLUGIN_OPTION_API_KEY). No other credential on the machine is read, and
-//     the key goes only to the AtlaSent API.
+//   Plugin (hooks.json passes --plugin): NONE. Connected mode is not offered in the
+//     plugin yet (0.2.5): the runtime cannot complete it today (the agent identity
+//     endpoint is staging-only, and an active global incident defense denies agent.*
+//     actions without signed source provenance). A plugin install is local only: no
+//     credential of any kind is read and nothing is ever sent. Re-enabling means
+//     restoring plugin.json's userConfig and this branch, with a live end-to-end run.
 //   npm CLI: ATLASENT_HOOKS_API_KEY (CI and tests), else <home>/credentials.json
 //     ({ "api_key", "base_url"? }), written by `atlasent-hooks connect`.
 // A blank value counts as unset: an optional setting left empty is exported as "".
 // No key → not connected.
 const set = v => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
 export function loadCredentials(home, env = process.env, { plugin = false } = {}) {
-  if (plugin) {
-    const apiKey = set(env.CLAUDE_PLUGIN_OPTION_API_KEY);
-    if (!apiKey) return null;
-    if (!/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the AtlaSent API key is not in ask_live_… / ask_test_… form');
-    return { apiKey, baseUrl: DEFAULT_BASE };
-  }
+  if (plugin) return null;
   let file = {};
   const path = join(home, 'credentials.json');
   if (existsSync(path)) {
