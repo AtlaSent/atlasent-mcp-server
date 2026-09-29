@@ -144,13 +144,19 @@ const SAFE_ABS = /^\/(tmp|var\/tmp|private\/tmp)(\/|$)/;
 // `find <dir> -delete` (or `-exec rm -r`) with no predicate narrowing what it matches is
 // `rm -rf <dir>` in other words. With a filter (`-name '*.pyc' -delete`) it is routine
 // cleanup and passes.
+// A filter narrows the deletion only when the expression has no alternative branch:
+// in `find / -name keep -o -delete` the -delete applies to everything NOT named keep.
+const FIND_OR = new Set(['-o', '-or', ',']);
 const FIND_FILTERS = /^-(i?name|i?path|i?wholename|i?regex|type|x?type|mtime|mmin|atime|amin|ctime|cmin|newer\w*|size|empty|user|group|perm|links|inum|samefile|prune|maxdepth)$/;
 function findDeleteRoots(argv) {
   if (argv[0] !== 'find') return null;
   const destructive = argv.includes('-delete') || argv.some((x, i) => ['-exec', '-execdir', '-ok', '-okdir'].includes(x) && argv[i + 1] === 'rm');
-  if (!destructive || argv.some(x => FIND_FILTERS.test(x))) return null;
+  if (!destructive || (argv.some(x => FIND_FILTERS.test(x)) && !argv.some(x => FIND_OR.has(x)))) return null;
+  // Leading options (-H, -L, -P, -O<level>, -D <debugopts>) come before the start paths.
+  let i = 1;
+  while (i < argv.length && /^-([HLP]|O\d*|D)$/.test(argv[i])) i += argv[i] === '-D' ? 2 : 1;
   const roots = [];
-  for (let i = 1; i < argv.length && !argv[i].startsWith('-') && argv[i] !== '(' && argv[i] !== '!'; i++) roots.push(argv[i]);
+  for (; i < argv.length && !argv[i].startsWith('-') && argv[i] !== '(' && argv[i] !== '!'; i++) roots.push(argv[i]);
   return roots.length ? roots : ['.'];
 }
 
@@ -179,7 +185,11 @@ const INERT = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'cat', 'less
 // inert, so `git commit -m x && psql -c "DROP TABLE t"` is still flagged.
 const MESSAGE_ONLY = a => (a[0] === 'git' && ['commit', 'tag', 'notes'].includes(gitSub(a)))
   || (a[0] === 'gh' && ['pr create', 'pr edit', 'pr comment', 'pr review', 'issue create', 'issue edit', 'issue comment'].includes(sub(a, 2)));
-const inert = segs => segs.length > 0 && segs.every(a => INERT.has(a[0]) || MESSAGE_ONLY(a) || (a[0] === 'git' && ['grep', 'log', 'show', 'diff'].includes(gitSub(a))));
+// A command substitution runs even inside a quoted message or echo argument, and the
+// tokenizer keeps quoted text as one argument, so `git commit -m "$(psql -c 'DROP TABLE t')"`
+// would look inert. Any `$(` or backtick in the text disables the exemption.
+const SUBSTITUTION = /\$\(|`/;
+const inert = (segs, text = '') => !SUBSTITUTION.test(text) && segs.length > 0 && segs.every(a => INERT.has(a[0]) || MESSAGE_ONLY(a) || (a[0] === 'git' && ['grep', 'log', 'show', 'diff'].includes(gitSub(a))));
 
 // ---------------------------------------------------------------------------
 // Rules. `argv` rules run per command segment; `text` rules run on the raw text so
@@ -199,7 +209,7 @@ export const RULES = [
   { id: 'git.discard-work', effect: 'ask', kind: 'destroy', description: 'Discarding uncommitted work or rewriting history (reset --hard, clean -f, branch -D, filter-repo)',
     argv: a => (git(a, 'reset') && hasFlag(a, '--hard')) || (git(a, 'clean') && /f/.test(shortFlags(a))) || (git(a, 'branch') && (/D/.test(shortFlags(a)) || (hasFlag(a, '--delete') && hasFlag(a, '--force')))) || git(a, 'filter-branch', 'filter-repo') || (git(a, 'stash') && ['clear', 'drop'].includes(positional(a)[1])) || (git(a, 'checkout', 'restore') && positional(a).includes('.') && !hasFlag(a, '--staged')) },
   { id: 'sql.destructive', effect: 'ask', kind: 'destroy', description: 'SQL that drops or empties data (DROP, TRUNCATE, DELETE without WHERE, DROP COLUMN)',
-    text: (t, segs) => !inert(segs) && (/\bdrop\s+(database|schema|table|materialized\s+view|view|index|role|user|owned|extension|function|type|policy|trigger)\b/i.test(t)
+    text: (t, segs) => !inert(segs, t) && (/\bdrop\s+(database|schema|table|materialized\s+view|view|index|role|user|owned|extension|function|type|policy|trigger)\b/i.test(t)
       || /\btruncate\s+(table\s+)?[\w."`\[]/i.test(t)
       || /\bdelete\s+from\s+[\w."`\[\]]+\s*(;|$|["'`)]|\s+(returning|limit)\b)/im.test(t)
       || /\balter\s+table\b[^;]*\bdrop\s+(column|constraint)\b/i.test(t)
@@ -241,7 +251,7 @@ export const RULES = [
   { id: 'http.delete', effect: 'ask', kind: 'destroy', description: 'An API request that deletes something (HTTP DELETE, or a GraphQL mutation such as volumeDelete)',
     // The 2026-04 PocketOS incident was a curl POST of a GraphQL `volumeDelete`
     // mutation to a platform API, not an HTTP DELETE, so both shapes are covered.
-    text: (t, segs) => !inert(segs) && /\b(curl|wget|http|https|xh|httpie)\b/.test(t) && /\bmutation\b[\s\S]{0,600}?\b[a-z][A-Za-z0-9]*(Delete|Destroy|Remove|Purge|Wipe|Reset|Drop)\s*[({]/.test(t),
+    text: (t, segs) => !inert(segs, t) && /\b(curl|wget|http|https|xh|httpie)\b/.test(t) && /\bmutation\b[\s\S]{0,600}?\b[a-z][A-Za-z0-9]*(Delete|Destroy|Remove|Purge|Wipe|Reset|Drop)\s*[({]/.test(t),
     argv: a => (['curl', 'wget'].includes(a[0]) && a.some((x, i) => ((x === '-X' || x === '--request' || x === '--method') && /^delete$/i.test(a[i + 1] ?? '')) || /^(-XDELETE|--request=DELETE|--method=DELETE)$/i.test(x)))
       || (['http', 'https', 'xh'].includes(a[0]) && /^delete$/i.test(a[1] ?? '')) },
   { id: 'deploy.release', effect: 'ask', kind: 'ship', description: 'Deploying or publishing (prod deploys, terraform/pulumi apply, npm publish, releases, migrations to a linked database)',

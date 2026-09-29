@@ -123,6 +123,16 @@ const FLAGGED = [
   ['find ~ -exec rm -rf {} +', 'deny', 'fs.rm-root'],
   // A commit message does not make a real SQL statement in the same chain safe.
   ['git commit -m "wip" && psql -c "DROP TABLE users"', 'ask', 'sql.destructive'],
+  // A substitution inside a quoted message or echo still RUNS: not inert.
+  ["git commit -m \"$(psql -c 'DROP TABLE users')\"", 'ask', 'sql.destructive'],
+  ['git commit -m "`psql -c \\"DROP TABLE users\\"`"', 'ask', 'sql.destructive'],
+  ["echo \"$(psql -c 'DROP TABLE users')\"", 'ask', 'sql.destructive'],
+  // find: leading options precede the start path; an -o branch escapes the filter.
+  ['find -H / -delete', 'deny', 'fs.rm-root'],
+  ['find -L -O2 ~ -delete', 'deny', 'fs.rm-root'],
+  ['find -D stat . -delete', 'ask', 'fs.rm-broad'],
+  ['find / -name keep -o -delete', 'deny', 'fs.rm-root'],
+  ['find . -name keep -or -exec rm -rf {} +', 'ask', 'fs.rm-broad'],
 ];
 
 const SAFE = [
