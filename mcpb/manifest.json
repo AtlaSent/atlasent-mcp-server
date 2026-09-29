@@ -1,12 +1,12 @@
 {
   "manifest_version": "0.3",
   "name": "atlasent-mcp-server",
-  "display_name": "Atlasent",
+  "display_name": "AtlaSent",
   "version": "2.16.0",
-  "description": "Atlasent for AI agents: with an API key, consequential actions wait for approval and get a signed record. With no key: an unsigned local demo.",
-  "long_description": "Before an agent's tool call changes a real system (a production deploy, a data export, an access grant), the agent asks Atlasent first. With an API key, risky actions wait for a person in your organization to approve them, and every decision gets a signed record, including who approved it when the decision relied on an approval. With no key the server runs a local demo: an in-process rules engine with unsigned permits that protects nothing. Also includes a read-only evidence-gap report that lists CI deploy steps with no approval gate in front of them. Source and docs: https://github.com/Atlasent/atlasent-mcp-server",
+  "description": "AtlaSent for AI agents: with an API key, consequential actions wait for approval and get a signed record. With no key: an unsigned local demo.",
+  "long_description": "Before an agent's tool call changes a real system (a production deploy, a data export, an access grant), the agent asks AtlaSent first. With an API key, risky actions wait for a person in your organization to approve them, and every decision gets a signed record, including who approved it when the decision relied on an approval. With no key the server runs a local demo: an in-process rules engine with unsigned permits that protects nothing. Also includes a read-only evidence-gap report that lists CI deploy steps with no approval gate in front of them. Source and docs: https://github.com/Atlasent/atlasent-mcp-server",
   "author": {
-    "name": "Atlasent",
+    "name": "AtlaSent",
     "url": "https://www.atlasent.io"
   },
   "repository": {
@@ -38,14 +38,14 @@
   "user_config": {
     "api_key": {
       "type": "string",
-      "title": "Atlasent API key",
+      "title": "AtlaSent API key",
       "description": "Sign up free at console.atlasent.io and choose Connect an AI agent. Leave blank for the unsigned local demo.",
       "sensitive": true,
       "required": false
     },
     "base_url": {
       "type": "string",
-      "title": "Atlasent API base URL",
+      "title": "AtlaSent API base URL",
       "description": "Leave as is for the hosted service.",
       "default": "https://api.atlasent.io/functions/v1",
       "required": false

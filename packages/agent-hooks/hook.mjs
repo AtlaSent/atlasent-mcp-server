@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { classify, decisionOf } from './rules.mjs';
-import { loadPolicy, configPaths } from './policy.mjs';
+import { loadPolicy, configPaths, ENVIRONMENT_NAME } from './policy.mjs';
 import { loadCredentials, connectedDecision } from './connected.mjs';
 
 const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -76,12 +76,21 @@ export function evaluate({ host, input, env = process.env, now = () => new Date(
   return { effect, reason, rule: rule.id, ...(unattendedAsk && { _unattendedAsk: { rule, policy } }) };
 }
 
-export const NUDGE = 'To have this wait for approval from your phone instead of stopping, connect Atlasent: atlasent-hooks connect';
+export const NUDGE = 'To have this wait for approval from your phone instead of stopping, connect AtlaSent: atlasent-hooks connect';
+
+// OFF by default until connected mode is proven end to end on staging
+// (docs/HOOK_HITL_APPROVAL.md, "Status"). Every agent.tool.invoke evaluation must
+// carry a trusted source_provenance.v1 envelope, and AtlaSent does not mint one yet,
+// so a connected guard currently blocks every held action. Advertising it would sell
+// something that does not work. Flip this when the staging proof passes;
+// ATLASENT_HOOKS_NUDGE=on shows it for testing.
+export const NUDGE_ENABLED_BY_DEFAULT = false;
 
 // Once per session, and only where the limit was actually hit: an unattended ask with
 // no key configured. Never in an attended prompt.
 function nudgeOnce(home, sessionId, env, now) {
-  if (env.ATLASENT_HOOKS_NUDGE === 'off' || typeof sessionId !== 'string' || !sessionId) return false;
+  const enabled = env.ATLASENT_HOOKS_NUDGE === 'on' || (NUDGE_ENABLED_BY_DEFAULT && env.ATLASENT_HOOKS_NUDGE !== 'off');
+  if (!enabled || typeof sessionId !== 'string' || !sessionId) return false;
   const file = join(home, 'nudged.json');
   let seen = {};
   try { const v = JSON.parse(readFileSync(file, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) seen = v; } catch { /* first time */ }
@@ -94,23 +103,40 @@ function nudgeOnce(home, sessionId, env, now) {
 }
 
 // Full decision, including connected mode. Never throws: any failure is a refusal.
-export async function decide({ host, input, env = process.env, now = () => new Date(), fetchImpl = globalThis.fetch }) {
+// plugin: installed as the Claude Code plugin, which is local only: no credential is
+// read and nothing is sent (see loadCredentials).
+export async function decide({ host, input, env = process.env, now = () => new Date(), fetchImpl = globalThis.fetch, plugin = false }) {
   const d = evaluate({ host, input, env, now });
   if (!d._unattendedAsk) return d;
   const { rule, policy } = d._unattendedAsk;
   const home = dirname(configPaths(null, env).user);
   let creds;
   try {
-    creds = loadCredentials(home, env);
+    creds = loadCredentials(home, env, { plugin });
   } catch (e) {
-    return { effect: 'deny', rule: rule.id, reason: `${d.reason} The Atlasent credentials are invalid (${String(e.message).slice(0, 120)}), so connected approval is unavailable.` };
+    return { effect: 'deny', rule: rule.id, reason: `${d.reason} The AtlaSent credentials are invalid (${String(e.message).slice(0, 120)}), so connected approval is unavailable.` };
   }
   if (!creds) {
+    // The plugin offers no connected mode, so it has nothing to point to.
+    if (plugin) return d;
     return nudgeOnce(home, input.session_id, env, now) ? { ...d, reason: `${d.reason} ${NUDGE}` } : d;
+  }
+  // Environment: the user's own hooks.json first, then the plugin's `environment`
+  // setting (user-owned, exported as CLAUDE_PLUGIN_OPTION_ENVIRONMENT). Never a
+  // repository config: see mergePolicies.
+  const config = { ...(policy.connected ?? {}) };
+  if (config.environment === undefined) {
+    const fromPlugin = typeof env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT === 'string' ? env.CLAUDE_PLUGIN_OPTION_ENVIRONMENT.trim() : '';
+    if (fromPlugin !== '') {
+      if (!ENVIRONMENT_NAME.test(fromPlugin)) {
+        return { effect: 'deny', rule: rule.id, reason: `${d.reason} The plugin's AtlaSent environment setting is not a short lowercase name such as "production", so connected approval is unavailable and nothing was sent.` };
+      }
+      config.environment = fromPlugin;
+    }
   }
   let r;
   try {
-    r = await connectedDecision({ input, rule, config: policy.connected ?? {}, creds, home, fetchImpl, now });
+    r = await connectedDecision({ input, rule, config, creds, home, fetchImpl, now });
   } catch (e) {
     r = { effect: 'deny', outcome: 'error', reason: `${d.reason} Connected approval failed (${String(e?.message ?? e).slice(0, 120)}).` };
   }

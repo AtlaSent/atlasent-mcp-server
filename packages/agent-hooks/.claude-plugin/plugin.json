@@ -1,10 +1,20 @@
 {
   "name": "atlasent-guard",
-  "version": "0.1.1",
+  "version": "0.2.6",
   "description": "Stops AI coding agents from destroying production: dropping databases, deleting volumes, force-pushing, terraform destroy and unreviewed deploys wait for a person. Local, no account.",
-  "author": { "name": "AtlaSent", "url": "https://www.atlasent.io" },
+  "author": {
+    "name": "AtlaSent",
+    "url": "https://www.atlasent.io"
+  },
   "homepage": "https://github.com/Atlasent/atlasent-mcp-server/tree/main/packages/agent-hooks#readme",
   "repository": "https://github.com/Atlasent/atlasent-mcp-server",
   "license": "Apache-2.0",
-  "keywords": ["security", "guardrails", "hooks", "production", "database", "terraform"]
+  "keywords": [
+    "security",
+    "guardrails",
+    "hooks",
+    "production",
+    "database",
+    "terraform"
+  ]
 }

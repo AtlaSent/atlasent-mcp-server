@@ -1,8 +1,42 @@
 # Design: the guard waits for a person in the console
 
-Status: **ACCEPTED** (2026-09-28; decisions below). D1 (the hook) is
-implemented in `packages/agent-hooks/connected.mjs`. D2 is blocked on the
-runtime binding fix A1 (see "Delivery plan").
+> **Status (2026-09-29): not available in the plugin.** The `atlasent-guard` plugin is
+> local only from 0.2.5: no key setting, no credential read, nothing sent. A live run
+> against the runtime found two runtime blockers: `v1-agent-actor-identity` is
+> staging-only, and an active global incident defense denies every `agent.*` action
+> that lacks signed upstream source provenance (`ASSERTION_UNVERIFIED`), which this
+> design does not produce. The approval never becomes reachable. The npm CLI path
+> keeps the code. Offer it in the plugin again only after a live end-to-end run
+> through hold, approve, claim and verify.
+
+> **Update (2026-09-29, later).** The trusted sealer now exists in atlasent-api
+> (`v1-source-provenance-seal`, staging only; see that repo's
+> `docs/runbooks/SOURCE_PROVENANCE_SEALER.md`). The hook calls it before evaluate with
+> the exact context and target, forwards the seal unchanged, and verifies the permit
+> against the provenance action hash, which it recomputes from the current action. An
+> approved claim continues the original request's admission on the runtime side. None
+> of this is proven live yet: the status above stands until the D2 staging run passes.
+
+Status: **ACCEPTED** (2026-09-28; decisions below). Slice 1 (the hook) is
+implemented in `packages/agent-hooks/connected.mjs`. **It is not usable and not
+commercially ready.**
+
+> **Correction (2026-09-29).** An earlier version of this status implied connected
+> mode only lacked a staging run. That was wrong. The first staging run showed that
+> every `agent.tool.invoke` evaluation, on staging and production, is subject to the
+> global incident-defense (METR) controls in `atlasent-api` migration
+> `20261264000000`, which require a trusted `source_provenance.v1` envelope at
+> `correlated` assurance or better, plus a stable `request_id`. AtlaSent had no
+> component that mints that envelope, so connected mode could never reach a hold. The
+> controls stay exactly as they are; the fix is a trusted server-side sealer
+> (atlasent-api), which the hook will call before evaluating. Connected mode is
+> commercially ready only after the live staging proof below passes, including its
+> negative cases.
+>
+> Staging run so far: the console's connect-an-agent flow issues a correctly bound
+> key; the agent identity mints and verifies (`actor_identity.verified: true`) once
+> its issuer is trusted; the hook failed closed, with a readable reason, at every
+> failure (network policy, untrusted issuer, wrong key, missing provenance).
 
 ## The problem
 
@@ -69,7 +103,7 @@ approval takes minutes. Blocking would fail in every case, and raising the
 timeout would freeze the agent's whole turn. Instead, the hook denies straight
 away with a reason Claude reads:
 
-> Held for approval (`apr_…`). A person has been asked in Atlasent. Do not
+> Held for approval (`apr_…`). A person has been asked in AtlaSent. Do not
 > retry with a different command. Wait, then run exactly the same command
 > again.
 
@@ -186,7 +220,7 @@ When the guard denies because the session is unattended and **no key is
 configured**, the deny reason includes one line, once per session:
 
 > To have this wait for approval from your phone instead of stopping,
-> connect Atlasent: `atlasent-hooks connect`.
+> connect AtlaSent: `atlasent-hooks connect`.
 
 The line never appears in an attended "ask" prompt, and
 `ATLASENT_HOOKS_NUDGE=off` turns it off. `atlasent-hooks connect` opens
@@ -228,7 +262,7 @@ returns 403, as `awaitApproval` in `src/engine.ts` already reports), and
 
 All five were decided by the founder on 2026-09-28.
 
-**Principle 1, clarified.** Atlasent governs authority. The hook does not
+**Principle 1, clarified.** AtlaSent governs authority. The hook does not
 hard-code "a human must always approve"; the governing policy decides what
 authority is enough for a given `agent.tool.invoke`. The **default policy
 seeded for new connected accounts** requires a human approval for unattended

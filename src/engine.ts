@@ -1266,9 +1266,8 @@ export async function verifyPermitV1(params: VerifyPermitV1Params): Promise<unkn
 // waitForApprovalResolution (packages/enforce):
 //   GET  /v1-approvals/{id}              status poll; never carries a token
 //   POST /v1-approvals/{id}/claim-permit one-time atomic claim on "approved"
-// Function path, on the /functions/v1 base: the gateway-style /v1/approvals/…
-// at the API root answers 404 "requested path is invalid" on api.atlasent.io
-// (verified 2026-09-29), so a poll there could never reach the runtime.
+// Both are the v1-approvals function under ATLASENT_BASE_URL (/functions/v1). The
+// "/v1/approvals/…" gateway form at the API root 404s on every deployed host.
 // Fail-closed throughout: any terminal status other than "approved", an
 // "approved" with no claimable permit, an auth/not-found error, or running
 // out of time all mean NO permit.

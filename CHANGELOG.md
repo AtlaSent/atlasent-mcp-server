@@ -233,6 +233,38 @@ stable and will not change without a major version bump.
   `terraform destroy`, volume deletes, `git push --force` and production
   deploys. With nobody to ask, they are refused. Everything else runs as
   normal. Runs locally and needs no account.
+- 0.2.2: without Node.js on `PATH` the guard now blocks, with a message saying
+  to install Node, instead of silently letting every action through while
+  showing as enabled. Also flags `gh repo delete`, `gh release delete`,
+  `gh api -X DELETE`, and `find … -delete` or `find … -exec rm` when nothing
+  narrows what they match. A commit message or PR body that mentions SQL no
+  longer triggers an approval prompt.
+- 0.2.3: the Node check moved from an inline command chain in `hooks.json`
+  into `hooks/guard.sh`, which `hooks.json` runs by a literal path. The Claude
+  plugin directory's validator blocks a hook command it cannot follow, and
+  0.2.2's inline chain was one. Behavior is unchanged.
+- 0.2.4 (connected mode): approval polls and permit claims now go to the
+  `v1-approvals` function under `/functions/v1`. The `/v1/approvals/…` form the
+  guard used 404s on every deployed host. Each evaluate also sends a fresh
+  `request_id`, which the runtime requires before it will consider source
+  provenance. Connected mode still cannot reach an approval: an active global
+  incident defense denies every `agent.*` action that lacks signed upstream
+  source provenance (`ASSERTION_UNVERIFIED`), which the guard cannot supply,
+  and the agent identity endpoint is not deployed to production.
+- 0.2.5: connected mode is no longer offered in the plugin. The plugin has no
+  key or environment setting, reads no credential of any kind, sends nothing,
+  and no longer suggests adding a key. It is local only until connected mode
+  can be completed end to end.
+- 0.2.6 (connected mode, npm CLI path only; the plugin stays local only):
+  - Before evaluating, the guard asks AtlaSent to seal source provenance for the
+    exact request (`v1-source-provenance-seal`) and forwards the seal unchanged;
+    it asserts none of it.
+  - The permit is verified against the provenance action hash, recomputed from
+    the current action and never read back from the local pending file.
+  - Each attempt keeps one `request_id` across honest retries, and spends it on a
+    final answer, a sealer 409 or `idempotency_key_reused`.
+  - Refused requests show the runtime's error code and message.
+  - Still not commercially ready until the live staging proof passes.
 
 ### `@atlasent/mcp-gate` 0.1.0 (tag `gate-v0.1.0`) — 2026-09-25
 

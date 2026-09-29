@@ -1,4 +1,4 @@
-# Atlasent Guard for Claude Code
+# AtlaSent Guard for Claude Code
 
 **Stops AI coding agents from destroying production.**
 
@@ -17,8 +17,7 @@ else runs exactly as before.
     mutation such as volumeDelete) [http.delete]. A person must approve this before it runs.
 ```
 
-Local by default: no account, no network, no dependencies. Apache-2.0 licensed.
-(An optional connected mode, below, sends held actions to Atlasent only after you add a key.)
+Local: no account, no network, no dependencies. Apache-2.0 licensed.
 
 ## Install (30 seconds)
 
@@ -29,7 +28,8 @@ In Claude Code:
 /plugin install atlasent-guard@atlasent
 ```
 
-Restart Claude Code. Requires Node 18 or later on your `PATH`.
+Restart Claude Code. Requires Node 18 or later on your `PATH`. Without it, the guard
+blocks every checked action and says why, rather than silently protecting nothing.
 
 Try it: ask Claude to run `terraform destroy` or `git push --force`. You get a prompt
 instead of a teardown.
@@ -40,12 +40,12 @@ instead of a teardown.
 |---|---|---|
 | `fs.rm-root` | **deny** | `rm -rf /`, `rm -rf ~`, `sudo bash -c "rm -rf /usr"` |
 | `disk.format` | **deny** | `mkfs.ext4 /dev/sda1`, `dd of=/dev/nvme0n1` |
-| `fs.rm-broad` | ask | `rm -rf .`, `rm -rf .git`, `rm -rf ~/projects/app` (not `rm -rf node_modules`) |
+| `fs.rm-broad` | ask | `rm -rf .`, `rm -rf .git`, `rm -rf ~/projects/app`, `find . -delete` (not `rm -rf node_modules`, not `find . -name '*.pyc' -delete`) |
 | `sql.destructive` | ask | `DROP TABLE`, `TRUNCATE`, `DELETE FROM x` with no `WHERE`, `DROP COLUMN`, `FLUSHALL`, `db.dropDatabase()` — in `psql -c`, heredocs, pipes, or a database MCP tool's `query` |
 | `db.reset` | ask | `supabase db reset`, `prisma migrate reset`, `dropdb`, `rails db:drop`, `manage.py flush` |
 | `iac.destroy` | ask | `terraform destroy`, `tofu apply -destroy`, `pulumi destroy`, `cdk destroy` |
 | `k8s.delete` | ask | `kubectl delete`, `kubectl drain`, `--replicas=0`, `helm uninstall` |
-| `cloud.delete` | ask | `aws rds delete-db-instance`, `aws s3 rb`, `aws s3 rm --recursive`, `gcloud … delete`, `az … delete` |
+| `cloud.delete` | ask | `aws rds delete-db-instance`, `aws s3 rb`, `aws s3 rm --recursive`, `gcloud … delete`, `az … delete`, `gh repo delete`, `gh release delete`, `gh api -X DELETE` |
 | `paas.destroy` | ask | `railway down`, `railway volume delete`, `fly apps destroy`, `heroku pg:reset`, `vercel rm`, `supabase projects delete` |
 | `container.destroy` | ask | `docker volume rm`, `docker system prune --volumes`, `docker compose down -v` |
 | `http.delete` | ask | `curl -X DELETE …`, a GraphQL `mutation { volumeDelete(…) }` sent with curl |
@@ -58,7 +58,8 @@ instead of a teardown.
 
 It unwraps `sudo`, `env`, `timeout`, `npx`, `VAR=value`, chains (`&&`, `;`, `|`),
 `$(…)`, and `bash -c "…"`, so a destructive command inside a longer one is still seen.
-`grep "DROP TABLE" docs/` is not flagged; `echo "DROP TABLE x" | psql` is.
+`grep "DROP TABLE" docs/` and a commit message that mentions `DROP TABLE` are not
+flagged; `echo "DROP TABLE x" | psql` is.
 
 To see what it would do with any command, from a checkout of this repository:
 `node packages/agent-hooks/cli.mjs check "<command>"`. (The npm package
@@ -69,38 +70,6 @@ To see what it would do with any command, from a checkout of this repository:
 If Claude Code runs with `--dangerously-skip-permissions` (`bypassPermissions`) or
 `dontAsk`, there is no one to answer a prompt. In those modes every "ask" becomes a
 **deny**. Unattended agents are exactly where the incidents happen.
-
-### Optional: wait for a person instead of stopping
-
-With an Atlasent account, an unattended "ask" goes to your organization's policy instead
-of being refused on the spot. By default a person decides in the Atlasent console (and in
-Slack if it's connected), and the agent carries on once they approve.
-
-```sh
-atlasent-hooks connect                                        # shows how to get an agent key
-atlasent-hooks connect --environment production < key.txt     # saves it (0600), key via stdin
-```
-
-How it works:
-
-1. The guard sends the held action to Atlasent: the tool, a **redacted** preview, and a
-   SHA-256 of the whole action (tool name plus complete input). Tokens, passwords, keys
-   and URL credentials are masked before anything leaves your machine. If redaction
-   fails, nothing is sent and the action is blocked. To send only the hash and metadata,
-   set `"connected": { "preview": "off" }`. A repository config may turn the preview off,
-   but only your own config picks the environment.
-2. The agent is told the action is held and to run exactly the same action again later.
-3. A person approves once, or denies with a note the agent reads on its next try.
-4. On the re-run, the guard claims a single-use permit and verifies it here, bound to that
-   exact action, repository, environment and agent. A changed action is a new request.
-
-Every failure blocks: network errors, timeouts, unexpected answers, a permit that
-doesn't verify. The guard never turns "unattended" into permission on its own. Whether a
-person is needed is decided by your organization's policy in Atlasent. When the permit
-verifies, the guard steps aside and Claude Code's own permission settings still apply.
-
-Without a key, nothing changes and nothing is sent. The first unattended block in a
-session adds one line saying connected mode exists (`ATLASENT_HOOKS_NUDGE=off` removes it).
 
 ## Configure
 
@@ -152,18 +121,18 @@ Be clear-eyed about this; a guard that overclaims is worse than none.
 This plugin answers *"did someone at the keyboard say yes?"* After an incident, the
 question is *"who in the organization authorized this, and can you prove it?"*
 
-[Atlasent](https://www.atlasent.io) answers that one. The same destructive actions go to
+[AtlaSent](https://www.atlasent.io) answers that one. The same destructive actions go to
 your organization's policy at execution time: a named approver, a single-use permit bound
 to that exact action, and a signed record of the decision. For agents, use [`@atlasent/mcp-server`](../../README.md) or
 [`@atlasent/mcp-gate`](../mcp-gate); for pipelines, the
-[Atlasent deploy gate](https://github.com/Atlasent/atlasent-action).
+[AtlaSent deploy gate](https://github.com/Atlasent/atlasent-action).
 [Create an account](https://console.atlasent.io/auth/sign-up?utm_source=agent-hooks&utm_medium=readme).
 
 ## Develop
 
 ```sh
 cd packages/agent-hooks
-node --test test/*.node.mjs
+npm test          # tests live in ../agent-hooks-test so the plugin ships none
 node cli.mjs rules
 node cli.mjs check "terraform destroy"
 ```
