@@ -255,6 +255,16 @@ stable and will not change without a major version bump.
   key or environment setting, reads no credential of any kind, sends nothing,
   and no longer suggests adding a key. It is local only until connected mode
   can be completed end to end.
+- 0.2.6 (connected mode, npm CLI path only; the plugin stays local only):
+  - Before evaluating, the guard asks AtlaSent to seal source provenance for the
+    exact request (`v1-source-provenance-seal`) and forwards the seal unchanged;
+    it asserts none of it.
+  - The permit is verified against the provenance action hash, recomputed from
+    the current action and never read back from the local pending file.
+  - Each attempt keeps one `request_id` across honest retries, and spends it on a
+    final answer, a sealer 409 or `idempotency_key_reused`.
+  - Refused requests show the runtime's error code and message.
+  - Still not commercially ready until the live staging proof passes.
 
 ### `@atlasent/mcp-gate` 0.1.0 (tag `gate-v0.1.0`) — 2026-09-25
 

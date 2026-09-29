@@ -16,6 +16,7 @@ import { mergePolicies, validatePolicy } from '../agent-hooks/policy.mjs';
 const CLI = fileURLToPath(new URL('../agent-hooks/cli.mjs', import.meta.url));
 const KEY = 'ask_test_hookkey123';
 const AGENT = 'agent:aaaaaaaa-0000-4000-8000-000000000001';
+const TENANT = 'c8928dc5-0000-4000-8000-000000000001';
 
 // ---------------------------------------------------------------------------
 // A fake runtime that enforces what the real one does at each step: an agent
@@ -29,18 +30,41 @@ function fakeRuntime(opts = {}) {
   const permits = new Map();
   let seq = 0;
   const agent = () => opts.agent ?? AGENT;
+  // Seals by request_id, as v1-source-provenance-seal records them.
+  const seals = new Map();
+  // The real formula (source_provenance_action.v1), so the guard's own recomputation is exercised.
+  const sealHash = (b) => createHash('sha256').update(canonicalJson({ version: 'source_provenance_action.v1', tenant_id: TENANT, actor_id: agent(), action_type: b.action_type, environment: b.context.environment, resource_id: b.resource_id ?? null, context: b.context })).digest('hex');
   const handle = async (method, path, body) => {
     calls.push({ method, path, body });
     if (opts.fail?.(method, path)) return opts.fail(method, path);
     if (path.endsWith('/v1-agent-actor-identity')) {
       if (opts.mintStatus) return { status: opts.mintStatus, json: { error: 'api_key_not_agent_bound' } };
-      return { status: 200, json: { assertion: { version: 'actor_identity.v1', subject: { principal_kind: 'agent', principal_id: agent() }, binding: { action_type: body.action_type, environment: body.environment }, signature: 'sig' } } };
+      return { status: 200, json: { assertion: { version: 'actor_identity.v1', subject: { principal_kind: 'agent', principal_id: agent() }, binding: { action_type: body.action_type, environment: body.environment, tenant_id: TENANT }, signature: 'sig' } } };
+    }
+    if (path.endsWith('/v1-source-provenance-seal')) {
+      if (opts.sealStatus) return { status: opts.sealStatus, json: { error: opts.sealError ?? 'seal_refused', message: 'refused by fake' } };
+      const h = sealHash(body);
+      const prior = seals.get(body.request_id);
+      if (prior && prior.hash !== h) return { status: 409, json: { error: 'seal_conflict', message: 'request_id already sealed for another action' } };
+      seals.set(body.request_id, { hash: h, context: JSON.stringify(body.context), resource: body.resource_id });
+      return { status: 200, json: { action_hash: h, reused: !!prior, source_provenance: { envelope: { chain_id: body.request_id, nonce: `n-${body.request_id}` }, attestation: { issuer: 'atlasent-source-provenance-sealer' } } } };
     }
     if (path.endsWith('/v1-evaluate')) {
       if (opts.evaluate) return opts.evaluate(body);
+      // Models the METR control unless opts.noProvenanceControl: the seal for THIS
+      // request must exist and cover exactly this context and target.
+      let payload = body.execution_payload_hash; let admitted = false;
+      if (!opts.noProvenanceControl) {
+        const seal = seals.get(body.request_id);
+        const sp = body.source_provenance;
+        if (!sp || !seal || sp.envelope?.chain_id !== body.request_id || seal.context !== JSON.stringify(body.context) || seal.resource !== body.resource_id) {
+          return { status: 200, json: { decision: 'deny', deny_code: 'ASSERTION_UNVERIFIED', source_provenance_reason: 'source_provenance_required' } };
+        }
+        payload = seal.hash; admitted = true;
+      }
       const id = `apr_${++seq}`;
-      approvals.set(id, { status: 'pending', action_type: body.action_type, environment: body.context.environment, binding: { payload: body.execution_payload_hash, target: body.resource_id, env: body.context.environment, actor: body.actor_identity.subject.principal_id } });
-      return { status: 200, json: { decision: 'hold', approval_request_id: id } };
+      approvals.set(id, { status: 'pending', action_type: body.action_type, environment: body.context.environment, binding: { payload, target: body.resource_id, env: body.context.environment, actor: body.actor_identity.subject.principal_id } });
+      return { status: 200, json: { decision: 'hold', approval_request_id: id, ...(admitted && { source_provenance: { chain_id: body.request_id, assurance: 'correlated' } }) } };
     }
     // Only the path the real runtime serves: the v1-approvals function under
     // /functions/v1. The "/v1/approvals/…" gateway form 404s on every deployed host.
@@ -80,7 +104,7 @@ function fakeRuntime(opts = {}) {
     return new Response(JSON.stringify(r.json), { status: r.status, headers: { 'content-type': 'application/json' } });
   };
   const approve = (id, status = 'approved_awaiting_claim', note) => { const a = approvals.get(id); a.status = status; if (note) a.note = note; };
-  return { calls, approvals, permits, fetchImpl, approve, handle };
+  return { calls, approvals, permits, seals, fetchImpl, approve, handle };
 }
 
 function setup({ environment = 'production', preview, project, key = KEY } = {}) {
@@ -94,6 +118,9 @@ function setup({ environment = 'production', preview, project, key = KEY } = {})
   return { home, cwd, env };
 }
 const unattended = (cwd, command = 'fly deploy', extra = {}) => ({ hook_event_name: 'PreToolUse', session_id: 's1', cwd, permission_mode: 'bypassPermissions', tool_name: 'Bash', tool_input: { command }, ...extra });
+// What pending.json holds, as parsed entries ({} when absent).
+const pendingEntries = home => (existsSync(join(home, 'pending.json')) ? JSON.parse(readFileSync(join(home, 'pending.json'), 'utf8')) : {});
+const approvalsRemembered = home => Object.values(pendingEntries(home)).filter(e => e.approval_request_id).length;
 const run = (s, rt, input) => decide({ host: 'claude-code', input, env: s.env, fetchImpl: rt.fetchImpl });
 const idOf = reason => /\((apr_\d+)\)/.exec(reason)?.[1];
 
@@ -146,7 +173,11 @@ test('verify presents payload hash, target, environment and the agent actor', as
   await run(s, rt, unattended(s.cwd)); rt.approve('apr_1');
   await run(s, rt, unattended(s.cwd));
   const v = rt.calls.find(c => c.path.endsWith('/v1-verify-permit')).body;
-  assert.equal(v.payload_hash, actionDigest(unattended(s.cwd)));
+  // The permit is bound to the sealed provenance action hash, which commits to the
+  // exact action through context.action_digest.
+  const sealCall = rt.calls.find(c => c.path.endsWith('/v1-source-provenance-seal')).body;
+  assert.equal(sealCall.context.action_digest, actionDigest(unattended(s.cwd)));
+  assert.equal(v.payload_hash, [...rt.seals.values()][0].hash);
   assert.equal(v.target_id, 'deploy.release@https://github.com/acme/app.git');
   assert.equal(v.environment, 'production');
   assert.equal(v.actor_id, AGENT);
@@ -225,7 +256,8 @@ test('wrong target: the same action from a different repository does not verify'
   writeFileSync(join(s.cwd, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/acme/other.git\n');
   const r = await run(s, rt, unattended(s.cwd));
   assert.equal(r.effect, 'deny');
-  assert.match(r.reason, /TARGET_MISMATCH/);
+  // The provenance action hash commits to the target too, so either check can fire first.
+  assert.match(r.reason, /TARGET_MISMATCH|PAYLOAD_MISMATCH/);
 });
 
 test('wrong environment: an approval minted for one environment does not verify in another', async () => {
@@ -234,7 +266,7 @@ test('wrong environment: an approval minted for one environment does not verify 
   writeFileSync(join(s.home, 'hooks.json'), JSON.stringify({ version: 1, connected: { environment: 'staging' } }));
   const r = await run(s, rt, unattended(s.cwd));
   assert.equal(r.effect, 'deny');
-  assert.match(r.reason, /ENVIRONMENT_MISMATCH/);
+  assert.match(r.reason, /ENVIRONMENT_MISMATCH|PAYLOAD_MISMATCH/);
 });
 
 test('insufficient approval: still pending, rejected with a note, or a runtime deny all block', async () => {
@@ -271,12 +303,15 @@ test('a claim that fails (already claimed) blocks', async () => {
   assert.match(r.reason, /no permit could be claimed/);
 });
 
-test('network failure blocks and remembers nothing', async () => {
+test('network failure blocks, remembers no approval, and keeps the attempt\'s request_id for an honest retry', async () => {
   const s = setup(); const rt = fakeRuntime({ throwOn: p => p.endsWith('/v1-evaluate') });
   const r = await run(s, rt, unattended(s.cwd));
   assert.equal(r.effect, 'deny');
   assert.match(r.reason, /could not be reached/);
-  assert.ok(!existsSync(join(s.home, 'pending.json')));
+  assert.equal(approvalsRemembered(s.home), 0);
+  const entries = Object.values(pendingEntries(s.home));
+  assert.equal(entries.length, 1, 'the attempt (request_id only) is kept');
+  assert.match(entries[0].request_id, /^[0-9a-f-]{36}$/);
 });
 
 test('malformed responses block: non-JSON, unknown decision, hold without id, 5xx, bad identity', async () => {
@@ -423,8 +458,16 @@ test('no key, nudge not shown: the decision is exactly what the local guard retu
   assert.equal(rt.calls.length, 0);
 });
 
-test('no key: the nudge is today\'s reason plus exactly one line, once per session, never when attended', async () => {
+test('the nudge is OFF by default until connected mode is staging-proven', async () => {
   const s = setup({ key: null }); const rt = fakeRuntime();
+  const input = unattended(s.cwd);
+  const local = evaluate({ host: 'claude-code', input, env: s.env });
+  const r = await decide({ host: 'claude-code', input, env: s.env, fetchImpl: rt.fetchImpl });
+  assert.equal(r.reason, local.reason, 'no nudge advertising a path that cannot work yet');
+});
+
+test('no key, nudge switched on: today\'s reason plus exactly one line, once per session, never when attended', async () => {
+  const s0 = setup({ key: null }); const s = { ...s0, env: { ...s0.env, ATLASENT_HOOKS_NUDGE: 'on' } }; const rt = fakeRuntime();
   const input = unattended(s.cwd);
   const local = evaluate({ host: 'claude-code', input, env: s.env });
   const first = await decide({ host: 'claude-code', input, env: s.env, fetchImpl: rt.fetchImpl });
@@ -561,7 +604,7 @@ test('plugin: loadCredentials never returns a credential', () => {
 test('plugin: with every kind of key present, nothing is sent and the local refusal stands', async () => {
   const s = setup(); const rt = fakeRuntime();
   writeFileSync(join(s.home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1' }));
-  const env = { ...s.env, CLAUDE_PLUGIN_OPTION_API_KEY: KEY };
+  const env = { ...s.env, CLAUDE_PLUGIN_OPTION_API_KEY: KEY, ATLASENT_HOOKS_NUDGE: 'on' };
   const r = await decide({ host: 'claude-code', input: unattended(s.cwd), env, fetchImpl: rt.fetchImpl, plugin: true });
   assert.equal(rt.calls.length, 0);
   assert.equal(r.effect, 'deny');
@@ -581,7 +624,7 @@ test('CLI --plugin (the registered plugin command) never reads a machine key or 
   const s = setup();
   writeFileSync(join(s.home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1' }));
   const run = argv => new Promise((resolve, reject) => {
-    const p = spawn(process.execPath, [CLI, ...argv], { env: { PATH: process.env.PATH, ...s.env, CLAUDE_PLUGIN_OPTION_API_KEY: KEY, ATLASENT_HOOKS_BASE_URL: 'https://127.0.0.1:1/functions/v1' } });
+    const p = spawn(process.execPath, [CLI, ...argv], { env: { PATH: process.env.PATH, ...s.env, CLAUDE_PLUGIN_OPTION_API_KEY: KEY, ATLASENT_HOOKS_NUDGE: 'on', ATLASENT_HOOKS_BASE_URL: 'https://127.0.0.1:1/functions/v1' } });
     let out = ''; let err = '';
     p.stdout.on('data', c => { out += c; }); p.stderr.on('data', c => { err += c; });
     p.on('close', code => code === 0 ? resolve(JSON.parse(out)) : reject(Error(err)));
@@ -612,7 +655,7 @@ test('stop conditions: HOLD is retryable after approval, DENY and unrecorded hol
   assert.match(denied.reason, /Decision ev_10\./);
   assert.match(denied.reason, /not a wait for approval\. Do not retry it unchanged/);
   assert.doesNotMatch(denied.reason, /run exactly the same action again/);
-  assert.ok(!existsSync(join(s.home, 'pending.json')), 'a deny is never remembered as pending');
+  assert.deepEqual(pendingEntries(s.home), {}, 'a deny is never remembered as pending, and spends its request_id');
 
   const s3 = setup();
   const unrecorded = await run(s3, fakeRuntime({ evaluate: () => ({ status: 200, json: { decision: 'hold', evaluation_id: 'ev_11' } }) }), unattended(s3.cwd));
@@ -620,7 +663,7 @@ test('stop conditions: HOLD is retryable after approval, DENY and unrecorded hol
   assert.match(unrecorded.reason, /no approval request was recorded/);
   assert.match(unrecorded.reason, /Do not retry it automatically/);
   assert.doesNotMatch(unrecorded.reason, /run exactly the same action again/);
-  assert.ok(!existsSync(join(s3.home, 'pending.json')));
+  assert.deepEqual(pendingEntries(s3.home), {}, 'an unrecorded hold is final: nothing remembered, request_id spent');
 
   const s4 = setup();
   const odd = await run(s4, fakeRuntime({ evaluate: () => ({ status: 200, json: { decision: 'maybe' } }) }), unattended(s4.cwd));
@@ -659,5 +702,216 @@ test('stop conditions: INSUFFICIENT_APPROVALS routes to a person rather than tel
   assert.match(r.reason, /needs approval from a person in AtlaSent/);
   assert.match(r.reason, /run exactly the same action again/);
   assert.doesNotMatch(r.reason, /not a wait for approval/);
-  assert.ok(!existsSync(join(s.home, 'pending.json')), 'no approval request exists, so nothing is remembered');
+  assert.deepEqual(pendingEntries(s.home), {}, 'no approval request exists, so nothing is remembered');
+});
+
+
+// ---------------------------------------------------------------------------
+// Runtime error detail and the per-attempt request_id
+// ---------------------------------------------------------------------------
+
+test('a refused evaluate shows the runtime\'s error code and message, not a bare status', async () => {
+  const s = setup();
+  const rt = fakeRuntime({ evaluate: () => ({ status: 400, json: { error: 'source_provenance_request_id_required', message: 'A stable request_id is required before source provenance can be admitted' } }) });
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /HTTP 400, source_provenance_request_id_required: A stable request_id is required/);
+});
+
+test('a refused evaluate with only a message, or nothing readable, still says what it can', async () => {
+  const s = setup();
+  const onlyMessage = fakeRuntime({ evaluate: () => ({ status: 422, json: { message: 'context.tool must be a non-empty string' } }) });
+  assert.match((await run(s, onlyMessage, unattended(s.cwd))).reason, /HTTP 422, context\.tool must be a non-empty string/);
+  const s2 = setup();
+  const nothing = fakeRuntime({ evaluate: () => ({ status: 502, json: {} }) });
+  const r = await run(s2, nothing, unattended(s2.cwd));
+  assert.match(r.reason, /\(HTTP 502\)/);
+});
+
+test('an identity mint refusal shows the runtime\'s code', async () => {
+  const s = setup();
+  const rt = fakeRuntime({ fail: (m, p) => p.endsWith('/v1-agent-actor-identity') && { status: 403, json: { error: 'agent_binding_required', message: 'This API key is not bound to a registered agent' } } });
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.match(r.reason, /HTTP 403, agent_binding_required: This API key is not bound to a registered agent/);
+});
+
+test('request_id is sent top-level, is a UUID, and stays with the held approval', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  await run(s, rt, unattended(s.cwd));
+  const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate')).body;
+  assert.match(ev.request_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  assert.equal(ev.context.request_id, undefined, 'never nested under context');
+  const [entry] = Object.values(pendingEntries(s.home));
+  assert.equal(entry.request_id, ev.request_id);
+  assert.equal(entry.approval_request_id, 'apr_1');
+});
+
+test('a retry after a lost answer re-presents the same request_id', async () => {
+  const s = setup();
+  let n = 0;
+  const rt = fakeRuntime({ evaluate: () => (++n === 1 ? { status: 503, json: { error: 'unavailable' } } : { status: 200, json: { decision: 'hold', approval_request_id: 'apr_9' } }) });
+  await run(s, rt, unattended(s.cwd));
+  await run(s, rt, unattended(s.cwd));
+  const ids = rt.calls.filter(c => c.path.endsWith('/v1-evaluate')).map(c => c.body.request_id);
+  assert.equal(ids.length, 2);
+  assert.equal(ids[0], ids[1], 'same attempt, same idempotency key');
+});
+
+test('after a final decision the next attempt gets a fresh request_id; a changed action gets its own', async () => {
+  const s = setup();
+  const rt = fakeRuntime({ evaluate: () => ({ status: 200, json: { decision: 'deny', deny_code: 'POLICY_DENY', deny_reason: 'no' } }) });
+  await run(s, rt, unattended(s.cwd, 'fly deploy'));
+  await run(s, rt, unattended(s.cwd, 'fly deploy'));
+  await run(s, rt, unattended(s.cwd, 'fly deploy --app other'));
+  const ids = rt.calls.filter(c => c.path.endsWith('/v1-evaluate')).map(c => c.body.request_id);
+  assert.equal(new Set(ids).size, 3, 'a replayed request_id would return the old recorded decision');
+});
+
+test('a tampered pending entry (bad request_id) is discarded, never sent', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  const digest = actionDigest(unattended(s.cwd));
+  writeFileSync(join(s.home, 'pending.json'), JSON.stringify({ [digest]: { request_id: 'not-a-uuid', created_at: new Date().toISOString() } }));
+  await run(s, rt, unattended(s.cwd));
+  const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate')).body;
+  assert.notEqual(ev.request_id, 'not-a-uuid');
+  assert.match(ev.request_id, /^[0-9a-f-]{36}$/);
+});
+
+// ---------------------------------------------------------------------------
+// Source provenance: AtlaSent seals, the guard only forwards (2026-09-29)
+// ---------------------------------------------------------------------------
+
+test('provenance: the exact evaluate request is sealed first and the seal is forwarded unchanged', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  await run(s, rt, unattended(s.cwd));
+  const paths = rt.calls.map(c => c.path.split('/').pop());
+  assert.deepEqual(paths, ['v1-agent-actor-identity', 'v1-source-provenance-seal', 'v1-evaluate']);
+  const seal = rt.calls[1].body; const ev = rt.calls[2].body;
+  assert.deepEqual(Object.keys(seal).sort(), ['action_type', 'context', 'request_id', 'resource_id']);
+  assert.equal(seal.request_id, ev.request_id);
+  assert.equal(seal.resource_id, ev.resource_id);
+  assert.deepEqual(seal.context, ev.context);
+  assert.equal(ev.context.action_digest, actionDigest(unattended(s.cwd)));
+  assert.equal(ev.source_provenance.envelope.chain_id, ev.request_id);
+});
+
+test('provenance: a refused or failed seal blocks without evaluating, and keeps the attempt', async () => {
+  for (const status of [403, 503]) {
+    const s = setup(); const rt = fakeRuntime({ sealStatus: status, sealError: 'agent_owner_required' });
+    const r = await run(s, rt, unattended(s.cwd));
+    assert.equal(r.effect, 'deny');
+    assert.match(r.reason, new RegExp(`HTTP ${status}, agent_owner_required`));
+    assert.ok(!rt.calls.some(c => c.path.endsWith('/v1-evaluate')));
+    const first = rt.calls.find(c => c.path.endsWith('/v1-source-provenance-seal')).body.request_id;
+    await run(s, rt, unattended(s.cwd));
+    const seals = rt.calls.filter(c => c.path.endsWith('/v1-source-provenance-seal'));
+    assert.equal(seals[1].body.request_id, first, 'an honest retry re-presents the same request');
+  }
+});
+
+test('provenance: a 409 from the sealer spends the attempt so the next run starts a new request', async () => {
+  const s = setup(); const rt = fakeRuntime({ sealStatus: 409, sealError: 'seal_expired' });
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /seal_expired/);
+  assert.deepEqual(pendingEntries(s.home), {});
+});
+
+test('provenance: a seal for a different action than this one is not used', async () => {
+  const s = setup();
+  const rt2 = fakeRuntime({ fail: (m, p) => p.endsWith('/v1-source-provenance-seal')
+    ? { status: 200, json: { action_hash: 'f'.repeat(64), source_provenance: { envelope: {}, attestation: {} } } } : undefined });
+  const r = await run(s, rt2, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /sealed provenance for a different action/);
+  assert.ok(!rt2.calls.some(c => c.path.endsWith('/v1-evaluate')));
+});
+
+test('provenance: missing seal on the evaluate is denied by the runtime (METR control stays in charge)', async () => {
+  const rt = fakeRuntime();
+  // A guard that dropped the seal would get the control's deny, not a hold.
+  const r = await rt.handle('POST', '/functions/v1/v1-evaluate', {
+    action_type: 'agent.tool.invoke', request_id: 'x', resource_id: 't', context: { environment: 'production' },
+    actor_identity: { subject: { principal_id: AGENT } },
+  });
+  assert.equal(r.json.deny_code, 'ASSERTION_UNVERIFIED');
+  assert.equal(r.json.source_provenance_reason, 'source_provenance_required');
+});
+
+test('provenance HITL: hold -> approve once -> claim -> verify bound to the sealed hash -> allow, exactly once', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  const first = await run(s, rt, unattended(s.cwd));
+  assert.equal(idOf(first.reason), 'apr_1');
+  assert.equal(Object.values(pendingEntries(s.home))[0].binding, 'provenance');
+  rt.approve('apr_1');
+  const second = await run(s, rt, unattended(s.cwd));
+  assert.equal(second.effect, 'allow', second.reason);
+  const v = rt.calls.filter(c => c.path.endsWith('/v1-verify-permit'));
+  assert.equal(v.length, 1);
+  assert.equal(v[0].body.payload_hash, [...rt.seals.values()][0].hash);
+  // The permit is spent: the next identical action is a new request, not a replay.
+  const third = await run(s, rt, unattended(s.cwd));
+  assert.equal(third.effect, 'deny');
+  assert.ok(idOf(third.reason) && idOf(third.reason) !== 'apr_1', third.reason);
+  const evs = rt.calls.filter(c => c.path.endsWith('/v1-evaluate'));
+  assert.equal(evs.length, 2);
+  assert.notEqual(evs[1].body.request_id, evs[0].body.request_id);
+});
+
+test('provenance HITL: an approval cannot be used by a different agent', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  await run(s, rt, unattended(s.cwd)); rt.approve('apr_1');
+  const other = fakeRuntime({ agent: 'agent:bbbbbbbb-0000-4000-8000-000000000002' });
+  other.approvals.set('apr_1', rt.approvals.get('apr_1'));
+  const r = await run(s, other, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /ACTOR_MISMATCH/);
+});
+
+test('runtime without the provenance control: the permit stays bound to the action digest', async () => {
+  const s = setup(); const rt = fakeRuntime({ noProvenanceControl: true });
+  await run(s, rt, unattended(s.cwd));
+  assert.equal(Object.values(pendingEntries(s.home))[0].binding, 'digest');
+  rt.approve('apr_1');
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'allow', r.reason);
+  assert.equal(rt.calls.find(c => c.path.endsWith('/v1-verify-permit')).body.payload_hash, actionDigest(unattended(s.cwd)));
+});
+
+test('idempotency_key_reused spends the attempt', async () => {
+  const s = setup();
+  const rt = fakeRuntime({ evaluate: () => ({ status: 409, json: { error: 'idempotency_key_reused', message: 'An evaluation for request_id already exists' } }) });
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /idempotency_key_reused/);
+  assert.deepEqual(pendingEntries(s.home), {});
+});
+
+test('a pending entry whose binding was tampered to "digest" still cannot verify a provenance permit', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  await run(s, rt, unattended(s.cwd)); rt.approve('apr_1');
+  const f = join(s.home, 'pending.json'); const p = JSON.parse(readFileSync(f, 'utf8'));
+  for (const e of Object.values(p)) e.binding = 'digest';
+  writeFileSync(f, JSON.stringify(p));
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /PAYLOAD_MISMATCH/);
+});
+
+test('an unrecognized or unreadable 200 answer spends the attempt (Codex P2)', async () => {
+  for (const evaluate of [() => ({ status: 200, json: { decision: 'maybe' } }), () => ({ status: 200, raw: 'not json' })]) {
+    const s = setup(); const rt = fakeRuntime({ evaluate });
+    assert.equal((await run(s, rt, unattended(s.cwd))).effect, 'deny');
+    assert.deepEqual(pendingEntries(s.home), {});
+  }
+});
+
+test('a pre-0.2.6 pending approval survives the upgrade and is claimed (Codex P2)', async () => {
+  const s = setup(); const rt = fakeRuntime({ noProvenanceControl: true });
+  await run(s, rt, unattended(s.cwd)); rt.approve('apr_1');
+  const f = join(s.home, 'pending.json'); const p = JSON.parse(readFileSync(f, 'utf8'));
+  for (const e of Object.values(p)) { delete e.request_id; delete e.binding; }
+  writeFileSync(f, JSON.stringify(p));
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'allow', r.reason);
 });

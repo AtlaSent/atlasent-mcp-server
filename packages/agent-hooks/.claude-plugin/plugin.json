@@ -1,6 +1,6 @@
 {
   "name": "atlasent-guard",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Stops AI coding agents from destroying production: dropping databases, deleting volumes, force-pushing, terraform destroy and unreviewed deploys wait for a person. Local, no account.",
   "author": {
     "name": "AtlaSent",
