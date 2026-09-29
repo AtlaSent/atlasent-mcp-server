@@ -57,7 +57,8 @@ const DEPLOY_ARGS = {
 // answered 404 here (older runtime) so the call sequence under test is only
 // evaluate / verify.
 function isChangeControlSideCall(url: string): boolean {
-  return url.includes("/v1-change-brief") || url.includes("/v1-agent-actor-identity");
+  return url.includes("/v1-change-brief") || url.includes("/v1-agent-actor-identity") ||
+    url.includes("/v1-source-provenance-seal");
 }
 
 let originalFetch: typeof globalThis.fetch;

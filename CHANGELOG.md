@@ -15,8 +15,21 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ### Added
 
+- The `agent.tool.invoke` gate now presents what the runtime requires for an
+  agent tool call (ADR CROSS-063):
+  - It sends the agent's own verified identity, minted for exactly
+    `agent.tool.invoke` in the request's environment.
+  - It sends sealed source provenance, sealed for the same `request_id`,
+    context and target that are evaluated.
+  - It verifies the permit against the sealed action hash and the agent the
+    runtime issued it to.
+
+  If either the identity or the seal cannot be obtained, the evaluate still
+  goes out and the runtime refuses it. Nothing is allowed locally. This needs
+  an agent-bound AtlaSent API key.
+
 - `deploy_service` sends one attempt id as `request_id` on both of its
-  evaluations: `mcp-<uuid>.tool-gate` for the `agent.tool.invoke` gate and
+  evaluations: the bare `<uuid>` for the `agent.tool.invoke` gate and
   `mcp-<uuid>.action` for the `production.deploy` it guards. The runtime stores
   `request_id` on every evaluation row, including early refusals, so the
   AtlaSent console can tie the gate to the deploy and show the agent's deploy

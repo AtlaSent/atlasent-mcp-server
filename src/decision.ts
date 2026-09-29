@@ -60,6 +60,14 @@ export type AllowDecision = {
   conditions?: string[];
   /** Client-side notes (e.g. a Change Brief could not be created). */
   notes?: string[];
+  /**
+   * The digest the runtime bound this permit to when it admitted sealed
+   * source provenance (the sealed action hash). Present it as `payload_hash`
+   * at verify; any other value fails PAYLOAD_MISMATCH.
+   */
+  bound_payload_hash?: string;
+  /** The actor the permit was issued to, when it differs from the caller's. */
+  bound_actor_id?: string;
 };
 
 export type DenyDecision = {

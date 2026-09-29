@@ -292,7 +292,13 @@ async function agentToolGate(
     return gate;
   }
 
-  const verification = await verify(gate.permit_token, ctx);
+  // Verify against exactly what the permit was bound to: the sealed action
+  // hash and the runtime-derived agent actor, when the runtime set them.
+  const verification = await verify(gate.permit_token, {
+    ...ctx,
+    ...(gate.bound_payload_hash && { payload_hash: gate.bound_payload_hash }),
+    ...(gate.bound_actor_id && { actor_id: gate.bound_actor_id }),
+  });
   log("agent_tool_gate.verify", {
     tool: toolName,
     actor: actorId,
