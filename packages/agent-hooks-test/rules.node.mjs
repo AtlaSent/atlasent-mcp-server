@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classify, decisionOf, tokenize, segmentsOf, RULES } from '../rules.mjs';
+import { classify, decisionOf, tokenize, segmentsOf, RULES } from '../agent-hooks/rules.mjs';
 
 const verdict = (command, policy) => {
   const { effect, rule } = decisionOf(classify({ kind: 'shell', command }, policy));
