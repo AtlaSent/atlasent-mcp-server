@@ -24,7 +24,7 @@ here.
 | **`claude-plugins-official`** (Anthropic's own marketplace) | not listed | — | — | — | Only via an Anthropic partner contact; no public submission route | Claude Code docs, plugins/publish |
 | **Claude connector directory** (remote MCP) | not applicable | — | — | Needs a hosted remote MCP URL; this server is stdio (streamable HTTP is self-host only) | None until AtlaSent hosts a remote MCP endpoint | [submit docs](https://claude.com/docs/plugins/submit) |
 | **Glama** | [glama.ai/mcp/servers/@Atlasent/atlasent-mcp-server](https://glama.ai/mcp/servers/@Atlasent/atlasent-mcp-server) | Not stated on the page (its npm badge is a live shields.io image). README snapshot sits between 2026-09-26 and 2026-09-27 20:39Z commits on `main` | **Claimed**: "Server maintainers are verified by Glama", maintainer `bettyc925` (from `glama.json`) | `glama.json`, `Dockerfile` (CI `docker-smoke`) | None required; Glama re-indexes from GitHub. To force it, use the listing's own re-index/refresh control while signed in as `bettyc925` | Page shows 45 tools. `main` registered 44 when checked and 45 after #191 merged (2026-09-28); Glama's README snapshot predates #191, so its 45 was not the evidence-gap tool, and the page does not say which tools it counted |
-| **Smithery** | not listed | — | — | `smithery.yaml` fixed (config was top-level, ignored); **current path is an MCPB bundle**: `npm run build && npm run bundle` → `atlasent-mcp-server-<version>.mcpb`, validated in CI (artifact `mcpb-bundle`) | Sign in at smithery.ai and publish the bundle under the AtlaSent namespace (steps below) | `registry.smithery.ai/servers/@Atlasent/atlasent-mcp-server` → 404; search "atlasent" → no AtlaSent entry |
+| **Smithery** | not listed | — | — | `smithery.yaml` fixed (config was top-level, ignored); **current path is an MCPB bundle**: `npm run build && npm run bundle` → `atlasent-mcp-server-<version>.mcpb`, validated in CI (artifact `mcpb-bundle`) | Sign in at smithery.ai and publish the bundle under the Atlasent namespace (steps below) | `registry.smithery.ai/servers/@Atlasent/atlasent-mcp-server` → 404; search "atlasent" → no AtlaSent entry |
 | **GitHub MCP Registry** (github.com/mcp, VS Code gallery) | not listed | — | — | Curated by GitHub from the official registry | None available to us; watch for inclusion | `api.mcp.github.com/v0.1/servers?search=atlasent` → 0 results |
 | **Docker MCP Catalog** | not listed | — | — | `Dockerfile` exists and passes `docker-smoke` | Optional: PR to `docker/mcp-registry` | `docker/mcp-registry` has no `servers/atlasent` |
 | **PulseMCP, mcp.so, cursor.directory** | not verified | — | — | These mostly ingest from the official registry | Check by hand in a browser | PulseMCP's public API is sunset, mcp.so renders client-side, cursor.directory rate-limited the check |
@@ -34,7 +34,7 @@ here.
 1. Download the `mcpb-bundle` artifact from the latest green CI run on `main`,
    or build it: `npm ci && npm run build && npm run bundle`.
 2. Sign in at [smithery.ai](https://smithery.ai) with the account that should
-   own the AtlaSent namespace, then go to [smithery.ai/new](https://smithery.ai/new),
+   own the Atlasent namespace, then go to [smithery.ai/new](https://smithery.ai/new),
    choose **Local (MCPB bundle)** and upload `atlasent-mcp-server-<version>.mcpb`.
    CLI equivalent: `npx @smithery/cli mcp publish ./atlasent-mcp-server-<version>.mcpb -n <namespace>/mcp-server`.
 3. Open the server's **Settings → Verification** to complete vendor verification.
