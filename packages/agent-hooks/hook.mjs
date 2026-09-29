@@ -77,6 +77,7 @@ export function evaluate({ host, input, env = process.env, now = () => new Date(
 }
 
 export const NUDGE = 'To have this wait for approval from your phone instead of stopping, connect Atlasent: atlasent-hooks connect';
+export const NUDGE_PLUGIN = "To have this wait for approval from your phone instead of stopping, enter an Atlasent agent key in this plugin's settings.";
 
 // Once per session, and only where the limit was actually hit: an unattended ask with
 // no key configured. Never in an attended prompt.
@@ -94,19 +95,21 @@ function nudgeOnce(home, sessionId, env, now) {
 }
 
 // Full decision, including connected mode. Never throws: any failure is a refusal.
-export async function decide({ host, input, env = process.env, now = () => new Date(), fetchImpl = globalThis.fetch }) {
+// plugin: installed as the Claude Code plugin, so the only credential is the plugin's
+// own setting (see loadCredentials).
+export async function decide({ host, input, env = process.env, now = () => new Date(), fetchImpl = globalThis.fetch, plugin = false }) {
   const d = evaluate({ host, input, env, now });
   if (!d._unattendedAsk) return d;
   const { rule, policy } = d._unattendedAsk;
   const home = dirname(configPaths(null, env).user);
   let creds;
   try {
-    creds = loadCredentials(home, env);
+    creds = loadCredentials(home, env, { plugin });
   } catch (e) {
     return { effect: 'deny', rule: rule.id, reason: `${d.reason} The Atlasent credentials are invalid (${String(e.message).slice(0, 120)}), so connected approval is unavailable.` };
   }
   if (!creds) {
-    return nudgeOnce(home, input.session_id, env, now) ? { ...d, reason: `${d.reason} ${NUDGE}` } : d;
+    return nudgeOnce(home, input.session_id, env, now) ? { ...d, reason: `${d.reason} ${plugin ? NUDGE_PLUGIN : NUDGE}` } : d;
   }
   // Environment: the user's own hooks.json first, then the plugin's `environment`
   // setting (user-owned, exported as CLAUDE_PLUGIN_OPTION_ENVIRONMENT). Never a

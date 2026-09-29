@@ -32,15 +32,23 @@ const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 // Configuration
 // ---------------------------------------------------------------------------
 
-// Where the key comes from, first match wins:
-//   1. the plugin's `api_key` setting (plugin.json userConfig, stored by Claude Code and
-//      exported to this hook as CLAUDE_PLUGIN_OPTION_API_KEY),
-//   2. ATLASENT_HOOKS_API_KEY (CI and tests),
-//   3. <home>/credentials.json ({ "api_key", "base_url"? }), written by `atlasent-hooks connect`.
+// Where the key comes from depends on how the hook was installed.
+//   Plugin (hooks.json passes --plugin): ONLY the plugin's own `api_key` setting
+//     (plugin.json userConfig, stored by Claude Code, exported as
+//     CLAUDE_PLUGIN_OPTION_API_KEY). No other credential on the machine is read, and
+//     the key goes only to the Atlasent API.
+//   npm CLI: ATLASENT_HOOKS_API_KEY (CI and tests), else <home>/credentials.json
+//     ({ "api_key", "base_url"? }), written by `atlasent-hooks connect`.
 // A blank value counts as unset: an optional setting left empty is exported as "".
 // No key → not connected.
 const set = v => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
-export function loadCredentials(home, env = process.env) {
+export function loadCredentials(home, env = process.env, { plugin = false } = {}) {
+  if (plugin) {
+    const apiKey = set(env.CLAUDE_PLUGIN_OPTION_API_KEY);
+    if (!apiKey) return null;
+    if (!/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the Atlasent API key is not in ask_live_… / ask_test_… form');
+    return { apiKey, baseUrl: DEFAULT_BASE };
+  }
   let file = {};
   const path = join(home, 'credentials.json');
   if (existsSync(path)) {
@@ -48,12 +56,12 @@ export function loadCredentials(home, env = process.env) {
     if (!object(parsed)) throw Error('credentials.json must be an object');
     file = parsed;
   }
-  const fromEnv = set(env.CLAUDE_PLUGIN_OPTION_API_KEY) ?? set(env.ATLASENT_HOOKS_API_KEY);
+  const fromEnv = set(env.ATLASENT_HOOKS_API_KEY);
   const apiKey = fromEnv ?? file.api_key;
   if (!apiKey) return null;
   if (typeof apiKey !== 'string' || !/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the Atlasent API key is not in ask_live_… / ask_test_… form');
   // A key and its endpoint travel together: credentials.json's base_url applies only to
-  // the key stored beside it, so a key entered elsewhere never goes to a leftover host.
+  // the key stored beside it, so an env key never goes to a leftover host.
   const baseUrl = String(set(env.ATLASENT_HOOKS_BASE_URL) ?? (fromEnv ? undefined : file.base_url) ?? DEFAULT_BASE).replace(/\/+$/, '');
   if (!/^https:\/\//.test(baseUrl) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(baseUrl)) throw Error('base_url must be https');
   return { apiKey, baseUrl };

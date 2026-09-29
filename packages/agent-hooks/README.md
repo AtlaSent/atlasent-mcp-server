@@ -78,7 +78,9 @@ Slack if it's connected), and the agent carries on once they approve.
 
 Installed as a plugin: enter an agent key in the plugin's **Atlasent agent API key**
 setting (Claude Code asks for it when you enable the plugin, and stores it securely).
-Leave it blank to stay local. With the npm CLI instead:
+Leave it blank to stay local. That setting is the only credential the plugin reads:
+it never uses `ATLASENT_HOOKS_API_KEY` or `~/.atlasent/credentials.json`, and it sends
+the key only to the Atlasent API. With the npm CLI instead:
 
 ```sh
 atlasent-hooks connect                                        # shows how to get an agent key
@@ -167,7 +169,7 @@ to that exact action, and a signed record of the decision. For agents, use [`@at
 
 ```sh
 cd packages/agent-hooks
-node --test test/*.node.mjs
+npm test          # tests live in ../agent-hooks-test so the plugin ships none
 node cli.mjs rules
 node cli.mjs check "terraform destroy"
 ```
