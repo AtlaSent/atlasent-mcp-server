@@ -13,7 +13,7 @@ const ID = /^[A-Za-z0-9_.-]{1,64}$/;
 //   "custom": [{ "id": "my.prod-db", "pattern": "psql .*prod", "effect": "ask", "description": "..." }],
 //   "unattended": "deny",       // what an "ask" becomes when no human can answer
 //   "connected": { "environment": "production", "preview": "redacted" }
-//                               // used only when an Atlasent key is configured
+//                               // used only when an AtlaSent key is configured
 // }
 export const ENVIRONMENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 

@@ -617,7 +617,7 @@ function actionTypeFor(category: Category): { action: string; note?: string } {
 
 function gateStepYaml(action: string, id: string): string {
   return [
-    "- name: Atlasent gate",
+    "- name: AtlaSent gate",
     `  id: ${id}`,
     "  uses: Atlasent/atlasent-action@v1",
     "  env:",
@@ -909,7 +909,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
   } else if (gaps > 0) {
     next =
       `${gaps} step${gaps === 1 ? "" : "s"} can change a real system without an approval gate that stops ` +
-      `${gaps === 1 ? "it" : "them"}. Each one's \`fix\` has the exact change. To apply it: create a free Atlasent ` +
+      `${gaps === 1 ? "it" : "them"}. Each one's \`fix\` has the exact change. To apply it: create a free AtlaSent ` +
       `account and API key (${SIGN_UP_URL}), add it as the ATLASENT_API_KEY repository secret, then make each fix.`;
   } else {
     next = "Every recognized step has a gate in front of it. Bind 'gated' steps to the gate's verified output to close the remaining distance.";
