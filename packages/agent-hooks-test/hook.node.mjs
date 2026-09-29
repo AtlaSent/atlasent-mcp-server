@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, readdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -113,9 +113,17 @@ test('plugin manifest and hook registration are wired to this CLI', () => {
   assert.equal(plugin.version, pkg.version, 'plugin.json and package.json versions must match');
   const entry = hooks.hooks.PreToolUse[0];
   for (const tool of ['Bash', 'Write', 'Edit', 'mcp__supabase__execute_sql']) assert.match(tool, new RegExp(`^(${entry.matcher})$`), tool);
-  // --plugin makes the plugin's own key setting the only credential read; the command
-  // may be wrapped (see the hooks.json command tests below) but must still pass it.
-  assert.match(entry.hooks[0].command, /node "\$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs" claude-code --plugin( |$)/);
+  // The Claude plugin directory's validator refuses a hook command it cannot follow: a
+  // computed path, an inline program, or a chain of commands. It follows a plain shell
+  // script named by a literal ${CLAUDE_PLUGIN_ROOT} path, so the command is exactly that.
+  assert.equal(entry.hooks[0].command, 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"');
+  // --plugin makes the plugin's own key setting the only credential read.
+  const script = readFileSync(new URL('../agent-hooks/hooks/guard.sh', import.meta.url), 'utf8');
+  assert.match(script, /^node "\$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs" claude-code --plugin \|\| \{$/m);
+  // Same rule inside the script: no command substitution and no variable but CLAUDE_PLUGIN_ROOT.
+  const code = script.split('\n').filter(l => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(code, /\$\(|`/);
+  assert.deepEqual([...new Set(code.match(/\$\{?[A-Za-z_]\w*/g))], ['${CLAUDE_PLUGIN_ROOT']);
   assert.equal(market.plugins.find(p => p.name === plugin.name)?.source, './packages/agent-hooks');
 });
 
@@ -155,15 +163,32 @@ test('hooks.json command: with Node present it answers exactly as the CLI does',
 });
 
 test('hooks.json command: no Node on PATH blocks (exit 2) instead of silently allowing', () => {
-  const emptyBin = mkdtempSync(join(tmpdir(), 'ah-nobin-'));
-  // `sh` itself is resolved by spawnSync; inside it, PATH holds no node.
-  const r = spawnSync('/bin/sh', ['-c', HOOK_COMMAND], { input: JSON.stringify(bash('npm test')), encoding: 'utf8', env: { PATH: emptyBin, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+  // A PATH like a machine with a shell but no Node: `sh` is there, `node` is not.
+  const bin = mkdtempSync(join(tmpdir(), 'ah-nonode-'));
+  symlinkSync('/bin/sh', join(bin, 'sh'));
+  const r = spawnSync('/bin/sh', ['-c', HOOK_COMMAND], { input: JSON.stringify(bash('npm test')), encoding: 'utf8', env: { PATH: bin, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /needs Node\.js 18/);
 });
 
 test('hooks.json command: a guard that cannot start blocks (exit 2)', () => {
-  const r = runHookCommand(bash('npm test'), { PATH: process.env.PATH, CLAUDE_PLUGIN_ROOT: join(tmpdir(), 'no-such-plugin-root') });
+  // A plugin root whose guard.sh is real but whose CLI crashes on load.
+  const root = mkdtempSync(join(tmpdir(), 'ah-broken-'));
+  mkdirSync(join(root, 'hooks'));
+  writeFileSync(join(root, 'hooks', 'guard.sh'), readFileSync(join(PLUGIN_ROOT, 'hooks', 'guard.sh')));
+  writeFileSync(join(root, 'cli.mjs'), 'this is not javascript(');
+  const r = runHookCommand(bash('npm test'), { PATH: process.env.PATH, CLAUDE_PLUGIN_ROOT: root });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /fail-closed/);
+});
+
+// guard.sh runs through `sh`, which cannot parse CRLF. A Windows checkout with
+// core.autocrlf=true converts text files to CRLF unless .gitattributes pins LF, and the
+// plugin installs by git clone, so without the pin every checked action is blocked
+// (exit 2) on Windows even with Node installed.
+test('guard.sh is pinned to LF line endings for Windows checkouts', () => {
+  const r = spawnSync('git', ['check-attr', 'eol', '--', 'hooks/guard.sh'], { cwd: PLUGIN_ROOT, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /: eol: lf$/m);
+  assert.doesNotMatch(readFileSync(join(PLUGIN_ROOT, 'hooks', 'guard.sh'), 'utf8'), /\r/);
 });

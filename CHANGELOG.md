@@ -239,6 +239,10 @@ stable and will not change without a major version bump.
   `gh api -X DELETE`, and `find … -delete` or `find … -exec rm` when nothing
   narrows what they match. A commit message or PR body that mentions SQL no
   longer triggers an approval prompt.
+- 0.2.3: the Node check moved from an inline command chain in `hooks.json`
+  into `hooks/guard.sh`, which `hooks.json` runs by a literal path. The Claude
+  plugin directory's validator blocks a hook command it cannot follow, and
+  0.2.2's inline chain was one. Behavior is unchanged.
 
 ### `@atlasent/mcp-gate` 0.1.0 (tag `gate-v0.1.0`) — 2026-09-25
 
