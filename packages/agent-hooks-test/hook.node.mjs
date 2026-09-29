@@ -113,7 +113,9 @@ test('plugin manifest and hook registration are wired to this CLI', () => {
   assert.equal(plugin.version, pkg.version, 'plugin.json and package.json versions must match');
   const entry = hooks.hooks.PreToolUse[0];
   for (const tool of ['Bash', 'Write', 'Edit', 'mcp__supabase__execute_sql']) assert.match(tool, new RegExp(`^(${entry.matcher})$`), tool);
-  assert.match(entry.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs" claude-code --plugin$/);
+  // --plugin makes the plugin's own key setting the only credential read; the command
+  // may be wrapped (see the hooks.json command tests below) but must still pass it.
+  assert.match(entry.hooks[0].command, /node "\$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs" claude-code --plugin( |$)/);
   assert.equal(market.plugins.find(p => p.name === plugin.name)?.source, './packages/agent-hooks');
 });
 
@@ -131,4 +133,37 @@ test('the shipped plugin folder holds no tests and no secret-shaped string', () 
     /\bgh[pousr]_[A-Za-z0-9]{20,}/, /\bgithub_pat_[A-Za-z0-9_]{20,}/, /\bxox[abposr]-[A-Za-z0-9-]{10,}/, /\bAKIA[0-9A-Z]{16}\b/,
     /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/];
   for (const f of files) { const text = readFileSync(f, 'utf8'); for (const re of TOKENS) assert.doesNotMatch(text, re, f); }
+});
+
+// The command Claude Code actually runs is hooks/hooks.json's, not cli.mjs directly.
+// Claude Code treats a hook that exits non-zero (other than 2) as a non-blocking error
+// and runs the tool anyway, so a machine without Node used to get NO protection with the
+// plugin shown as enabled. The wrapper must block (exit 2) instead.
+const HOOK_COMMAND = JSON.parse(readFileSync(fileURLToPath(new URL('../agent-hooks/hooks/hooks.json', import.meta.url)), 'utf8')).hooks.PreToolUse[0].hooks[0].command;
+const PLUGIN_ROOT = fileURLToPath(new URL('../agent-hooks', import.meta.url));
+function runHookCommand(payload, env) {
+  return spawnSync('sh', ['-c', HOOK_COMMAND], { input: JSON.stringify(payload), encoding: 'utf8', env: { ATLASENT_HOOKS_HOME: mkdtempSync(join(tmpdir(), 'ah-home-')), ...env } });
+}
+
+test('hooks.json command: with Node present it answers exactly as the CLI does', () => {
+  const r = runHookCommand(bash('terraform destroy'), { PATH: process.env.PATH, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(decision(JSON.parse(r.stdout)), 'ask');
+  const quiet = runHookCommand(bash('npm test'), { PATH: process.env.PATH, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT });
+  assert.equal(quiet.status, 0, quiet.stderr);
+  assert.equal(quiet.stdout.trim(), '');
+});
+
+test('hooks.json command: no Node on PATH blocks (exit 2) instead of silently allowing', () => {
+  const emptyBin = mkdtempSync(join(tmpdir(), 'ah-nobin-'));
+  // `sh` itself is resolved by spawnSync; inside it, PATH holds no node.
+  const r = spawnSync('/bin/sh', ['-c', HOOK_COMMAND], { input: JSON.stringify(bash('npm test')), encoding: 'utf8', env: { PATH: emptyBin, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /needs Node\.js 18/);
+});
+
+test('hooks.json command: a guard that cannot start blocks (exit 2)', () => {
+  const r = runHookCommand(bash('npm test'), { PATH: process.env.PATH, CLAUDE_PLUGIN_ROOT: join(tmpdir(), 'no-such-plugin-root') });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /fail-closed/);
 });

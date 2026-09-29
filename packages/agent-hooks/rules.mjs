@@ -141,6 +141,19 @@ const ROOTISH = /^(\/|\/\*|~|~\/|~\/\*|\$HOME|\$HOME\/|\$HOME\/\*|\$\{HOME\}|\$\
 const BROAD = /^(\.|\.\/|\.\.|\.\.\/.*|\*|\.\*|\.\/\*|\.git\/?|~\/.+|\$HOME\/.+|\$\{HOME\}\/.+|\/.+)$/;
 const SAFE_ABS = /^\/(tmp|var\/tmp|private\/tmp)(\/|$)/;
 
+// `find <dir> -delete` (or `-exec rm -r`) with no predicate narrowing what it matches is
+// `rm -rf <dir>` in other words. With a filter (`-name '*.pyc' -delete`) it is routine
+// cleanup and passes.
+const FIND_FILTERS = /^-(i?name|i?path|i?wholename|i?regex|type|x?type|mtime|mmin|atime|amin|ctime|cmin|newer\w*|size|empty|user|group|perm|links|inum|samefile|prune|maxdepth)$/;
+function findDeleteRoots(argv) {
+  if (argv[0] !== 'find') return null;
+  const destructive = argv.includes('-delete') || argv.some((x, i) => ['-exec', '-execdir', '-ok', '-okdir'].includes(x) && argv[i + 1] === 'rm');
+  if (!destructive || argv.some(x => FIND_FILTERS.test(x))) return null;
+  const roots = [];
+  for (let i = 1; i < argv.length && !argv[i].startsWith('-') && argv[i] !== '(' && argv[i] !== '!'; i++) roots.push(argv[i]);
+  return roots.length ? roots : ['.'];
+}
+
 const git = (argv, ...subs) => argv[0] === 'git' && subs.includes(gitSub(argv));
 function gitSub(argv) {
   // Skip git's global options such as `-C dir` and `-c k=v`.
@@ -161,7 +174,12 @@ const CONFIG_PATH = /(^|[\/\\])(\.atlasent[\/\\](hooks|credentials|pending)\.jso
 // Commands that only search, read or print. When every segment is one of these, SQL or
 // a GraphQL mutation appearing in the text is being looked at, not executed.
 const INERT = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'cat', 'less', 'more', 'head', 'tail', 'echo', 'printf', 'wc', 'find', 'ls', 'git-grep']);
-const inert = segs => segs.length > 0 && segs.every(a => INERT.has(a[0]) || (a[0] === 'git' && ['grep', 'log', 'show', 'diff'].includes(gitSub(a))));
+// Commands that only carry prose (a commit message, a PR body) are inert too: "fix: drop
+// table handling" in a commit message is not SQL being run. Only when EVERY segment is
+// inert, so `git commit -m x && psql -c "DROP TABLE t"` is still flagged.
+const MESSAGE_ONLY = a => (a[0] === 'git' && ['commit', 'tag', 'notes'].includes(gitSub(a)))
+  || (a[0] === 'gh' && ['pr create', 'pr edit', 'pr comment', 'pr review', 'issue create', 'issue edit', 'issue comment'].includes(sub(a, 2)));
+const inert = segs => segs.length > 0 && segs.every(a => INERT.has(a[0]) || MESSAGE_ONLY(a) || (a[0] === 'git' && ['grep', 'log', 'show', 'diff'].includes(gitSub(a))));
 
 // ---------------------------------------------------------------------------
 // Rules. `argv` rules run per command segment; `text` rules run on the raw text so
@@ -169,11 +187,11 @@ const inert = segs => segs.length > 0 && segs.every(a => INERT.has(a[0]) || (a[0
 // ---------------------------------------------------------------------------
 export const RULES = [
   { id: 'fs.rm-root', effect: 'deny', kind: 'destroy', description: 'Recursive delete of /, the home directory or a system directory',
-    argv: a => { const r = rmInfo(a); return !!r && ((r.recursive && r.targets.some(t => ROOTISH.test(t))) || hasFlag(a, '--no-preserve-root')); } },
+    argv: a => { const r = rmInfo(a); if (r) return (r.recursive && r.targets.some(t => ROOTISH.test(t))) || hasFlag(a, '--no-preserve-root'); return !!findDeleteRoots(a)?.some(t => ROOTISH.test(t)); } },
   { id: 'disk.format', effect: 'deny', kind: 'destroy', description: 'Formatting or raw-writing a disk device',
     argv: a => /^mkfs(\.|$)/.test(a[0]) || (a[0] === 'dd' && a.some(x => /^of=\/dev\//.test(x))) || (a[0] === 'wipefs') || (a[0] === 'shred' && a.some(x => x.startsWith('/dev/'))) },
   { id: 'fs.rm-broad', effect: 'ask', kind: 'destroy', description: 'Recursive delete of the working tree, .git, the home directory contents or an absolute path',
-    argv: a => { const r = rmInfo(a); return !!r && r.recursive && r.targets.some(t => BROAD.test(t) && !SAFE_ABS.test(t) && !ROOTISH.test(t)); } },
+    argv: a => { const broad = t => BROAD.test(t) && !SAFE_ABS.test(t) && !ROOTISH.test(t); const r = rmInfo(a); if (r) return r.recursive && r.targets.some(broad); return !!findDeleteRoots(a)?.some(broad); } },
   { id: 'git.force-push', effect: 'ask', kind: 'overwrite', description: 'Force-push, which can overwrite shared history',
     argv: a => git(a, 'push') && (hasFlag(a, '--force', '--force-with-lease', '--force-if-includes', '--mirror') || /f/.test(shortFlags(a)) || positional(a).some(x => /^\+/.test(x))) },
   { id: 'git.remote-delete', effect: 'ask', kind: 'destroy', description: 'Deleting a remote branch or tag',
@@ -203,10 +221,12 @@ export const RULES = [
   { id: 'k8s.delete', effect: 'ask', kind: 'destroy', description: 'Kubernetes deletion or drain (kubectl delete, drain, helm uninstall, scale to zero)',
     argv: a => (['kubectl', 'oc', 'k'].includes(a[0]) && (['delete', 'drain'].includes(positional(a)[0]) || (positional(a)[0] === 'scale' && a.some(x => /^--replicas=0$/.test(x)))))
       || (a[0] === 'helm' && ['uninstall', 'delete', 'del', 'un'].includes(positional(a)[0])) },
-  { id: 'cloud.delete', effect: 'ask', kind: 'destroy', description: 'Cloud resource deletion (aws/gcloud/az/doctl delete, terminate, s3 rb, recursive s3 rm)',
+  { id: 'cloud.delete', effect: 'ask', kind: 'destroy', description: 'Cloud or hosted resource deletion (aws/gcloud/az/doctl delete, terminate, s3 rb, recursive s3 rm, gh repo/release delete)',
     argv: a => (a[0] === 'aws' && (positional(a).some(x => /^(delete|terminate|deregister|remove|purge|disable)-/.test(x)) || sub(a, 2) === 's3 rb' || (sub(a, 2) === 's3 rm' && hasFlag(a, '--recursive'))))
       || (a[0] === 'gsutil' && (['rm', 'rb'].includes(positional(a)[0])))
-      || (['gcloud', 'az', 'doctl', 'linode-cli', 'hcloud', 'oci', 'ibmcloud'].includes(a[0]) && positional(a).some(x => ['delete', 'destroy', 'terminate', 'purge'].includes(x))) },
+      || (['gcloud', 'az', 'doctl', 'linode-cli', 'hcloud', 'oci', 'ibmcloud'].includes(a[0]) && positional(a).some(x => ['delete', 'destroy', 'terminate', 'purge'].includes(x)))
+      || (a[0] === 'gh' && (['repo delete', 'repo archive', 'release delete', 'secret delete', 'variable delete', 'environment delete', 'cache delete', 'run delete'].includes(sub(a, 2))
+        || (positional(a)[0] === 'api' && a.some((x, i) => ((x === '-X' || x === '--method') && /^delete$/i.test(a[i + 1] ?? '')) || /^(-XDELETE|--method=DELETE)$/i.test(x))))) },
   { id: 'paas.destroy', effect: 'ask', kind: 'destroy', description: 'Platform teardown (Railway, Fly, Heroku, Vercel, Netlify, Render, Supabase project or volume deletion)',
     argv: a => (a[0] === 'railway' && (['delete', 'down'].includes(positional(a)[0]) || positional(a).slice(0, 3).some(x => ['delete', 'remove', 'rm'].includes(x)) && ['volume', 'environment', 'service', 'project'].includes(positional(a)[0])))
       || (['fly', 'flyctl'].includes(a[0]) && (positional(a).some(x => ['destroy'].includes(x)) || (['volumes', 'volume', 'apps', 'machine', 'machines'].includes(positional(a)[0]) && ['delete', 'destroy', 'rm', 'remove'].includes(positional(a)[1]))))

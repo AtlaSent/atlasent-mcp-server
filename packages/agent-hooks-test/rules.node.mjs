@@ -111,6 +111,18 @@ const FLAGGED = [
   ['cd infra; terraform destroy', 'ask', 'iac.destroy'],
   ['FOO=1 env BAR=2 timeout 30 terraform destroy', 'ask', 'iac.destroy'],
   ['echo $(kubectl delete pod x)', 'ask', 'k8s.delete'],
+  // GitHub-hosted resources.
+  ['gh repo delete org/repo --yes', 'ask', 'cloud.delete'],
+  ['gh release delete v1.2.0 -y', 'ask', 'cloud.delete'],
+  ['gh api -X DELETE repos/org/repo', 'ask', 'cloud.delete'],
+  ['gh api --method DELETE repos/org/repo/git/refs/heads/main', 'ask', 'cloud.delete'],
+  // `find` with nothing narrowing what it deletes is rm -rf by another name.
+  ['find . -delete', 'ask', 'fs.rm-broad'],
+  ['find . -mindepth 1 -exec rm -rf {} +', 'ask', 'fs.rm-broad'],
+  ['find / -delete', 'deny', 'fs.rm-root'],
+  ['find ~ -exec rm -rf {} +', 'deny', 'fs.rm-root'],
+  // A commit message does not make a real SQL statement in the same chain safe.
+  ['git commit -m "wip" && psql -c "DROP TABLE users"', 'ask', 'sql.destructive'],
 ];
 
 const SAFE = [
@@ -124,6 +136,11 @@ const SAFE = [
   'aws s3 ls', 'aws s3 cp file s3://bucket/', 'gcloud config list', 'vercel', 'vercel dev', 'fly status',
   'railway logs', 'kubectl --context prod get pods', 'npm --workspace api test', 'docker --context prod ps', 'rm -r --dir build', 'supabase start', 'supabase db diff', 'prisma migrate dev', 'cat .atlasent/hooks.json',
   'echo "remember to run terraform destroy later"',
+  'gh pr list', 'gh api repos/org/repo', 'gh release view v1', 'gh repo view',
+  'find . -name "*.pyc" -delete', 'find . -type d -name __pycache__ -exec rm -rf {} +', 'find build -delete',
+  // Prose that mentions SQL or an API call is not running it.
+  'git commit -m "fix: drop table handling in migration"', 'git commit -m "remove DELETE FROM sessions;"',
+  'gh pr create --title "x" --body "handles TRUNCATE TABLE and curl -X DELETE"',
 ];
 
 test('flags destructive and shipping commands with the expected rule', () => {
