@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
+const CLI = fileURLToPath(new URL('../agent-hooks/cli.mjs', import.meta.url));
 
 // Run the hook exactly as Claude Code does: JSON on stdin, JSON (or nothing) on stdout.
 function run(payload, { raw, home, env = {} } = {}) {
@@ -106,13 +106,29 @@ test('allowed commands are not logged', () => {
 });
 
 test('plugin manifest and hook registration are wired to this CLI', () => {
-  const plugin = JSON.parse(readFileSync(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8'));
-  const hooks = JSON.parse(readFileSync(new URL('../hooks/hooks.json', import.meta.url), 'utf8'));
-  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  const market = JSON.parse(readFileSync(new URL('../../../.claude-plugin/marketplace.json', import.meta.url), 'utf8'));
+  const plugin = JSON.parse(readFileSync(new URL('../agent-hooks/.claude-plugin/plugin.json', import.meta.url), 'utf8'));
+  const hooks = JSON.parse(readFileSync(new URL('../agent-hooks/hooks/hooks.json', import.meta.url), 'utf8'));
+  const pkg = JSON.parse(readFileSync(new URL('../agent-hooks/package.json', import.meta.url), 'utf8'));
+  const market = JSON.parse(readFileSync(new URL('../../.claude-plugin/marketplace.json', import.meta.url), 'utf8'));
   assert.equal(plugin.version, pkg.version, 'plugin.json and package.json versions must match');
   const entry = hooks.hooks.PreToolUse[0];
   for (const tool of ['Bash', 'Write', 'Edit', 'mcp__supabase__execute_sql']) assert.match(tool, new RegExp(`^(${entry.matcher})$`), tool);
-  assert.match(entry.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs" claude-code$/);
+  assert.match(entry.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs" claude-code --plugin$/);
   assert.equal(market.plugins.find(p => p.name === plugin.name)?.source, './packages/agent-hooks');
+});
+
+// The plugin installs packages/agent-hooks as a whole, so everything in it ships. The
+// Claude directory refuses a plugin with a secret-shaped string in any file, and the
+// redaction fixtures are exactly that, which is why the tests live in this folder.
+test('the shipped plugin folder holds no tests and no secret-shaped string', () => {
+  const root = fileURLToPath(new URL('../agent-hooks/', import.meta.url));
+  const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
+  const files = walk(root);
+  assert.ok(files.length > 5, 'walked the plugin folder');
+  assert.deepEqual(files.filter(f => /(^|[\\/])(test|tests|__tests__)[\\/]|\.(test|spec|node)\.m?js$/.test(f.slice(root.length))), []);
+  // Token shapes a secret scanner flags (the redaction fixtures use every one of them).
+  const TOKENS = [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, /\bask_(?:live|test)_[A-Za-z0-9_-]{6,}/, /\bsk-[A-Za-z0-9_-]{16,}/,
+    /\bgh[pousr]_[A-Za-z0-9]{20,}/, /\bgithub_pat_[A-Za-z0-9_]{20,}/, /\bxox[abposr]-[A-Za-z0-9-]{10,}/, /\bAKIA[0-9A-Z]{16}\b/,
+    /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/];
+  for (const f of files) { const text = readFileSync(f, 'utf8'); for (const re of TOKENS) assert.doesNotMatch(text, re, f); }
 });
