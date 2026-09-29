@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // atlasent-hooks — a PreToolUse guard for Claude Code.
 //   atlasent-hooks claude-code      read a PreToolUse payload on stdin, answer on stdout
+//                                   (--plugin: the plugin's own key setting is the only credential)
 //   atlasent-hooks check "<cmd>"    show what the guard would do with a shell command
 //   atlasent-hooks rules            list the built-in rules
 //   atlasent-hooks init             write a starter ~/.atlasent/hooks.json (never overwrites)
@@ -19,7 +20,7 @@ if (mode === 'claude-code') {
   try { input = JSON.parse(readFileSync(0, 'utf8')); } catch { input = null; }
   let decision;
   try {
-    decision = await decide({ host: 'claude-code', input: input ?? {} });
+    decision = await decide({ host: 'claude-code', input: input ?? {}, plugin: args.includes('--plugin') });
   } catch {
     decision = { effect: 'deny', reason: 'AtlaSent guard failed unexpectedly, so the action was blocked (fail-closed).' };
   }

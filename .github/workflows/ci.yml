@@ -40,6 +40,8 @@ jobs:
   # atlasent-guard, the Claude Code plugin in packages/agent-hooks. Zero dependencies.
   # Its tests drive the real CLI with Claude Code's stdin payload, so this job proves
   # the hook blocks, not just that a rule table parses. Node 18 is the declared floor.
+  # Tests live in packages/agent-hooks-test, outside the plugin folder: the plugin installs
+  # that whole folder, and the redaction fixtures look like real secrets to a scanner.
   agent-hooks:
     runs-on: ubuntu-latest
     strategy:
@@ -54,7 +56,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - name: Unit and end-to-end hook tests
-        run: node --test test/*.node.mjs
+        run: node --test ../agent-hooks-test/*.node.mjs
       - name: A destructive command is actually refused through the CLI
         run: |
           set -euo pipefail
