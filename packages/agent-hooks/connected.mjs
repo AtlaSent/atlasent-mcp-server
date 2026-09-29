@@ -50,12 +50,6 @@ export function loadCredentials(home, env = process.env) {
   return { apiKey, baseUrl };
 }
 
-// "/v1/approvals/…" is served at the API root, "/v1-evaluate" under /functions/v1
-// (same split as src/engine.ts restBaseUrl).
-function restBase(baseUrl) {
-  return baseUrl.endsWith('/functions/v1') ? baseUrl.slice(0, -'/functions/v1'.length) : baseUrl;
-}
-
 // ---------------------------------------------------------------------------
 // What exactly is being approved
 // ---------------------------------------------------------------------------
@@ -139,13 +133,16 @@ function client(creds, fetchImpl, deadline) {
     return { status: res.status, json: object(json) ? json : null };
   };
   const fn = p => `${creds.baseUrl}${p}`;
-  const rest = p => `${restBase(creds.baseUrl)}${p}`;
   return {
     mintIdentity: environment => call('POST', fn('/v1-agent-actor-identity'), { action_type: ACTION_TYPE, environment }),
     evaluate: body => call('POST', fn('/v1-evaluate'), body),
     verify: body => call('POST', fn('/v1-verify-permit'), body),
-    approval: id => call('GET', rest(`/v1/approvals/${encodeURIComponent(id)}`)),
-    claim: (id, body) => call('POST', rest(`/v1/approvals/${encodeURIComponent(id)}/claim-permit`), body),
+    // The v1-approvals FUNCTION path. The gateway-style `/v1/approvals/…` at the API
+    // root is not served (404 "requested path is invalid" on both api.atlasent.io and
+    // a raw Supabase URL, verified 2026-09-29), so a poll or claim there could never
+    // reach the runtime and every approval would stay unusable.
+    approval: id => call('GET', fn(`/v1-approvals/${encodeURIComponent(id)}`)),
+    claim: (id, body) => call('POST', fn(`/v1-approvals/${encodeURIComponent(id)}/claim-permit`), body),
   };
 }
 

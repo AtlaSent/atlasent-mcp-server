@@ -42,12 +42,14 @@ function fakeRuntime(opts = {}) {
       approvals.set(id, { status: 'pending', action_type: body.action_type, environment: body.context.environment, binding: { payload: body.execution_payload_hash, target: body.resource_id, env: body.context.environment, actor: body.actor_identity.subject.principal_id } });
       return { status: 200, json: { decision: 'hold', approval_request_id: id } };
     }
-    const m = /\/v1\/approvals\/([^/]+)(\/claim-permit)?$/.exec(path);
+    // Real runtime: the gateway-style /v1/approvals/… at the API root is not served.
+    if (/\/v1\/approvals\//.test(path)) return { status: 404, json: { error: 'requested path is invalid' } };
+    const m = /\/functions\/v1\/v1-approvals\/([^/]+)(\/claim-permit)?$/.exec(path);
     if (m) {
       const a = approvals.get(decodeURIComponent(m[1]));
       if (opts.approvalStatus) return { status: opts.approvalStatus, json: {} };
       if (!a) return { status: 404, json: { error: 'not_found' } };
-      if (!m[2]) return { status: 200, json: { status: a.status, action_type: a.action_type, environment: a.environment, ...(a.note && { decision_note: a.note }) } };
+      if (!m[2]) return { status: 200, json: { status: a.status, action_type: a.action_type, environment: a.environment, ...(a.note && { resolution_note: a.note }) } };
       if (a.status !== 'approved_awaiting_claim' || a.claimed) return { status: 409, json: { error: 'not_claimable' } };
       if (body.actor_identity?.subject?.principal_id !== a.binding.actor) return { status: 403, json: { deny_code: 'ACTOR_MISMATCH' } };
       a.claimed = true;
