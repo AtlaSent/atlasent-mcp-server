@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // atlasent-hooks — a PreToolUse guard for Claude Code.
 //   atlasent-hooks claude-code      read a PreToolUse payload on stdin, answer on stdout
-//                                   (--plugin: the plugin's own key setting is the only credential)
+//                                   (--plugin: local only; no credential is read, nothing is sent)
 //   atlasent-hooks check "<cmd>"    show what the guard would do with a shell command
 //   atlasent-hooks rules            list the built-in rules
 //   atlasent-hooks init             write a starter ~/.atlasent/hooks.json (never overwrites)

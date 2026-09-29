@@ -251,6 +251,10 @@ stable and will not change without a major version bump.
   incident defense denies every `agent.*` action that lacks signed upstream
   source provenance (`ASSERTION_UNVERIFIED`), which the guard cannot supply,
   and the agent identity endpoint is not deployed to production.
+- 0.2.5: connected mode is no longer offered in the plugin. The plugin has no
+  key or environment setting, reads no credential of any kind, sends nothing,
+  and no longer suggests adding a key. It is local only until connected mode
+  can be completed end to end.
 
 ### `@atlasent/mcp-gate` 0.1.0 (tag `gate-v0.1.0`) — 2026-09-25
 
