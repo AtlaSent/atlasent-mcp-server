@@ -21,8 +21,9 @@ beforeEach(() => {
   process.env.ATLASENT_API_KEY = "test-key";
   process.env.ATLASENT_BASE_URL = "https://api.test/functions/v1";
   _resetRateLimitForTests();
-  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
-    bodies.push(JSON.parse(String(init?.body ?? "{}")));
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    // Evaluate bodies only; identity mint and provenance seal are side calls.
+    if (String(url).includes("/v1-evaluate")) bodies.push(JSON.parse(String(init?.body ?? "{}")));
     return new Response(JSON.stringify({ decision: "deny", deny_reason: "test" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },

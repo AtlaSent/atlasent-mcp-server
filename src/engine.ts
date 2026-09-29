@@ -28,7 +28,7 @@
  * handler calls `authorize(ctx)` and gets back the same Decision shape.
  */
 
-import type { ActionContext, Decision, VerifyResult } from "./decision.js";
+import type { ActionContext, AllowDecision, Decision, VerifyResult } from "./decision.js";
 import { denyDecision } from "./decision.js";
 import { authorizeLocal, verifyLocal } from "./localEngine.js";
 import { upgradeHint } from "./upgrade.js";
@@ -327,6 +327,8 @@ interface RawEvaluate {
   conditions?: string[];
   hold_id?: string;
   approval_request_id?: string;
+  /** Present when the runtime admitted sealed source provenance. */
+  source_provenance?: Record<string, unknown>;
 }
 
 // Shared base request-body construction for POST /v1-evaluate. Both call
@@ -511,13 +513,28 @@ export async function attachAgentActorIdentity(
   action_type: string,
   environment: string | undefined,
 ): Promise<string[]> {
-  if (!MANDATORY_CHANGE_CONTROL_ACTION_TYPES.has(action_type)) return [];
-  // No plan: the runtime's change-plan gate denies first, so an identity
-  // would never be read. Do not mint a credential nobody will check.
-  if (body.change_plan === undefined) return [];
+  const agentAction = action_type.startsWith("agent.");
+  if (!agentAction) {
+    if (!MANDATORY_CHANGE_CONTROL_ACTION_TYPES.has(action_type)) return [];
+    // No plan: the runtime's change-plan gate denies first, so an identity
+    // would never be read. Do not mint a credential nobody will check.
+    if (body.change_plan === undefined) return [];
+  }
+  // agent.* (ADR CROSS-063): the agent.tool.invoke platform template requires
+  // a verified agent identity as its admission floor, with or without a plan.
   const minted = await mintAgentActorIdentity(action_type, environment ?? "");
   if (minted.ok) {
     body.actor_identity = minted.actor_identity;
+    // An agent-bound key's actor is agent:<id>, derived by the runtime; a
+    // different actor_id in the body is refused 403 actor_id_mismatch before
+    // any policy runs. The caller's actor_id is a report, never authority, so
+    // for agent.* send the identity's own principal instead.
+    const principal = (minted.actor_identity.subject as Record<string, unknown> | undefined)?.principal_id;
+    if (agentAction && typeof principal === "string" && body.actor_id !== undefined && body.actor_id !== principal) {
+      const reported = body.actor_id;
+      body.actor_id = principal;
+      return [`actor_id '${String(reported)}' was replaced by the key's verified agent '${principal}'.`];
+    }
     return [];
   }
   return [
@@ -526,6 +543,65 @@ export async function attachAgentActorIdentity(
       "with any other key the runtime denies ACTOR_UNVERIFIED.",
   ];
 }
+
+/**
+ * Sealed source provenance for agent.* actions (#3785). The runtime's global
+ * incident-defense overlay refuses an agent.* evaluate that carries no
+ * `source_provenance.v1` it sealed itself (ASSERTION_UNVERIFIED), and it seals
+ * only for an agent-bound key, a UUID request_id, and the EXACT context and
+ * resource_id that evaluate will receive. So this runs after the body is fully
+ * built and must not change it afterwards.
+ *
+ * Returns the sealed `action_hash`: when the runtime admits the provenance it
+ * binds the permit to that hash, so the verify boundary must present it.
+ * Never fails the request: without a seal the evaluate still goes out and the
+ * runtime refuses it (fail-closed there), with a note saying why.
+ */
+export async function attachSourceProvenance(
+  body: Record<string, unknown>,
+): Promise<{ action_hash?: string; notes: string[] }> {
+  const action_type = body.action_type;
+  if (typeof action_type !== "string" || !action_type.startsWith("agent.")) return { notes: [] };
+  const request_id = body.request_id;
+  if (typeof request_id !== "string" || !UUID_RE.test(request_id)) {
+    return { notes: [`'${action_type}' needs sealed source provenance, which requires a UUID request_id; none was sealed.`] };
+  }
+  const sealBody: Record<string, unknown> = { action_type, request_id, context: body.context ?? {} };
+  if (typeof body.resource_id === "string") sealBody.resource_id = body.resource_id;
+  let res: Response;
+  try {
+    res = await fetch(`${resolveBase("/v1-source-provenance-seal")}/v1-source-provenance-seal`, {
+      method: "POST",
+      headers: buildHeaders(),
+      body: JSON.stringify(sealBody),
+      signal: makeAbortSignal(REQUEST_TIMEOUT_MS),
+    });
+  } catch (e) {
+    return { notes: [`source provenance could not be sealed (network error: ${e instanceof Error ? e.message : String(e)}).`] };
+  }
+  let json: Record<string, unknown> | null = null;
+  try {
+    json = (await res.json()) as Record<string, unknown>;
+  } catch {
+    json = null;
+  }
+  const sp = json?.source_provenance;
+  const hash = json?.action_hash;
+  if (res.status !== 200 || !sp || typeof sp !== "object" || Array.isArray(sp) ||
+      typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash)) {
+    const code = typeof json?.error === "string" ? json.error : `HTTP ${res.status}`;
+    return {
+      notes: [
+        `source provenance could not be sealed (${code}). Only an agent-bound AtlaSent API key can seal it; ` +
+          `without it the runtime refuses '${action_type}'.`,
+      ],
+    };
+  }
+  body.source_provenance = sp;
+  return { action_hash: hash, notes: [] };
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * The client-side twin of the runtime's EXECUTION_PAYLOAD_HASH_REQUIRED gate:
@@ -775,7 +851,8 @@ interface EvaluateRequestBodyInput {
  * Correlated request ids for one gated tool call. The agent.tool.invoke gate
  * and the consequential action it guards share one attempt id:
  *
- *   mcp-<uuid>.tool-gate   the outer gate ("may this agent use this tool?")
+ *   <uuid>                 the outer gate ("may this agent use this tool?");
+ *                          bare, because the provenance sealer requires a UUID
  *   mcp-<uuid>.action      the action the tool performs (e.g. production.deploy)
  *
  * The runtime persists request_id on every evaluation row, including early
@@ -788,6 +865,10 @@ export function newToolAttemptId(): string {
 }
 
 export function toolAttemptRequestId(attemptId: string, part: "tool-gate" | "action"): string {
+  // The gate is agent.tool.invoke, which needs sealed source provenance, and
+  // the sealer accepts only a bare UUID request_id. So the gate carries the
+  // attempt's UUID itself and the action keeps the prefixed form.
+  if (part === "tool-gate") return attemptId.replace(/^mcp-/, "");
   return `${attemptId}.${part}`;
 }
 
@@ -849,10 +930,12 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
     change_plan: ctx.change_plan,
   });
   const identityNotes = await attachAgentActorIdentity(body, ctx.action_type, ctx.environment);
+  // Last: the seal covers the exact context/resource_id sent below.
+  const provenance = await attachSourceProvenance(body);
 
   const data = await post<RawEvaluate>("/v1-evaluate", body);
   if (data.decision === "hold" || data.decision === "escalate") changeControl.remember(data.approval_request_id);
-  const notes = [...changeControl.notes, ...identityNotes];
+  const notes = [...changeControl.notes, ...identityNotes, ...provenance.notes];
 
   // Normalise request_id → audit_id (canonical API contract uses request_id).
   const audit_id = data.request_id;
@@ -860,7 +943,11 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
 
   if (data.decision === "allow") {
     if (!data.permit_token) throw new Error("Remote allowed the action but returned no permit_token");
-    const out: Decision = { decision: "allow", permit_token: data.permit_token };
+    const out: AllowDecision = { decision: "allow", permit_token: data.permit_token };
+    // Admitted provenance binds the permit to the sealed action hash (not to
+    // any execution_payload_hash we sent); record what verify must present.
+    if (data.source_provenance && provenance.action_hash) out.bound_payload_hash = provenance.action_hash;
+    if (typeof body.actor_id === "string" && body.actor_id !== ctx.actor_id) out.bound_actor_id = body.actor_id;
     if (audit_id) out.audit_id = audit_id;
     if (envelope_hash) out.envelope_hash = envelope_hash;
     if (data.conditions?.length) out.conditions = data.conditions;
