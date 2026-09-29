@@ -74,6 +74,15 @@ If Claude Code runs with `--dangerously-skip-permissions` (`bypassPermissions`) 
 
 ### Optional: wait for a person instead of stopping
 
+> **Not usable yet (2026-09-29).** Connected mode is implemented but has not passed its
+> end-to-end staging proof, and it cannot work until AtlaSent mints trusted source
+> provenance: every `agent.tool.invoke` evaluation must carry a sealed
+> `source_provenance.v1` envelope, and the sealer that issues one is still being built.
+> Until then a connected guard blocks every held action with a reason that says so.
+> Nothing below is a commercial claim until the staging proof in
+> [`docs/HOOK_HITL_APPROVAL.md`](../../docs/HOOK_HITL_APPROVAL.md) passes. The
+> upgrade prompt is switched off until then.
+
 With an AtlaSent account, an unattended "ask" goes to your organization's policy instead
 of being refused on the spot. By default a person decides in the AtlaSent console (and in
 Slack if it's connected), and the agent carries on once they approve.
@@ -107,8 +116,9 @@ doesn't verify. The guard never turns "unattended" into permission on its own. W
 person is needed is decided by your organization's policy in AtlaSent. When the permit
 verifies, the guard steps aside and Claude Code's own permission settings still apply.
 
-Without a key, nothing changes and nothing is sent. The first unattended block in a
-session adds one line saying connected mode exists (`ATLASENT_HOOKS_NUDGE=off` removes it).
+Without a key, nothing changes and nothing is sent. Once connected mode is proven, the
+first unattended block in a session will add one line saying it exists
+(`ATLASENT_HOOKS_NUDGE=off` removes it); it is off until then (`=on` shows it for testing).
 
 ## Configure
 

@@ -79,10 +79,19 @@ export function evaluate({ host, input, env = process.env, now = () => new Date(
 export const NUDGE = 'To have this wait for approval from your phone instead of stopping, connect AtlaSent: atlasent-hooks connect';
 export const NUDGE_PLUGIN = "To have this wait for approval from your phone instead of stopping, enter an AtlaSent agent key in this plugin's settings.";
 
+// OFF by default until connected mode is proven end to end on staging
+// (docs/HOOK_HITL_APPROVAL.md, "Status"). Every agent.tool.invoke evaluation must
+// carry a trusted source_provenance.v1 envelope, and AtlaSent does not mint one yet,
+// so a connected guard currently blocks every held action. Advertising it would sell
+// something that does not work. Flip this when the staging proof passes;
+// ATLASENT_HOOKS_NUDGE=on shows it for testing.
+export const NUDGE_ENABLED_BY_DEFAULT = false;
+
 // Once per session, and only where the limit was actually hit: an unattended ask with
 // no key configured. Never in an attended prompt.
 function nudgeOnce(home, sessionId, env, now) {
-  if (env.ATLASENT_HOOKS_NUDGE === 'off' || typeof sessionId !== 'string' || !sessionId) return false;
+  const enabled = env.ATLASENT_HOOKS_NUDGE === 'on' || (NUDGE_ENABLED_BY_DEFAULT && env.ATLASENT_HOOKS_NUDGE !== 'off');
+  if (!enabled || typeof sessionId !== 'string' || !sessionId) return false;
   const file = join(home, 'nudged.json');
   let seen = {};
   try { const v = JSON.parse(readFileSync(file, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) seen = v; } catch { /* first time */ }

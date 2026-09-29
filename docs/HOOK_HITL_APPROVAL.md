@@ -1,7 +1,25 @@
 # Design: the guard waits for a person in the console
 
 Status: **ACCEPTED** (2026-09-28; decisions below). Slice 1 (the hook) is
-implemented in `packages/agent-hooks/connected.mjs` and not yet staging-proven.
+implemented in `packages/agent-hooks/connected.mjs`. **It is not usable and not
+commercially ready.**
+
+> **Correction (2026-09-29).** An earlier version of this status implied connected
+> mode only lacked a staging run. That was wrong. The first staging run showed that
+> every `agent.tool.invoke` evaluation, on staging and production, is subject to the
+> global incident-defense (METR) controls in `atlasent-api` migration
+> `20261264000000`, which require a trusted `source_provenance.v1` envelope at
+> `correlated` assurance or better, plus a stable `request_id`. AtlaSent had no
+> component that mints that envelope, so connected mode could never reach a hold. The
+> controls stay exactly as they are; the fix is a trusted server-side sealer
+> (atlasent-api), which the hook will call before evaluating. Connected mode is
+> commercially ready only after the live staging proof below passes, including its
+> negative cases.
+>
+> Staging run so far: the console's connect-an-agent flow issues a correctly bound
+> key; the agent identity mints and verifies (`actor_identity.verified: true`) once
+> its issuer is trusted; the hook failed closed, with a readable reason, at every
+> failure (network policy, untrusted issuer, wrong key, missing provenance).
 
 ## The problem
 

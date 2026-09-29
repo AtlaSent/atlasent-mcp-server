@@ -12,7 +12,7 @@
 // only path to allow. The hook never turns "unattended" into autonomy on its own: if
 // the governing policy allows without a person, that is the policy's decision.
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { canonicalJson } from './jcs.mjs';
@@ -122,17 +122,36 @@ function writeJsonPrivate(path, value) {
   writeFileSync(tmp, JSON.stringify(value) + '\n', { mode: 0o600 });
   renameSync(tmp, path);
 }
+// An entry is one attempt at one exact action (keyed by its digest):
+//   { request_id, approval_request_id?, created_at }
+// request_id is written BEFORE the evaluate call, so an honest retry after a lost
+// answer re-presents the same id (the runtime's idempotency key and the id any
+// source provenance is bound to). It is spent with the attempt: a final answer
+// deletes the entry and the next attempt gets a fresh id, because the runtime
+// replays the recorded decision for a repeated id.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export function pendingStore(home, now) {
   const path = join(home, 'pending.json');
   const load = () => {
     const all = readJson(path);
     const t = now().getTime();
-    for (const [k, v] of Object.entries(all)) if (!object(v) || typeof v.approval_request_id !== 'string' || !(t - Date.parse(v.created_at) < PENDING_TTL_MS)) delete all[k];
+    for (const [k, v] of Object.entries(all)) {
+      const ok = object(v) && typeof v.request_id === 'string' && UUID_RE.test(v.request_id) &&
+        (v.approval_request_id === undefined || typeof v.approval_request_id === 'string') &&
+        t - Date.parse(v.created_at) < PENDING_TTL_MS;
+      if (!ok) delete all[k];
+    }
     return all;
   };
   return {
     get: digest => load()[digest] ?? null,
-    set: (digest, approval_request_id) => { const all = load(); all[digest] = { approval_request_id, created_at: now().toISOString() }; writeJsonPrivate(path, all); },
+    // The attempt for this action, created (and persisted) if there is none yet.
+    attempt: digest => {
+      const all = load();
+      if (!all[digest]) { all[digest] = { request_id: randomUUID(), created_at: now().toISOString() }; writeJsonPrivate(path, all); }
+      return all[digest];
+    },
+    hold: (digest, approval_request_id) => { const all = load(); if (all[digest]) { all[digest].approval_request_id = approval_request_id; writeJsonPrivate(path, all); } },
     del: digest => { const all = load(); if (digest in all) { delete all[digest]; writeJsonPrivate(path, all); } },
   };
 }
@@ -170,7 +189,7 @@ function client(creds, fetchImpl, deadline) {
 // checks the signature. Returns the assertion or throws.
 function checkedAssertion(r, environment) {
   if (r.status === 404) throw Error('this AtlaSent runtime has no agent identity endpoint');
-  if (r.status !== 200) throw Error(`agent identity was refused (${typeof r.json?.error === 'string' ? r.json.error : `HTTP ${r.status}`}); the key must be bound to a registered agent`);
+  if (r.status !== 200) throw Error(`agent identity was refused (${httpFailure(r)}); the key must be bound to a registered agent`);
   const a = r.json?.assertion;
   if (!object(a) || a.version !== 'actor_identity.v1' || a.subject?.principal_kind !== 'agent' ||
       typeof a.subject?.principal_id !== 'string' || a.binding?.action_type !== ACTION_TYPE ||
@@ -185,6 +204,18 @@ const reasonsOf = j => {
   const list = Array.isArray(r) ? r : typeof r === 'string' ? [r] : [];
   return list.filter(x => typeof x === 'string').map(x => x.slice(0, 300)).join('; ');
 };
+
+// What the runtime said about a refused request: its error code and message
+// (e.g. "source_provenance_request_id_required: A stable request_id is required…").
+// A bare "HTTP 400" tells the user nothing they can act on.
+const errorDetailOf = j => {
+  const clean = v => (typeof v === 'string' && v.trim() ? v.trim().replace(/\s+/g, ' ').slice(0, 300) : null);
+  const code = clean(j?.error) ?? clean(j?.code) ?? clean(j?.deny_code);
+  const message = clean(j?.message) ?? clean(j?.error_description) ?? (reasonsOf(j) || null);
+  if (code && message && message !== code) return `${code}: ${message}`;
+  return code ?? message;
+};
+const httpFailure = r => `HTTP ${r.status}${errorDetailOf(r.json) ? `, ${errorDetailOf(r.json)}` : ''}`;
 
 // The approver's note, if the approval record carries one. Guidance only: it is shown
 // to the agent and never changes the decision.
@@ -244,12 +275,12 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
 
   try {
     const held = pending.get(digest);
-    if (held) {
+    if (held?.approval_request_id) {
       const id = held.approval_request_id;
       const polled = await api.approval(id);
       if (polled.status === 401 || polled.status === 403) return deny('approval_read_refused', `Checking approval ${id} was refused (HTTP ${polled.status}); the key needs approvals:read. It stays blocked.`);
       if (polled.status === 404) { pending.del(digest); return deny('approval_missing', `Approval ${id} was not found. Run the action again to ask for approval afresh.`); }
-      if (polled.status !== 200 || typeof polled.json?.status !== 'string') return deny('approval_unreadable', `Approval ${id} could not be read, so it stays blocked.`);
+      if (polled.status !== 200 || typeof polled.json?.status !== 'string') return deny('approval_unreadable', `Approval ${id} could not be read (${httpFailure(polled)}), so it stays blocked.`);
       const status = polled.json.status;
       if (status === 'pending') return deny('waiting', `Still waiting for a person to decide approval ${id} in AtlaSent. ${RETRY_HINT}`);
       if (!APPROVED.has(status)) {
@@ -265,13 +296,14 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       const claimed = await api.claim(id, claimBody);
       const token = claimed.json?.permit_token;
       if (!(claimed.status === 200 && claimed.json?.claimed === true && typeof token === 'string' && token)) {
-        const code = claimed.json?.deny_code ?? claimed.json?.error;
-        return deny('claim_failed', `Approval ${id} was approved but no permit could be claimed${typeof code === 'string' ? ` (${code})` : ''}. It was blocked.`);
+        const detail = errorDetailOf(claimed.json);
+        return deny('claim_failed', `Approval ${id} was approved but no permit could be claimed${detail ? ` (${detail})` : ''}. It was blocked.`);
       }
       return await verifyAndAllow(token, assertion.subject.principal_id);
     }
 
     const assertion = checkedAssertion(await api.mintIdentity(environment), environment);
+    const { request_id: requestId } = pending.attempt(digest);
     const context = {
       tool: input.tool_name,
       environment,
@@ -284,6 +316,7 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
     };
     const body = {
       action_type: ACTION_TYPE,
+      request_id: requestId,
       actor_identity: assertion,
       resource_id: targetId,
       execution_payload_hash: digest,
@@ -292,17 +325,19 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       ...(typeof input.session_id === 'string' && { agent_session: { host: 'claude-code', session_id: input.session_id.slice(0, 200) } }),
     };
     const r = await api.evaluate(body);
-    if (r.status !== 200 || !r.json) return deny('evaluate_failed', `AtlaSent could not evaluate this (HTTP ${r.status})${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}. It was blocked.`);
+    // Not a decision: keep the attempt, so re-running presents the same request_id.
+    if (r.status !== 200 || !r.json) return deny('evaluate_failed', `AtlaSent could not evaluate this (${httpFailure(r)}). It was blocked.`);
     const d = r.json.decision;
     const decisionRef = decisionIdOf(r.json) ? ` Decision ${decisionIdOf(r.json)}.` : '';
     if ((d === 'hold' || d === 'escalate') && typeof r.json.approval_request_id === 'string' && r.json.approval_request_id) {
       const id = r.json.approval_request_id;
-      pending.set(digest, id);
+      pending.hold(digest, id);
       return deny('held', `Held for approval (${id}). A person has been asked in AtlaSent.${decisionRef} ${RETRY_HINT}`);
     }
     if (d === 'hold' || d === 'escalate') {
       // The runtime held it but recorded no approval request (a non-fatal path on
       // its side). Nobody can approve it, so re-running would only hold again.
+      pending.del(digest);
       return deny('held_unrecorded', `AtlaSent held this for approval, but no approval request was recorded, so there is nothing for a person to approve.${decisionRef} It was blocked. Do not retry it automatically; tell the user.`);
     }
     if (d !== 'allow' && d !== 'deny') {
@@ -311,8 +346,10 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
     if (d === 'allow' && typeof r.json.permit_token === 'string' && r.json.permit_token) {
       // The governing policy allowed without a person. That is the policy's call; the
       // permit still has to verify here.
+      pending.del(digest);
       return await verifyAndAllow(r.json.permit_token, assertion.subject.principal_id);
     }
+    pending.del(digest); // a final decision spends this attempt's request_id
     if (d === 'allow') return deny('evaluate_failed', `AtlaSent allowed this but returned no permit, so there is nothing to verify.${decisionRef} It was blocked.`);
     const code = typeof r.json.deny_code === 'string' ? ` (${r.json.deny_code})` : '';
     // INSUFFICIENT_APPROVALS is not a terminal refusal: a person's approval resolves it

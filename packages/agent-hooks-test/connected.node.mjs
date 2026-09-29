@@ -92,6 +92,9 @@ function setup({ environment = 'production', preview, project, key = KEY } = {})
   return { home, cwd, env };
 }
 const unattended = (cwd, command = 'fly deploy', extra = {}) => ({ hook_event_name: 'PreToolUse', session_id: 's1', cwd, permission_mode: 'bypassPermissions', tool_name: 'Bash', tool_input: { command }, ...extra });
+// What pending.json holds, as parsed entries ({} when absent).
+const pendingEntries = home => (existsSync(join(home, 'pending.json')) ? JSON.parse(readFileSync(join(home, 'pending.json'), 'utf8')) : {});
+const approvalsRemembered = home => Object.values(pendingEntries(home)).filter(e => e.approval_request_id).length;
 const run = (s, rt, input) => decide({ host: 'claude-code', input, env: s.env, fetchImpl: rt.fetchImpl });
 const idOf = reason => /\((apr_\d+)\)/.exec(reason)?.[1];
 
@@ -268,12 +271,15 @@ test('a claim that fails (already claimed) blocks', async () => {
   assert.match(r.reason, /no permit could be claimed/);
 });
 
-test('network failure blocks and remembers nothing', async () => {
+test('network failure blocks, remembers no approval, and keeps the attempt\'s request_id for an honest retry', async () => {
   const s = setup(); const rt = fakeRuntime({ throwOn: p => p.endsWith('/v1-evaluate') });
   const r = await run(s, rt, unattended(s.cwd));
   assert.equal(r.effect, 'deny');
   assert.match(r.reason, /could not be reached/);
-  assert.ok(!existsSync(join(s.home, 'pending.json')));
+  assert.equal(approvalsRemembered(s.home), 0);
+  const entries = Object.values(pendingEntries(s.home));
+  assert.equal(entries.length, 1, 'the attempt (request_id only) is kept');
+  assert.match(entries[0].request_id, /^[0-9a-f-]{36}$/);
 });
 
 test('malformed responses block: non-JSON, unknown decision, hold without id, 5xx, bad identity', async () => {
@@ -420,8 +426,18 @@ test('no key, nudge not shown: the decision is exactly what the local guard retu
   assert.equal(rt.calls.length, 0);
 });
 
-test('no key: the nudge is today\'s reason plus exactly one line, once per session, never when attended', async () => {
+test('the nudge is OFF by default until connected mode is staging-proven', async () => {
   const s = setup({ key: null }); const rt = fakeRuntime();
+  const input = unattended(s.cwd);
+  const local = evaluate({ host: 'claude-code', input, env: s.env });
+  const r = await decide({ host: 'claude-code', input, env: s.env, fetchImpl: rt.fetchImpl });
+  assert.equal(r.reason, local.reason, 'no nudge advertising a path that cannot work yet');
+  const p = await decide({ host: 'claude-code', input, env: s.env, fetchImpl: rt.fetchImpl, plugin: true });
+  assert.ok(!p.reason.includes(NUDGE_PLUGIN));
+});
+
+test('no key, nudge switched on: today\'s reason plus exactly one line, once per session, never when attended', async () => {
+  const s0 = setup({ key: null }); const s = { ...s0, env: { ...s0.env, ATLASENT_HOOKS_NUDGE: 'on' } }; const rt = fakeRuntime();
   const input = unattended(s.cwd);
   const local = evaluate({ host: 'claude-code', input, env: s.env });
   const first = await decide({ host: 'claude-code', input, env: s.env, fetchImpl: rt.fetchImpl });
@@ -564,7 +580,7 @@ test('plugin: only its own key setting counts, always sent to the AtlaSent API',
 test('plugin: a machine credential (env or credentials.json) is never read or sent', async () => {
   const s = setup(); const rt = fakeRuntime();
   writeFileSync(join(s.home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1' }));
-  const r = await decide({ host: 'claude-code', input: unattended(s.cwd), env: s.env, fetchImpl: rt.fetchImpl, plugin: true });
+  const r = await decide({ host: 'claude-code', input: unattended(s.cwd), env: { ...s.env, ATLASENT_HOOKS_NUDGE: 'on' }, fetchImpl: rt.fetchImpl, plugin: true });
   assert.equal(rt.calls.length, 0);
   assert.equal(r.effect, 'deny');
   assert.ok(r.reason.endsWith(NUDGE_PLUGIN), r.reason);
@@ -579,7 +595,7 @@ test('CLI --plugin (the registered plugin command) ignores a machine key and say
   const s = setup();
   writeFileSync(join(s.home, 'credentials.json'), JSON.stringify({ api_key: 'ask_live_filekey1' }));
   const run = argv => new Promise((resolve, reject) => {
-    const p = spawn(process.execPath, [CLI, ...argv], { env: { PATH: process.env.PATH, ...s.env, ATLASENT_HOOKS_BASE_URL: 'https://127.0.0.1:1/functions/v1' } });
+    const p = spawn(process.execPath, [CLI, ...argv], { env: { PATH: process.env.PATH, ...s.env, ATLASENT_HOOKS_NUDGE: 'on', ATLASENT_HOOKS_BASE_URL: 'https://127.0.0.1:1/functions/v1' } });
     let out = ''; let err = '';
     p.stdout.on('data', c => { out += c; }); p.stderr.on('data', c => { err += c; });
     p.on('close', code => code === 0 ? resolve(JSON.parse(out)) : reject(Error(err)));
@@ -610,7 +626,7 @@ test('stop conditions: HOLD is retryable after approval, DENY and unrecorded hol
   assert.match(denied.reason, /Decision ev_10\./);
   assert.match(denied.reason, /not a wait for approval\. Do not retry it unchanged/);
   assert.doesNotMatch(denied.reason, /run exactly the same action again/);
-  assert.ok(!existsSync(join(s.home, 'pending.json')), 'a deny is never remembered as pending');
+  assert.deepEqual(pendingEntries(s.home), {}, 'a deny is never remembered as pending, and spends its request_id');
 
   const s3 = setup();
   const unrecorded = await run(s3, fakeRuntime({ evaluate: () => ({ status: 200, json: { decision: 'hold', evaluation_id: 'ev_11' } }) }), unattended(s3.cwd));
@@ -618,7 +634,7 @@ test('stop conditions: HOLD is retryable after approval, DENY and unrecorded hol
   assert.match(unrecorded.reason, /no approval request was recorded/);
   assert.match(unrecorded.reason, /Do not retry it automatically/);
   assert.doesNotMatch(unrecorded.reason, /run exactly the same action again/);
-  assert.ok(!existsSync(join(s3.home, 'pending.json')));
+  assert.deepEqual(pendingEntries(s3.home), {}, 'an unrecorded hold is final: nothing remembered, request_id spent');
 
   const s4 = setup();
   const odd = await run(s4, fakeRuntime({ evaluate: () => ({ status: 200, json: { decision: 'maybe' } }) }), unattended(s4.cwd));
@@ -657,5 +673,77 @@ test('stop conditions: INSUFFICIENT_APPROVALS routes to a person rather than tel
   assert.match(r.reason, /needs approval from a person in AtlaSent/);
   assert.match(r.reason, /run exactly the same action again/);
   assert.doesNotMatch(r.reason, /not a wait for approval/);
-  assert.ok(!existsSync(join(s.home, 'pending.json')), 'no approval request exists, so nothing is remembered');
+  assert.deepEqual(pendingEntries(s.home), {}, 'no approval request exists, so nothing is remembered');
+});
+
+
+// ---------------------------------------------------------------------------
+// Runtime error detail and the per-attempt request_id
+// ---------------------------------------------------------------------------
+
+test('a refused evaluate shows the runtime\'s error code and message, not a bare status', async () => {
+  const s = setup();
+  const rt = fakeRuntime({ evaluate: () => ({ status: 400, json: { error: 'source_provenance_request_id_required', message: 'A stable request_id is required before source provenance can be admitted' } }) });
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /HTTP 400, source_provenance_request_id_required: A stable request_id is required/);
+});
+
+test('a refused evaluate with only a message, or nothing readable, still says what it can', async () => {
+  const s = setup();
+  const onlyMessage = fakeRuntime({ evaluate: () => ({ status: 422, json: { message: 'context.tool must be a non-empty string' } }) });
+  assert.match((await run(s, onlyMessage, unattended(s.cwd))).reason, /HTTP 422, context\.tool must be a non-empty string/);
+  const s2 = setup();
+  const nothing = fakeRuntime({ evaluate: () => ({ status: 502, json: {} }) });
+  const r = await run(s2, nothing, unattended(s2.cwd));
+  assert.match(r.reason, /\(HTTP 502\)/);
+});
+
+test('an identity mint refusal shows the runtime\'s code', async () => {
+  const s = setup();
+  const rt = fakeRuntime({ fail: (m, p) => p.endsWith('/v1-agent-actor-identity') && { status: 403, json: { error: 'agent_binding_required', message: 'This API key is not bound to a registered agent' } } });
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.match(r.reason, /HTTP 403, agent_binding_required: This API key is not bound to a registered agent/);
+});
+
+test('request_id is sent top-level, is a UUID, and stays with the held approval', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  await run(s, rt, unattended(s.cwd));
+  const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate')).body;
+  assert.match(ev.request_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  assert.equal(ev.context.request_id, undefined, 'never nested under context');
+  const [entry] = Object.values(pendingEntries(s.home));
+  assert.equal(entry.request_id, ev.request_id);
+  assert.equal(entry.approval_request_id, 'apr_1');
+});
+
+test('a retry after a lost answer re-presents the same request_id', async () => {
+  const s = setup();
+  let n = 0;
+  const rt = fakeRuntime({ evaluate: () => (++n === 1 ? { status: 503, json: { error: 'unavailable' } } : { status: 200, json: { decision: 'hold', approval_request_id: 'apr_9' } }) });
+  await run(s, rt, unattended(s.cwd));
+  await run(s, rt, unattended(s.cwd));
+  const ids = rt.calls.filter(c => c.path.endsWith('/v1-evaluate')).map(c => c.body.request_id);
+  assert.equal(ids.length, 2);
+  assert.equal(ids[0], ids[1], 'same attempt, same idempotency key');
+});
+
+test('after a final decision the next attempt gets a fresh request_id; a changed action gets its own', async () => {
+  const s = setup();
+  const rt = fakeRuntime({ evaluate: () => ({ status: 200, json: { decision: 'deny', deny_code: 'POLICY_DENY', deny_reason: 'no' } }) });
+  await run(s, rt, unattended(s.cwd, 'fly deploy'));
+  await run(s, rt, unattended(s.cwd, 'fly deploy'));
+  await run(s, rt, unattended(s.cwd, 'fly deploy --app other'));
+  const ids = rt.calls.filter(c => c.path.endsWith('/v1-evaluate')).map(c => c.body.request_id);
+  assert.equal(new Set(ids).size, 3, 'a replayed request_id would return the old recorded decision');
+});
+
+test('a tampered pending entry (bad request_id) is discarded, never sent', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  const digest = actionDigest(unattended(s.cwd));
+  writeFileSync(join(s.home, 'pending.json'), JSON.stringify({ [digest]: { request_id: 'not-a-uuid', created_at: new Date().toISOString() } }));
+  await run(s, rt, unattended(s.cwd));
+  const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate')).body;
+  assert.notEqual(ev.request_id, 'not-a-uuid');
+  assert.match(ev.request_id, /^[0-9a-f-]{36}$/);
 });
