@@ -9,6 +9,14 @@
 > keeps the code. Offer it in the plugin again only after a live end-to-end run
 > through hold, approve, claim and verify.
 
+> **Update (2026-09-29, later).** The trusted sealer now exists in atlasent-api
+> (`v1-source-provenance-seal`, staging only; see that repo's
+> `docs/runbooks/SOURCE_PROVENANCE_SEALER.md`). The hook calls it before evaluate with
+> the exact context and target, forwards the seal unchanged, and verifies the permit
+> against the provenance action hash, which it recomputes from the current action. An
+> approved claim continues the original request's admission on the runtime side. None
+> of this is proven live yet: the status above stands until the D2 staging run passes.
+
 Status: **ACCEPTED** (2026-09-28; decisions below). Slice 1 (the hook) is
 implemented in `packages/agent-hooks/connected.mjs`. **It is not usable and not
 commercially ready.**

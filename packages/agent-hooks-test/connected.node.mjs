@@ -16,6 +16,7 @@ import { mergePolicies, validatePolicy } from '../agent-hooks/policy.mjs';
 const CLI = fileURLToPath(new URL('../agent-hooks/cli.mjs', import.meta.url));
 const KEY = 'ask_test_hookkey123';
 const AGENT = 'agent:aaaaaaaa-0000-4000-8000-000000000001';
+const TENANT = 'c8928dc5-0000-4000-8000-000000000001';
 
 // ---------------------------------------------------------------------------
 // A fake runtime that enforces what the real one does at each step: an agent
@@ -29,18 +30,41 @@ function fakeRuntime(opts = {}) {
   const permits = new Map();
   let seq = 0;
   const agent = () => opts.agent ?? AGENT;
+  // Seals by request_id, as v1-source-provenance-seal records them.
+  const seals = new Map();
+  // The real formula (source_provenance_action.v1), so the guard's own recomputation is exercised.
+  const sealHash = (b) => createHash('sha256').update(canonicalJson({ version: 'source_provenance_action.v1', tenant_id: TENANT, actor_id: agent(), action_type: b.action_type, environment: b.context.environment, resource_id: b.resource_id ?? null, context: b.context })).digest('hex');
   const handle = async (method, path, body) => {
     calls.push({ method, path, body });
     if (opts.fail?.(method, path)) return opts.fail(method, path);
     if (path.endsWith('/v1-agent-actor-identity')) {
       if (opts.mintStatus) return { status: opts.mintStatus, json: { error: 'api_key_not_agent_bound' } };
-      return { status: 200, json: { assertion: { version: 'actor_identity.v1', subject: { principal_kind: 'agent', principal_id: agent() }, binding: { action_type: body.action_type, environment: body.environment }, signature: 'sig' } } };
+      return { status: 200, json: { assertion: { version: 'actor_identity.v1', subject: { principal_kind: 'agent', principal_id: agent() }, binding: { action_type: body.action_type, environment: body.environment, tenant_id: TENANT }, signature: 'sig' } } };
+    }
+    if (path.endsWith('/v1-source-provenance-seal')) {
+      if (opts.sealStatus) return { status: opts.sealStatus, json: { error: opts.sealError ?? 'seal_refused', message: 'refused by fake' } };
+      const h = sealHash(body);
+      const prior = seals.get(body.request_id);
+      if (prior && prior.hash !== h) return { status: 409, json: { error: 'seal_conflict', message: 'request_id already sealed for another action' } };
+      seals.set(body.request_id, { hash: h, context: JSON.stringify(body.context), resource: body.resource_id });
+      return { status: 200, json: { action_hash: h, reused: !!prior, source_provenance: { envelope: { chain_id: body.request_id, nonce: `n-${body.request_id}` }, attestation: { issuer: 'atlasent-source-provenance-sealer' } } } };
     }
     if (path.endsWith('/v1-evaluate')) {
       if (opts.evaluate) return opts.evaluate(body);
+      // Models the METR control unless opts.noProvenanceControl: the seal for THIS
+      // request must exist and cover exactly this context and target.
+      let payload = body.execution_payload_hash; let admitted = false;
+      if (!opts.noProvenanceControl) {
+        const seal = seals.get(body.request_id);
+        const sp = body.source_provenance;
+        if (!sp || !seal || sp.envelope?.chain_id !== body.request_id || seal.context !== JSON.stringify(body.context) || seal.resource !== body.resource_id) {
+          return { status: 200, json: { decision: 'deny', deny_code: 'ASSERTION_UNVERIFIED', source_provenance_reason: 'source_provenance_required' } };
+        }
+        payload = seal.hash; admitted = true;
+      }
       const id = `apr_${++seq}`;
-      approvals.set(id, { status: 'pending', action_type: body.action_type, environment: body.context.environment, binding: { payload: body.execution_payload_hash, target: body.resource_id, env: body.context.environment, actor: body.actor_identity.subject.principal_id } });
-      return { status: 200, json: { decision: 'hold', approval_request_id: id } };
+      approvals.set(id, { status: 'pending', action_type: body.action_type, environment: body.context.environment, binding: { payload, target: body.resource_id, env: body.context.environment, actor: body.actor_identity.subject.principal_id } });
+      return { status: 200, json: { decision: 'hold', approval_request_id: id, ...(admitted && { source_provenance: { chain_id: body.request_id, assurance: 'correlated' } }) } };
     }
     // Only the path the real runtime serves: the v1-approvals function under
     // /functions/v1. The "/v1/approvals/…" gateway form 404s on every deployed host.
@@ -80,7 +104,7 @@ function fakeRuntime(opts = {}) {
     return new Response(JSON.stringify(r.json), { status: r.status, headers: { 'content-type': 'application/json' } });
   };
   const approve = (id, status = 'approved_awaiting_claim', note) => { const a = approvals.get(id); a.status = status; if (note) a.note = note; };
-  return { calls, approvals, permits, fetchImpl, approve, handle };
+  return { calls, approvals, permits, seals, fetchImpl, approve, handle };
 }
 
 function setup({ environment = 'production', preview, project, key = KEY } = {}) {
@@ -149,7 +173,11 @@ test('verify presents payload hash, target, environment and the agent actor', as
   await run(s, rt, unattended(s.cwd)); rt.approve('apr_1');
   await run(s, rt, unattended(s.cwd));
   const v = rt.calls.find(c => c.path.endsWith('/v1-verify-permit')).body;
-  assert.equal(v.payload_hash, actionDigest(unattended(s.cwd)));
+  // The permit is bound to the sealed provenance action hash, which commits to the
+  // exact action through context.action_digest.
+  const sealCall = rt.calls.find(c => c.path.endsWith('/v1-source-provenance-seal')).body;
+  assert.equal(sealCall.context.action_digest, actionDigest(unattended(s.cwd)));
+  assert.equal(v.payload_hash, [...rt.seals.values()][0].hash);
   assert.equal(v.target_id, 'deploy.release@https://github.com/acme/app.git');
   assert.equal(v.environment, 'production');
   assert.equal(v.actor_id, AGENT);
@@ -228,7 +256,8 @@ test('wrong target: the same action from a different repository does not verify'
   writeFileSync(join(s.cwd, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/acme/other.git\n');
   const r = await run(s, rt, unattended(s.cwd));
   assert.equal(r.effect, 'deny');
-  assert.match(r.reason, /TARGET_MISMATCH/);
+  // The provenance action hash commits to the target too, so either check can fire first.
+  assert.match(r.reason, /TARGET_MISMATCH|PAYLOAD_MISMATCH/);
 });
 
 test('wrong environment: an approval minted for one environment does not verify in another', async () => {
@@ -237,7 +266,7 @@ test('wrong environment: an approval minted for one environment does not verify 
   writeFileSync(join(s.home, 'hooks.json'), JSON.stringify({ version: 1, connected: { environment: 'staging' } }));
   const r = await run(s, rt, unattended(s.cwd));
   assert.equal(r.effect, 'deny');
-  assert.match(r.reason, /ENVIRONMENT_MISMATCH/);
+  assert.match(r.reason, /ENVIRONMENT_MISMATCH|PAYLOAD_MISMATCH/);
 });
 
 test('insufficient approval: still pending, rejected with a note, or a runtime deny all block', async () => {
@@ -746,4 +775,125 @@ test('a tampered pending entry (bad request_id) is discarded, never sent', async
   const ev = rt.calls.find(c => c.path.endsWith('/v1-evaluate')).body;
   assert.notEqual(ev.request_id, 'not-a-uuid');
   assert.match(ev.request_id, /^[0-9a-f-]{36}$/);
+});
+
+// ---------------------------------------------------------------------------
+// Source provenance: AtlaSent seals, the guard only forwards (2026-09-29)
+// ---------------------------------------------------------------------------
+
+test('provenance: the exact evaluate request is sealed first and the seal is forwarded unchanged', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  await run(s, rt, unattended(s.cwd));
+  const paths = rt.calls.map(c => c.path.split('/').pop());
+  assert.deepEqual(paths, ['v1-agent-actor-identity', 'v1-source-provenance-seal', 'v1-evaluate']);
+  const seal = rt.calls[1].body; const ev = rt.calls[2].body;
+  assert.deepEqual(Object.keys(seal).sort(), ['action_type', 'context', 'request_id', 'resource_id']);
+  assert.equal(seal.request_id, ev.request_id);
+  assert.equal(seal.resource_id, ev.resource_id);
+  assert.deepEqual(seal.context, ev.context);
+  assert.equal(ev.context.action_digest, actionDigest(unattended(s.cwd)));
+  assert.equal(ev.source_provenance.envelope.chain_id, ev.request_id);
+});
+
+test('provenance: a refused or failed seal blocks without evaluating, and keeps the attempt', async () => {
+  for (const status of [403, 503]) {
+    const s = setup(); const rt = fakeRuntime({ sealStatus: status, sealError: 'agent_owner_required' });
+    const r = await run(s, rt, unattended(s.cwd));
+    assert.equal(r.effect, 'deny');
+    assert.match(r.reason, new RegExp(`HTTP ${status}, agent_owner_required`));
+    assert.ok(!rt.calls.some(c => c.path.endsWith('/v1-evaluate')));
+    const first = rt.calls.find(c => c.path.endsWith('/v1-source-provenance-seal')).body.request_id;
+    await run(s, rt, unattended(s.cwd));
+    const seals = rt.calls.filter(c => c.path.endsWith('/v1-source-provenance-seal'));
+    assert.equal(seals[1].body.request_id, first, 'an honest retry re-presents the same request');
+  }
+});
+
+test('provenance: a 409 from the sealer spends the attempt so the next run starts a new request', async () => {
+  const s = setup(); const rt = fakeRuntime({ sealStatus: 409, sealError: 'seal_expired' });
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /seal_expired/);
+  assert.deepEqual(pendingEntries(s.home), {});
+});
+
+test('provenance: a seal for a different action than this one is not used', async () => {
+  const s = setup();
+  const rt2 = fakeRuntime({ fail: (m, p) => p.endsWith('/v1-source-provenance-seal')
+    ? { status: 200, json: { action_hash: 'f'.repeat(64), source_provenance: { envelope: {}, attestation: {} } } } : undefined });
+  const r = await run(s, rt2, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /sealed provenance for a different action/);
+  assert.ok(!rt2.calls.some(c => c.path.endsWith('/v1-evaluate')));
+});
+
+test('provenance: missing seal on the evaluate is denied by the runtime (METR control stays in charge)', async () => {
+  const rt = fakeRuntime();
+  // A guard that dropped the seal would get the control's deny, not a hold.
+  const r = await rt.handle('POST', '/functions/v1/v1-evaluate', {
+    action_type: 'agent.tool.invoke', request_id: 'x', resource_id: 't', context: { environment: 'production' },
+    actor_identity: { subject: { principal_id: AGENT } },
+  });
+  assert.equal(r.json.deny_code, 'ASSERTION_UNVERIFIED');
+  assert.equal(r.json.source_provenance_reason, 'source_provenance_required');
+});
+
+test('provenance HITL: hold -> approve once -> claim -> verify bound to the sealed hash -> allow, exactly once', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  const first = await run(s, rt, unattended(s.cwd));
+  assert.equal(idOf(first.reason), 'apr_1');
+  assert.equal(Object.values(pendingEntries(s.home))[0].binding, 'provenance');
+  rt.approve('apr_1');
+  const second = await run(s, rt, unattended(s.cwd));
+  assert.equal(second.effect, 'allow', second.reason);
+  const v = rt.calls.filter(c => c.path.endsWith('/v1-verify-permit'));
+  assert.equal(v.length, 1);
+  assert.equal(v[0].body.payload_hash, [...rt.seals.values()][0].hash);
+  // The permit is spent: the next identical action is a new request, not a replay.
+  const third = await run(s, rt, unattended(s.cwd));
+  assert.equal(third.effect, 'deny');
+  assert.ok(idOf(third.reason) && idOf(third.reason) !== 'apr_1', third.reason);
+  const evs = rt.calls.filter(c => c.path.endsWith('/v1-evaluate'));
+  assert.equal(evs.length, 2);
+  assert.notEqual(evs[1].body.request_id, evs[0].body.request_id);
+});
+
+test('provenance HITL: an approval cannot be used by a different agent', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  await run(s, rt, unattended(s.cwd)); rt.approve('apr_1');
+  const other = fakeRuntime({ agent: 'agent:bbbbbbbb-0000-4000-8000-000000000002' });
+  other.approvals.set('apr_1', rt.approvals.get('apr_1'));
+  const r = await run(s, other, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /ACTOR_MISMATCH/);
+});
+
+test('runtime without the provenance control: the permit stays bound to the action digest', async () => {
+  const s = setup(); const rt = fakeRuntime({ noProvenanceControl: true });
+  await run(s, rt, unattended(s.cwd));
+  assert.equal(Object.values(pendingEntries(s.home))[0].binding, 'digest');
+  rt.approve('apr_1');
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'allow', r.reason);
+  assert.equal(rt.calls.find(c => c.path.endsWith('/v1-verify-permit')).body.payload_hash, actionDigest(unattended(s.cwd)));
+});
+
+test('idempotency_key_reused spends the attempt', async () => {
+  const s = setup();
+  const rt = fakeRuntime({ evaluate: () => ({ status: 409, json: { error: 'idempotency_key_reused', message: 'An evaluation for request_id already exists' } }) });
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /idempotency_key_reused/);
+  assert.deepEqual(pendingEntries(s.home), {});
+});
+
+test('a pending entry whose binding was tampered to "digest" still cannot verify a provenance permit', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  await run(s, rt, unattended(s.cwd)); rt.approve('apr_1');
+  const f = join(s.home, 'pending.json'); const p = JSON.parse(readFileSync(f, 'utf8'));
+  for (const e of Object.values(p)) e.binding = 'digest';
+  writeFileSync(f, JSON.stringify(p));
+  const r = await run(s, rt, unattended(s.cwd));
+  assert.equal(r.effect, 'deny');
+  assert.match(r.reason, /PAYLOAD_MISMATCH/);
 });
