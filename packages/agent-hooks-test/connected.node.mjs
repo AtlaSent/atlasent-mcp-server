@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { decide, NUDGE, evaluate } from '../agent-hooks/hook.mjs';
 import { canonicalJson } from '../agent-hooks/jcs.mjs';
 import { redactedPreview, assertNoSecrets, MASK } from '../agent-hooks/redact.mjs';
-import { actionDigest, repoIdentity, loadCredentials } from '../agent-hooks/connected.mjs';
+import { actionDigest, repoIdentity, loadCredentials, callTimeoutMs, TOTAL_BUDGET_MS } from '../agent-hooks/connected.mjs';
 import { mergePolicies, validatePolicy } from '../agent-hooks/policy.mjs';
 
 const CLI = fileURLToPath(new URL('../agent-hooks/cli.mjs', import.meta.url));
@@ -914,4 +914,35 @@ test('a pre-0.2.6 pending approval survives the upgrade and is claimed (Codex P2
   writeFileSync(f, JSON.stringify(p));
   const r = await run(s, rt, unattended(s.cwd));
   assert.equal(r.effect, 'allow', r.reason);
+});
+
+// ---------------------------------------------------------------------------
+// Call budgets. evaluate and claim-permit run a full policy evaluation on the
+// runtime; a claim-time reevaluation took ~7 s on staging (D2), and a 6 s cap
+// lost a permit the runtime had already minted and spent.
+// ---------------------------------------------------------------------------
+
+test('call budgets: evaluation calls get 15 s, every other call 6 s, never past the deadline', () => {
+  assert.equal(callTimeoutMs('evaluation', TOTAL_BUDGET_MS), 15_000);
+  assert.equal(callTimeoutMs('plain', TOTAL_BUDGET_MS), 6_000);
+  assert.equal(callTimeoutMs('evaluation', 4_000), 4_000);
+  assert.equal(callTimeoutMs('plain', 2_500), 2_500);
+  assert.ok(TOTAL_BUDGET_MS <= 25_000, 'must finish well inside hooks.json\'s 30 s timeout');
+});
+
+test('a claim that takes longer than the plain 6 s cap still yields the verified permit', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  await run(s, rt, unattended(s.cwd)); rt.approve('apr_1');
+  // Honors init.signal the way real fetch does, so the per-call cap is what is tested.
+  const slow = async (url, init) => {
+    if (new URL(url).pathname.endsWith('/claim-permit')) {
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, 7_000);
+        init.signal?.addEventListener('abort', () => { clearTimeout(t); reject(init.signal.reason ?? Error('aborted')); }, { once: true });
+      });
+    }
+    return rt.fetchImpl(url, init);
+  };
+  const r = await decide({ host: 'claude-code', input: unattended(s.cwd), env: s.env, fetchImpl: slow });
+  assert.equal(r.effect, 'allow');
 });

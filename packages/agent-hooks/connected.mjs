@@ -20,9 +20,17 @@ import { redactedPreview } from './redact.mjs';
 
 export const ACTION_TYPE = 'agent.tool.invoke';
 const DEFAULT_BASE = 'https://api.atlasent.io/functions/v1';
-// Claude Code kills a hook at hooks.json's timeout; finish well inside it.
-export const TOTAL_BUDGET_MS = 20_000;
+// Claude Code kills a hook at hooks.json's timeout (30 s); finish well inside it.
+export const TOTAL_BUDGET_MS = 25_000;
+// Per call. evaluate and claim-permit each run a full policy evaluation on the
+// runtime (claim-time reevaluation, IMPL-026B), which took about 7 s on staging:
+// a 6 s cap lost a permit the runtime had already minted and spent. The cheap
+// calls (identity mint, seal, approval read, verify) keep the short cap.
 const CALL_TIMEOUT_MS = 6_000;
+const EVALUATION_CALL_TIMEOUT_MS = 15_000;
+export function callTimeoutMs(kind, left) {
+  return Math.min(kind === 'evaluation' ? EVALUATION_CALL_TIMEOUT_MS : CALL_TIMEOUT_MS, left);
+}
 const PENDING_TTL_MS = 24 * 60 * 60 * 1000; // matches the runtime's hold expiry
 const APPROVED = new Set(['approved', 'approved_awaiting_claim']);
 
@@ -177,14 +185,14 @@ export function pendingStore(home, now) {
 // ---------------------------------------------------------------------------
 
 function client(creds, fetchImpl, deadline) {
-  const call = async (method, url, body) => {
+  const call = async (method, url, body, kind = 'plain') => {
     const left = deadline - Date.now();
     if (left <= 0) throw Error('ran out of time');
     const res = await fetchImpl(url, {
       method,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${creds.apiKey}`, 'User-Agent': '@atlasent/agent-hooks' },
       ...(body !== undefined && { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(Math.min(CALL_TIMEOUT_MS, left)),
+      signal: AbortSignal.timeout(callTimeoutMs(kind, left)),
     });
     let json = null;
     try { json = await res.json(); } catch { json = null; }
@@ -197,13 +205,13 @@ function client(creds, fetchImpl, deadline) {
     // already knows (this key's agent, that agent's owner, this request and action). The
     // guard cannot assert any of it; it only forwards what the runtime sealed.
     seal: body => call('POST', fn('/v1-source-provenance-seal'), body),
-    evaluate: body => call('POST', fn('/v1-evaluate'), body),
+    evaluate: body => call('POST', fn('/v1-evaluate'), body, 'evaluation'),
     verify: body => call('POST', fn('/v1-verify-permit'), body),
     // Approvals are the v1-approvals function, like every other call here. The
     // "/v1/approvals/…" gateway form at the API root is not served by any deployed
     // host (it answers 404 on production and staging), so it must not be used.
     approval: id => call('GET', fn(`/v1-approvals/${encodeURIComponent(id)}`)),
-    claim: (id, body) => call('POST', fn(`/v1-approvals/${encodeURIComponent(id)}/claim-permit`), body),
+    claim: (id, body) => call('POST', fn(`/v1-approvals/${encodeURIComponent(id)}/claim-permit`), body, 'evaluation'),
   };
 }
 

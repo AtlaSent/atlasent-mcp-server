@@ -324,8 +324,10 @@ seed comes back to the founder for explicit approval before any write.
   `connected.environment`, so an agent that can write to the repo cannot route
   its actions to a laxer environment's policy. A repository may turn the
   preview off (stricter), never on.
-- **Hook timeout raised to 30 s** in `hooks/hooks.json`, with an internal 20 s
-  budget and 6 s per call. The hook must answer before Claude Code gives up on
+- **Hook timeout raised to 30 s** in `hooks/hooks.json`, with an internal 25 s
+  budget: 15 s for the two calls that run a full evaluation (evaluate and
+  claim-permit) and 6 s for every other call. A claim-time reevaluation took
+  about 7 s on staging, and a 6 s cap lost a permit the runtime had minted. The hook must answer before Claude Code gives up on
   it, so it always finishes with a decision rather than being cut off.
 - **After a verified permit the hook steps aside** (no explicit allow): Claude
   Code's own permission settings still apply, as for every other allow.
