@@ -1912,8 +1912,8 @@ describe("atlasent_evaluate execution payload binding", () => {
   it("sends execution_payload_hash top-level, normalized to bare 64-hex", async () => {
     forceRemoteMode();
     const captured: { body: unknown }[] = [];
-    globalThis.fetch = mock.fn(async (_url, init) => {
-      captured.push({ body: JSON.parse((init?.body as string) ?? "{}") });
+    globalThis.fetch = mock.fn(async (url, init) => {
+      if (String(url).includes("/v1-evaluate")) captured.push({ body: JSON.parse((init?.body as string) ?? "{}") });
       return new Response(JSON.stringify({ decision: "allow", permit_token: "pt_bind_1" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },

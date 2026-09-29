@@ -283,6 +283,28 @@ evaluate still goes out. The runtime decides.
 missing. The reason tells the agent to ask for the revision rather than invent
 one. Tests: `src/planMismatch.test.ts`.
 
+### The agent.tool.invoke gate: identity + sealed provenance (CROSS-063, 2026-09-29)
+
+The runtime's `agent.tool.invoke` platform template requires a verified agent
+identity (admission floor, atlasent-docs CROSS-063). Separately, the global
+incident-defense overlay requires `source_provenance.v1` that the runtime
+sealed itself for every `agent.*` action (atlasent-api #3785). In
+`authorizeRemote`:
+
+1. `attachAgentActorIdentity` mints for every `agent.*` action, plan or no
+   plan. It sends the identity's own `agent:<id>` as `actor_id`, because the
+   runtime refuses a different one with 403.
+2. `attachSourceProvenance` runs **last** and seals exactly `request_id`,
+   `context` and `resource_id` as they will be sent. The sealer accepts only
+   a UUID request_id, so the gate uses the attempt's bare UUID. The deploy
+   keeps `mcp-<uuid>.action`, and the console pairs the two forms.
+3. On an allow with admitted provenance, the permit is bound to the sealed
+   `action_hash`. `agentToolGate` presents that hash, plus `bound_actor_id`,
+   at verify.
+
+A failed mint or seal adds a note and the evaluate still goes out; the
+runtime refuses it. Tests: `src/agentToolGate.test.ts`.
+
 Headers: `Authorization: Bearer $ATLASENT_API_KEY`, optional `x-anon-key: $ATLASENT_ANON_KEY`.
 
 ## Disabled Endpoints (atlasent-api)

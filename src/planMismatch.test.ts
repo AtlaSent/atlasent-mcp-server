@@ -667,11 +667,12 @@ describe("deploy_service request correlation", () => {
     await Promise.all([client.connect(c), server.connect(s)]);
 
     const first = await deployOnce(client);
-    const gateMatch = /^(.+)\.tool-gate$/.exec(first.gate);
+    // The gate carries the attempt's bare UUID (the provenance sealer accepts
+    // only a UUID); the deploy keeps the prefixed form.
     const actionMatch = /^(.+)\.action$/.exec(first.action);
-    assert.ok(gateMatch && actionMatch, `unexpected ids ${first.gate} / ${first.action}`);
-    assert.match(gateMatch![1], ATTEMPT);
-    assert.equal(gateMatch![1], actionMatch![1], "the gate and the deploy it guards share one attempt");
+    assert.ok(actionMatch, `unexpected ids ${first.gate} / ${first.action}`);
+    assert.match(actionMatch![1], ATTEMPT);
+    assert.equal(`mcp-${first.gate}`, actionMatch![1], "the gate and the deploy it guards share one attempt");
 
     const second = await deployOnce(client);
     assert.notEqual(second.action, first.action, "a new call is a new attempt, never an idempotent replay");
@@ -691,7 +692,7 @@ describe("deploy_service request correlation", () => {
     });
     const evals = posts(EVAL);
     assert.equal(evals.length, 1);
-    assert.match(String(evals[0].body!.request_id), /^mcp-.+\.tool-gate$/);
+    assert.match(String(evals[0].body!.request_id), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 
   it("a linked re-request gets a NEW request_id under the same attempt (reuse would replay the hold)", async () => {
