@@ -1,4 +1,4 @@
-# Atlasent Guard for Claude Code
+# AtlaSent Guard for Claude Code
 
 **Stops AI coding agents from destroying production.**
 
@@ -18,7 +18,7 @@ else runs exactly as before.
 ```
 
 Local by default: no account, no network, no dependencies. Apache-2.0 licensed.
-(An optional connected mode, below, sends held actions to Atlasent only after you add a key.)
+(An optional connected mode, below, sends held actions to AtlaSent only after you add a key.)
 
 ## Install (30 seconds)
 
@@ -72,11 +72,11 @@ If Claude Code runs with `--dangerously-skip-permissions` (`bypassPermissions`) 
 
 ### Optional: wait for a person instead of stopping
 
-With an Atlasent account, an unattended "ask" goes to your organization's policy instead
-of being refused on the spot. By default a person decides in the Atlasent console (and in
+With an AtlaSent account, an unattended "ask" goes to your organization's policy instead
+of being refused on the spot. By default a person decides in the AtlaSent console (and in
 Slack if it's connected), and the agent carries on once they approve.
 
-Installed as a plugin: enter an agent key in the plugin's **Atlasent agent API key**
+Installed as a plugin: enter an agent key in the plugin's **AtlaSent agent API key**
 setting (Claude Code asks for it when you enable the plugin, and stores it securely).
 Leave it blank to stay local. With the npm CLI instead:
 
@@ -87,7 +87,7 @@ atlasent-hooks connect --environment production < key.txt     # saves it (0600),
 
 How it works:
 
-1. The guard sends the held action to Atlasent: the tool, a **redacted** preview, and a
+1. The guard sends the held action to AtlaSent: the tool, a **redacted** preview, and a
    SHA-256 of the whole action (tool name plus complete input). Tokens, passwords, keys
    and URL credentials are masked before anything leaves your machine. If redaction
    fails, nothing is sent and the action is blocked. To send only the hash and metadata,
@@ -100,7 +100,7 @@ How it works:
 
 Every failure blocks: network errors, timeouts, unexpected answers, a permit that
 doesn't verify. The guard never turns "unattended" into permission on its own. Whether a
-person is needed is decided by your organization's policy in Atlasent. When the permit
+person is needed is decided by your organization's policy in AtlaSent. When the permit
 verifies, the guard steps aside and Claude Code's own permission settings still apply.
 
 Without a key, nothing changes and nothing is sent. The first unattended block in a
@@ -156,11 +156,11 @@ Be clear-eyed about this; a guard that overclaims is worse than none.
 This plugin answers *"did someone at the keyboard say yes?"* After an incident, the
 question is *"who in the organization authorized this, and can you prove it?"*
 
-[Atlasent](https://www.atlasent.io) answers that one. The same destructive actions go to
+[AtlaSent](https://www.atlasent.io) answers that one. The same destructive actions go to
 your organization's policy at execution time: a named approver, a single-use permit bound
 to that exact action, and a signed record of the decision. For agents, use [`@atlasent/mcp-server`](../../README.md) or
 [`@atlasent/mcp-gate`](../mcp-gate); for pipelines, the
-[Atlasent deploy gate](https://github.com/Atlasent/atlasent-action).
+[AtlaSent deploy gate](https://github.com/Atlasent/atlasent-action).
 [Create an account](https://console.atlasent.io/auth/sign-up?utm_source=agent-hooks&utm_medium=readme).
 
 ## Develop

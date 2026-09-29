@@ -1,4 +1,4 @@
-// Connected mode: an unattended "ask" goes to the organization's Atlasent policy
+// Connected mode: an unattended "ask" goes to the organization's AtlaSent policy
 // instead of becoming a flat refusal. See docs/HOOK_HITL_APPROVAL.md.
 //
 // The hook cannot wait minutes for a person inside one PreToolUse call, so:
@@ -51,7 +51,7 @@ export function loadCredentials(home, env = process.env) {
   const fromEnv = set(env.CLAUDE_PLUGIN_OPTION_API_KEY) ?? set(env.ATLASENT_HOOKS_API_KEY);
   const apiKey = fromEnv ?? file.api_key;
   if (!apiKey) return null;
-  if (typeof apiKey !== 'string' || !/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the Atlasent API key is not in ask_live_… / ask_test_… form');
+  if (typeof apiKey !== 'string' || !/^ask_(live|test)_[A-Za-z0-9_-]+$/.test(apiKey)) throw Error('the AtlaSent API key is not in ask_live_… / ask_test_… form');
   // A key and its endpoint travel together: credentials.json's base_url applies only to
   // the key stored beside it, so a key entered elsewhere never goes to a leftover host.
   const baseUrl = String(set(env.ATLASENT_HOOKS_BASE_URL) ?? (fromEnv ? undefined : file.base_url) ?? DEFAULT_BASE).replace(/\/+$/, '');
@@ -161,7 +161,7 @@ function client(creds, fetchImpl, deadline) {
 // The minted assertion must be an agent identity for exactly this binding; the runtime
 // checks the signature. Returns the assertion or throws.
 function checkedAssertion(r, environment) {
-  if (r.status === 404) throw Error('this Atlasent runtime has no agent identity endpoint');
+  if (r.status === 404) throw Error('this AtlaSent runtime has no agent identity endpoint');
   if (r.status !== 200) throw Error(`agent identity was refused (${typeof r.json?.error === 'string' ? r.json.error : `HTTP ${r.status}`}); the key must be bound to a registered agent`);
   const a = r.json?.assertion;
   if (!object(a) || a.version !== 'actor_identity.v1' || a.subject?.principal_kind !== 'agent' ||
@@ -232,7 +232,7 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       if (polled.status === 404) { pending.del(digest); return deny('approval_missing', `Approval ${id} was not found. Run the action again to ask for approval afresh.`); }
       if (polled.status !== 200 || typeof polled.json?.status !== 'string') return deny('approval_unreadable', `Approval ${id} could not be read, so it stays blocked.`);
       const status = polled.json.status;
-      if (status === 'pending') return deny('waiting', `Still waiting for a person to decide approval ${id} in Atlasent. ${RETRY_HINT}`);
+      if (status === 'pending') return deny('waiting', `Still waiting for a person to decide approval ${id} in AtlaSent. ${RETRY_HINT}`);
       if (!APPROVED.has(status)) {
         pending.del(digest);
         const note = noteOf(polled.json);
@@ -273,12 +273,12 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       ...(typeof input.session_id === 'string' && { agent_session: { host: 'claude-code', session_id: input.session_id.slice(0, 200) } }),
     };
     const r = await api.evaluate(body);
-    if (r.status !== 200 || !r.json) return deny('evaluate_failed', `Atlasent could not evaluate this (HTTP ${r.status})${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}. It was blocked.`);
+    if (r.status !== 200 || !r.json) return deny('evaluate_failed', `AtlaSent could not evaluate this (HTTP ${r.status})${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}. It was blocked.`);
     const d = r.json.decision;
     if ((d === 'hold' || d === 'escalate') && typeof r.json.approval_request_id === 'string' && r.json.approval_request_id) {
       const id = r.json.approval_request_id;
       pending.set(digest, id);
-      return deny('held', `Held for approval (${id}). A person has been asked in Atlasent. ${RETRY_HINT}`);
+      return deny('held', `Held for approval (${id}). A person has been asked in AtlaSent. ${RETRY_HINT}`);
     }
     if (d === 'allow' && typeof r.json.permit_token === 'string' && r.json.permit_token) {
       // The governing policy allowed without a person. That is the policy's call; the
@@ -286,8 +286,8 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
       return await verifyAndAllow(r.json.permit_token, assertion.subject.principal_id);
     }
     const code = typeof r.json.deny_code === 'string' ? ` (${r.json.deny_code})` : '';
-    return deny('denied', `Atlasent denied this${code}${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}.`);
+    return deny('denied', `AtlaSent denied this${code}${reasonsOf(r.json) ? `: ${reasonsOf(r.json)}` : ''}.`);
   } catch (e) {
-    return deny('error', `Atlasent could not be reached or answered unexpectedly (${String(e?.message ?? e).slice(0, 160)}), so it was blocked.`);
+    return deny('error', `AtlaSent could not be reached or answered unexpectedly (${String(e?.message ?? e).slice(0, 160)}), so it was blocked.`);
   }
 }

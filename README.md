@@ -7,9 +7,9 @@ MCP server that enforces authorize-before-execute for any MCP-compatible AI agen
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![Glama MCP server](https://glama.ai/mcp/servers/Atlasent/atlasent-mcp-server/badge)](https://glama.ai/mcp/servers/Atlasent/atlasent-mcp-server)
 
-**Atlasent is security and organizational authority infrastructure for consequential actions by people, software, and AI.**
+**AtlaSent is security and organizational authority infrastructure for consequential actions by people, software, and AI.**
 
-This MCP server brings it to AI agents (Claude, Cursor, Windsurf, any MCP host). Before an agent's tool call changes a real system (a production deploy, a data export, an access grant), the agent asks Atlasent first. With an API key (remote mode):
+This MCP server brings it to AI agents (Claude, Cursor, Windsurf, any MCP host). Before an agent's tool call changes a real system (a production deploy, a data export, an access grant), the agent asks AtlaSent first. With an API key (remote mode):
 
 1. **Connect it** to your agent with a few lines of config.
 2. **Risky actions wait** for a person to approve them. Everything else runs as normal.
@@ -17,15 +17,15 @@ This MCP server brings it to AI agents (Claude, Cursor, Windsurf, any MCP host).
 
 Try it in 60 seconds with no account: `npx -y @atlasent/mcp-server` (local mode, a demo that protects nothing).
 
-**Local blocking is free.** To actually block on your own machine without an account, use [MCP Gate](./packages/mcp-gate) or the [Claude Code agent guard](./packages/agent-hooks). Both are part of the free Community plan. Hosted decisions, shared policies and approvals for a team are on the [Atlasent plans](https://www.atlasent.io/pricing).
+**Local blocking is free.** To actually block on your own machine without an account, use [MCP Gate](./packages/mcp-gate) or the [Claude Code agent guard](./packages/agent-hooks). Both are part of the free Community plan. Hosted decisions, shared policies and approvals for a team are on the [AtlaSent plans](https://www.atlasent.io/pricing).
 
 ### For engineers
 
-Atlasent performs **execution-time authorization**: determine whether a specific consequential Action is authorized now, issue a bounded Permit on `allow`, verify that Permit at the execution Gate, and only then allow the governed native effect.
+AtlaSent performs **execution-time authorization**: determine whether a specific consequential Action is authorized now, issue a bounded Permit on `allow`, verify that Permit at the execution Gate, and only then allow the governed native effect.
 
 > **A plausible request is not organizational authority.**
 
-This MCP server exposes Atlasent authorization primitives to Model Context Protocol hosts and includes a protected deployment demo that proves the ordering end to end.
+This MCP server exposes AtlaSent authorization primitives to Model Context Protocol hosts and includes a protected deployment demo that proves the ordering end to end.
 
 ## Which authority decided?
 
@@ -49,7 +49,7 @@ policy, `cloud_permit_consumed` is an organizational permit. **These reason stri
 deliberately not normalised into a generic "blocked."** Do not collapse them.
 
 The two packages point in opposite directions, which is why they are separate:
-`mcp-server` exposes Atlasent *as* MCP tools an agent calls to ask for authorization;
+`mcp-server` exposes AtlaSent *as* MCP tools an agent calls to ask for authorization;
 `mcp-gate` sits *in front of* someone else's MCP server and intercepts.
 
 ## The invariant
@@ -72,7 +72,7 @@ Action proposed
 
 ## Quickstart: 60 seconds, no account
 
-You don't need an Atlasent account or API key to try this server. With no credentials set, it runs in **local mode**: an in-process rules engine that works offline.
+You don't need an AtlaSent account or API key to try this server. With no credentials set, it runs in **local mode**: an in-process rules engine that works offline.
 
 Add this to your MCP host config (Claude Desktop, Cursor, Windsurf, and others; per-host file locations are [below](#claude-desktop)):
 
@@ -138,7 +138,7 @@ prove afterwards.
 
 ## Canon-backed Actions
 
-Atlasent does not treat every ad-hoc tool string as a new governed Action Type.
+AtlaSent does not treat every ad-hoc tool string as a new governed Action Type.
 
 Use the **Protected Action Canon** for stable Action identity. Two important examples are:
 
@@ -180,7 +180,7 @@ agent requests deploy_service
   → simulated deployment effect
 ```
 
-The internal outer gate uses the Canon-backed `agent.tool.invoke` Action (`CANON-000026` / `ACT-0029`) — the same public identifier documented throughout the Atlasent ecosystem as the canonical generic AI-agent tool invocation. It previously used a legacy, uncatalogued identity, `model.agent.execute_tool`, which had no corresponding `action_classes` provisioning path in the runtime (no seed/migration anywhere creates a row with that slug) — so against a real, unmodified Atlasent org the outer gate could only ever return `NO_ACTION_CLASS` deny, regardless of the tool-specific inner gate's own decision. Migrating the outer gate onto `agent.tool.invoke` gives it the runtime's real "AI Agent Safeguard" provisioning path, which already exists for exactly this purpose. See Atlasent/atlasent-mcp-server#121 for the full investigation and decision record.
+The internal outer gate uses the Canon-backed `agent.tool.invoke` Action (`CANON-000026` / `ACT-0029`) — the same public identifier documented throughout the AtlaSent ecosystem as the canonical generic AI-agent tool invocation. It previously used a legacy, uncatalogued identity, `model.agent.execute_tool`, which had no corresponding `action_classes` provisioning path in the runtime (no seed/migration anywhere creates a row with that slug) — so against a real, unmodified Atlasent org the outer gate could only ever return `NO_ACTION_CLASS` deny, regardless of the tool-specific inner gate's own decision. Migrating the outer gate onto `agent.tool.invoke` gives it the runtime's real "AI Agent Safeguard" provisioning path, which already exists for exactly this purpose. See Atlasent/atlasent-mcp-server#121 for the full investigation and decision record.
 
 If either Decision is non-allow **or either Permit fails Verification**, no deployment result is produced.
 
@@ -301,7 +301,7 @@ The tool never invents an action type: every candidate is a Canon entry by refer
 
 ### `atlasent_atlas_lookup`
 
-Read-only lookup of canonical Atlasent concepts such as Authority, Policy, Decision, Permit, Verification, Evidence, Gate, and Trust Root.
+Read-only lookup of canonical AtlaSent concepts such as Authority, Policy, Decision, Permit, Verification, Evidence, Gate, and Trust Root.
 
 ### `atlasent_evidence_gap_report`
 
@@ -372,7 +372,7 @@ Approval / Assertion collected
   → native effect
 ```
 
-Approvals are made by a person in the Atlasent console, never by an agent: this server deliberately has no tool that creates or resolves an approval. When an action is held for a person, the result carries an `approval_request_id`; call `atlasent_await_approval` with it to wait while the person decides in the console. On approval it returns a permit that must still pass `atlasent_verify_permit`; a rejection, expiry or timeout returns no permit and the action does not run. (Remote mode only; local mode never approves.) The protected Action must still satisfy the current authorization path and execution-boundary Verification before proceeding.
+Approvals are made by a person in the AtlaSent console, never by an agent: this server deliberately has no tool that creates or resolves an approval. When an action is held for a person, the result carries an `approval_request_id`; call `atlasent_await_approval` with it to wait while the person decides in the console. On approval it returns a permit that must still pass `atlasent_verify_permit`; a rejection, expiry or timeout returns no permit and the action does not run. (Remote mode only; local mode never approves.) The protected Action must still satisfy the current authorization path and execution-boundary Verification before proceeding.
 
 **Change plans and plan changes.** `production.deploy`, `infrastructure.change`, `production.rollback` and `secret.configuration.change` need a `change_plan` (`{ operation, revision?, artifact_ref? }`, with a revision and/or artifact ref). Pass it to `deploy_service`, `evaluate` or `atlasent_evaluate`. The server first creates a Change Brief recording exactly that plan, then evaluates with the brief id and the same plan. When the key cannot create briefs (HTTP 403) or the runtime has none (HTTP 404), the server evaluates with the plan alone and adds a `notes` entry. Any other brief failure blocks the evaluation. On claim, the server presents the same plan again, so a mismatch means the plan really changed. If your plan changed while you waited, pass the new plan to `atlasent_await_approval` as `change_plan`. By default the server files **one** linked re-request for the new plan (`supersedes_approval_id` set to the old approval), then waits for a person to decide it. The result shows the steps in `summary`, for example "plan changed from X to Y → re-request sent (approval …) → waiting → approved". With `on_plan_mismatch: "use_approved"`, the server claims the approved plan and returns it as `approved_plan`; run exactly that plan. A second mismatch, a revoked or suspicious approval, or an organization policy with `auto_rerequest_on_mismatch: false` stops the wait with no permit. The result includes the diff and what to do next.
 
@@ -382,14 +382,14 @@ For action classes that require a verified actor, the runtime resolves the appro
 
 Every evaluate call reports **which app** it came from (the MCP client's name,
 e.g. `claude-code` or `cursor`) and **which chat or session** as
-`agent_session`. Atlasent stores this labelled *reported by the agent host*:
+`agent_session`. AtlaSent stores this labelled *reported by the agent host*:
 useful for tracing an action back to the conversation that caused it, never
 used to decide anything.
 
 - Session id: the Streamable HTTP session, else `ATLASENT_SESSION_ID` if your
   host sets it, else a per-process id prefixed `mcp-process-`.
 - Optional `ATLASENT_RUN_ID` for a run or job id.
-- With an **agent API key**, leave `actor_id` empty: Atlasent identifies the
+- With an **agent API key**, leave `actor_id` empty: AtlaSent identifies the
   agent and the person it acts for from the key itself, so the model never
   names itself.
 
@@ -408,7 +408,7 @@ Keep these statements distinct:
 | Mode | Purpose |
 |---|---|
 | `local` | Zero-config: offline in-process rules engine, unsigned permits. Development, demos, CI. |
-| `remote` | Calls the configured Atlasent hosted/runtime API. |
+| `remote` | Calls the configured AtlaSent hosted/runtime API. |
 
 ### Get an API key
 
@@ -458,7 +458,7 @@ to prevent registration of mutating administrative tools during a live-API demo.
 
 ## Fail-closed behavior
 
-For a path that is configured to require Atlasent Authorization and Permit Verification, treat these as block conditions:
+For a path that is configured to require AtlaSent Authorization and Permit Verification, treat these as block conditions:
 
 - non-allow Decision;
 - missing required Permit;

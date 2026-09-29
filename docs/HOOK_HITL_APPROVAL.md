@@ -68,7 +68,7 @@ approval takes minutes. Blocking would fail in every case, and raising the
 timeout would freeze the agent's whole turn. Instead, the hook denies straight
 away with a reason Claude reads:
 
-> Held for approval (`apr_…`). A person has been asked in Atlasent. Do not
+> Held for approval (`apr_…`). A person has been asked in AtlaSent. Do not
 > retry with a different command. Wait, then run exactly the same command
 > again.
 
@@ -185,7 +185,7 @@ When the guard denies because the session is unattended and **no key is
 configured**, the deny reason includes one line, once per session:
 
 > To have this wait for approval from your phone instead of stopping,
-> connect Atlasent: `atlasent-hooks connect`.
+> connect AtlaSent: `atlasent-hooks connect`.
 
 The line never appears in an attended "ask" prompt, and
 `ATLASENT_HOOKS_NUDGE=off` turns it off. `atlasent-hooks connect` opens
@@ -227,7 +227,7 @@ returns 403, as `awaitApproval` in `src/engine.ts` already reports), and
 
 All five were decided by the founder on 2026-09-28.
 
-**Principle 1, clarified.** Atlasent governs authority. The hook does not
+**Principle 1, clarified.** AtlaSent governs authority. The hook does not
 hard-code "a human must always approve"; the governing policy decides what
 authority is enough for a given `agent.tool.invoke`. The **default policy
 seeded for new connected accounts** requires a human approval for unattended
