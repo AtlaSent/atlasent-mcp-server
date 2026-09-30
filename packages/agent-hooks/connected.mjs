@@ -28,8 +28,14 @@ export const TOTAL_BUDGET_MS = 25_000;
 // calls (identity mint, seal, approval read, verify) keep the short cap.
 const CALL_TIMEOUT_MS = 6_000;
 const EVALUATION_CALL_TIMEOUT_MS = 15_000;
+// An evaluation call can return a single-use permit that must still be verified
+// in this same run, so it never takes the time verify needs.
+export const VERIFY_RESERVE_MS = 4_000;
+// Below this, a claim would likely be cut off after the runtime spent it.
+export const MIN_CLAIM_MS = 8_000;
 export function callTimeoutMs(kind, left) {
-  return Math.min(kind === 'evaluation' ? EVALUATION_CALL_TIMEOUT_MS : CALL_TIMEOUT_MS, left);
+  if (kind === 'evaluation') return Math.max(0, Math.min(EVALUATION_CALL_TIMEOUT_MS, left - VERIFY_RESERVE_MS));
+  return Math.max(0, Math.min(CALL_TIMEOUT_MS, left));
 }
 const PENDING_TTL_MS = 24 * 60 * 60 * 1000; // matches the runtime's hold expiry
 const APPROVED = new Set(['approved', 'approved_awaiting_claim']);
@@ -186,13 +192,13 @@ export function pendingStore(home, now) {
 
 function client(creds, fetchImpl, deadline) {
   const call = async (method, url, body, kind = 'plain') => {
-    const left = deadline - Date.now();
-    if (left <= 0) throw Error('ran out of time');
+    const timeout = callTimeoutMs(kind, deadline - Date.now());
+    if (timeout <= 0) throw Error('ran out of time');
     const res = await fetchImpl(url, {
       method,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${creds.apiKey}`, 'User-Agent': '@atlasent/agent-hooks' },
       ...(body !== undefined && { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(callTimeoutMs(kind, left)),
+      signal: AbortSignal.timeout(timeout),
     });
     let json = null;
     try { json = await res.json(); } catch { json = null; }
@@ -274,8 +280,8 @@ const RETRY_HINT = 'Do not change the action. Wait, then run exactly the same ac
 // The connected decision. Returns { effect: 'allow'|'deny', reason, outcome }.
 // ---------------------------------------------------------------------------
 
-export async function connectedDecision({ input, rule, config, creds, home, fetchImpl = fetch, now = () => new Date() }) {
-  const deadline = Date.now() + TOTAL_BUDGET_MS;
+export async function connectedDecision({ input, rule, config, creds, home, fetchImpl = fetch, now = () => new Date(), budgetMs = TOTAL_BUDGET_MS }) {
+  const deadline = Date.now() + budgetMs;
   const deny = (outcome, text) => ({ effect: 'deny', outcome, reason: `AtlaSent guard: ${rule.description} [${rule.id}]. ${text}` });
   const environment = config.environment;
   if (typeof environment !== 'string' || !environment) {
@@ -338,7 +344,13 @@ export async function connectedDecision({ input, rule, config, creds, home, fetc
         const note = noteOf(polled.json);
         return deny('not_approved', `A person did not approve this (approval ${id}: ${status}).${note ? ` Their note: "${note}".` : ''} Do not retry it unchanged.`);
       }
-      // Approved. Claim exactly once; whatever happens next, this pointer is spent.
+      // Approved. The claim spends the approval, so only start it with time left
+      // for the identity mint, the claim itself and the verify after it;
+      // otherwise keep the pointer and let the next run claim.
+      if (deadline - Date.now() < CALL_TIMEOUT_MS + MIN_CLAIM_MS + VERIFY_RESERVE_MS) {
+        return deny('waiting', `Approval ${id} is approved, but this check ran short on time before claiming it, so nothing was used. ${RETRY_HINT}`);
+      }
+      // Claim exactly once; whatever happens next, this pointer is spent.
       pending.del(digest);
       // No recorded binding: a pre-0.2.6 entry, which was always bound to the digest.
       if (held.binding === undefined) held.binding = 'digest';

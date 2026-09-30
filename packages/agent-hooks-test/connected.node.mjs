@@ -10,7 +10,8 @@ import { createHash } from 'node:crypto';
 import { decide, NUDGE, evaluate } from '../agent-hooks/hook.mjs';
 import { canonicalJson } from '../agent-hooks/jcs.mjs';
 import { redactedPreview, assertNoSecrets, MASK } from '../agent-hooks/redact.mjs';
-import { actionDigest, repoIdentity, loadCredentials, callTimeoutMs, TOTAL_BUDGET_MS } from '../agent-hooks/connected.mjs';
+import { actionDigest, repoIdentity, loadCredentials, callTimeoutMs, TOTAL_BUDGET_MS, VERIFY_RESERVE_MS, connectedDecision } from '../agent-hooks/connected.mjs';
+import { RULES } from '../agent-hooks/rules.mjs';
 import { mergePolicies, validatePolicy } from '../agent-hooks/policy.mjs';
 
 const CLI = fileURLToPath(new URL('../agent-hooks/cli.mjs', import.meta.url));
@@ -922,12 +923,32 @@ test('a pre-0.2.6 pending approval survives the upgrade and is claimed (Codex P2
 // lost a permit the runtime had already minted and spent.
 // ---------------------------------------------------------------------------
 
-test('call budgets: evaluation calls get 15 s, every other call 6 s, never past the deadline', () => {
+test('call budgets: evaluation calls get 15 s but always leave verify its reserve; others 6 s', () => {
   assert.equal(callTimeoutMs('evaluation', TOTAL_BUDGET_MS), 15_000);
   assert.equal(callTimeoutMs('plain', TOTAL_BUDGET_MS), 6_000);
-  assert.equal(callTimeoutMs('evaluation', 4_000), 4_000);
+  assert.equal(callTimeoutMs('evaluation', 10_000), 10_000 - VERIFY_RESERVE_MS);
+  assert.equal(callTimeoutMs('evaluation', VERIFY_RESERVE_MS), 0, 'no evaluation call once only the verify reserve is left');
   assert.equal(callTimeoutMs('plain', 2_500), 2_500);
+  assert.equal(callTimeoutMs('plain', -5), 0);
   assert.ok(TOTAL_BUDGET_MS <= 25_000, 'must finish well inside hooks.json\'s 30 s timeout');
+});
+
+// Codex on #205: a claim spends the approval, so it must not start when the
+// run cannot also finish the verify. Short on time, the hook keeps the pointer
+// and the next run claims.
+test('an approved claim is deferred, not burned, when the run is short on time', async () => {
+  const s = setup(); const rt = fakeRuntime();
+  await run(s, rt, unattended(s.cwd)); rt.approve('apr_1');
+  const rule = RULES.find(r => r.id === 'deploy.release');
+  const input = unattended(s.cwd);
+  const creds = { apiKey: KEY, baseUrl: 'https://rt.example/functions/v1' };
+  const short = await connectedDecision({ input, rule, config: { environment: 'production' }, creds, home: s.home, fetchImpl: rt.fetchImpl, budgetMs: 12_000 });
+  assert.equal(short.effect, 'deny');
+  assert.match(short.reason, /ran short on time/);
+  assert.equal(rt.calls.filter(c => c.path.endsWith('/claim-permit')).length, 0, 'no claim was attempted');
+  assert.equal(approvalsRemembered(s.home), 1, 'the approval is still tracked');
+  const next = await run(s, rt, input);
+  assert.equal(next.effect, 'allow');
 });
 
 test('a claim that takes longer than the plain 6 s cap still yields the verified permit', async () => {

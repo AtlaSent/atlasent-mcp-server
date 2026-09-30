@@ -327,7 +327,11 @@ seed comes back to the founder for explicit approval before any write.
 - **Hook timeout raised to 30 s** in `hooks/hooks.json`, with an internal 25 s
   budget: 15 s for the two calls that run a full evaluation (evaluate and
   claim-permit) and 6 s for every other call. A claim-time reevaluation took
-  about 7 s on staging, and a 6 s cap lost a permit the runtime had minted. The hook must answer before Claude Code gives up on
+  about 7 s on staging, and a 6 s cap lost a permit the runtime had minted.
+  An evaluation call never takes the last 4 s, which are kept for verify, and
+  a claim does not start unless the run has time for the mint, the claim and
+  the verify. When time is short the hook keeps the approval for the next run
+  instead of spending it. The hook must answer before Claude Code gives up on
   it, so it always finishes with a decision rather than being cut off.
 - **After a verified permit the hook steps aside** (no explicit allow): Claude
   Code's own permission settings still apply, as for every other allow.
