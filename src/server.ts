@@ -49,6 +49,7 @@ import { registerV2Tools } from "./v2Tools.js";
 import { registerComplianceTools } from "./complianceTools.js";
 import { registerVqpTools } from "./vqpTools.js";
 import { registerEvidenceGapTool } from "./evidenceGap.js";
+import { aiActionConfigFromEnv, registerAiActionTools } from "./aiActionTools.js";
 import { CANON_ACT_CATALOG, type ActSpecEntry } from "./canonCatalog.js";
 import { CANON_ACTION_GRAPH } from "./canonGraph.js";
 import { NO_MATCH_HINT, rankActions, type RetrievalResult } from "./actionRetrieval.js";
@@ -2122,6 +2123,12 @@ export function createServer(): McpServer {
   // front of them. Offline and read-only; works without an API key.
   // -------------------------------------------------------------------------
   registerEvidenceGapTool(server, rateLimitOk);
+
+  // AI Action Protection reference tool (atlasent-docs CROSS-064). Registered
+  // only when an operator names the one repository it may change: installing
+  // this server never grants write access to anything by default.
+  const aiActionConfig = aiActionConfigFromEnv();
+  if (aiActionConfig) registerAiActionTools(server, aiActionConfig, rateLimitOk);
 
   return server;
 }

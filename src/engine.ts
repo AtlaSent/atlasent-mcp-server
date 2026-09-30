@@ -28,7 +28,7 @@
  * handler calls `authorize(ctx)` and gets back the same Decision shape.
  */
 
-import type { ActionContext, AllowDecision, Decision, VerifyResult } from "./decision.js";
+import type { ActionContext, AllowDecision, Decision, SealedBinding, VerifyResult } from "./decision.js";
 import { denyDecision } from "./decision.js";
 import { authorizeLocal, verifyLocal } from "./localEngine.js";
 import { upgradeHint } from "./upgrade.js";
@@ -901,6 +901,15 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
   if (ctx.change_window !== undefined) context.change_window = ctx.change_window;
   if (ctx.tool_name !== undefined) context.tool_name = ctx.tool_name;
   if (ctx.tool !== undefined) context.tool = ctx.tool;
+  // agent.*: admitted sealed provenance binds the permit to the SEALED action
+  // hash, which covers `context` and `resource_id` but not the top-level
+  // execution_payload_hash. Without the digest inside the sealed context, a
+  // permit for "this tool on this target" would verify for any arguments.
+  // Mirrors packages/agent-hooks (context.action_digest). AI Action Protection,
+  // atlasent-docs CROSS-064.
+  if (ctx.action_type.startsWith("agent.") && ctx.payload_hash !== undefined) {
+    context.action_digest = normalizePayloadHash(ctx.payload_hash);
+  }
 
   const body = buildEvaluateRequestBody({
     action_type: ctx.action_type,
@@ -937,6 +946,20 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
   if (data.decision === "hold" || data.decision === "escalate") changeControl.remember(data.approval_request_id);
   const notes = [...changeControl.notes, ...identityNotes, ...provenance.notes];
 
+  // What the admitted seal covered, so an executor can recompute the sealed
+  // hash from the action it actually runs (see SealedBinding).
+  const tenantId = ((body.actor_identity as Record<string, unknown> | undefined)?.binding as Record<string, unknown> | undefined)?.tenant_id;
+  const sealed_binding: SealedBinding | undefined =
+    data.source_provenance && provenance.action_hash && typeof tenantId === "string" && typeof body.actor_id === "string"
+      ? {
+          tenant_id: tenantId,
+          actor_id: body.actor_id,
+          environment: ctx.environment,
+          resource_id: typeof body.resource_id === "string" ? body.resource_id : null,
+          context: (body.context ?? {}) as Record<string, unknown>,
+        }
+      : undefined;
+
   // Normalise request_id → audit_id (canonical API contract uses request_id).
   const audit_id = data.request_id;
   const envelope_hash = data.envelope_hash;
@@ -948,6 +971,7 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
     // any execution_payload_hash we sent); record what verify must present.
     if (data.source_provenance && provenance.action_hash) out.bound_payload_hash = provenance.action_hash;
     if (typeof body.actor_id === "string" && body.actor_id !== ctx.actor_id) out.bound_actor_id = body.actor_id;
+    if (sealed_binding) out.sealed_binding = sealed_binding;
     if (audit_id) out.audit_id = audit_id;
     if (envelope_hash) out.envelope_hash = envelope_hash;
     if (data.conditions?.length) out.conditions = data.conditions;
@@ -971,6 +995,11 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
       ...(audit_id && { audit_id }),
       ...(envelope_hash && { envelope_hash }),
       ...(notes.length && { notes }),
+      // Same binding the allow path reports: the permit claimed after approval
+      // is bound to the sealed action hash and the key's agent.
+      ...(data.source_provenance && provenance.action_hash && { bound_payload_hash: provenance.action_hash }),
+      ...(typeof body.actor_id === "string" && body.actor_id !== ctx.actor_id && { bound_actor_id: body.actor_id }),
+      ...(sealed_binding && { sealed_binding }),
     };
   }
 
