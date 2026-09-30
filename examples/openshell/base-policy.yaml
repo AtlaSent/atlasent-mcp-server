@@ -1,0 +1,13 @@
+# Example OpenShell base policy for an agent whose consequential writes are
+# mediated by Atlasent. OpenShell should remain default-deny for direct write
+# destinations; only the Atlasent adapter gets authority API access through the
+# attached Atlasent provider profile.
+filesystem:
+  read_only:
+    - /usr
+    - /lib
+    - /etc
+  read_write:
+    - /workspace
+    - /tmp
+network_policies: {}
