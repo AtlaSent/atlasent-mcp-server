@@ -20,7 +20,7 @@
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { authorize, awaitApproval, getMode, recordCircuitTrip, verify } from "./engine.js";
+import { admitGovernedOperation, authorize, awaitApproval, establishGovernedEffect, getMode, recordCircuitTrip, verify } from "./engine.js";
 import {
   CircuitBreaker,
   executeGoverned,
@@ -43,6 +43,13 @@ export interface AiActionConfig {
   pathPrefix?: string;
   breakerFile?: string;
   stopFile?: string;
+  /**
+   * CROSS-064 G4 (ATLASENT_AI_ACTION_RUNTIME_EFFECT=true): consume the permit
+   * via consume-and-admit and let the runtime establish the effect from
+   * GitHub's signed push events. Needs consequential_operations:write on the
+   * key and the repository enrolled with the org's GitHub App.
+   */
+  runtimeEffect?: boolean;
 }
 
 export function aiActionConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AiActionConfig | null {
@@ -60,6 +67,7 @@ export function aiActionConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AiA
     ...(env.ATLASENT_AI_ACTION_PATH_PREFIX?.trim() && { pathPrefix: env.ATLASENT_AI_ACTION_PATH_PREFIX.trim() }),
     ...(env.ATLASENT_AI_ACTION_BREAKER_FILE?.trim() && { breakerFile: env.ATLASENT_AI_ACTION_BREAKER_FILE.trim() }),
     ...(env.ATLASENT_AI_ACTION_STOP_FILE?.trim() && { stopFile: env.ATLASENT_AI_ACTION_STOP_FILE.trim() }),
+    ...(env.ATLASENT_AI_ACTION_RUNTIME_EFFECT?.trim() === "true" && { runtimeEffect: true }),
   };
 }
 
@@ -87,6 +95,11 @@ export interface AiActionDeps {
   awaitApproval: typeof awaitApproval;
   /** CROSS-064 G3: record a trip in the runtime. Omitted in tests that do not exercise it. */
   recordCircuitTrip?: typeof recordCircuitTrip;
+  /** CROSS-064 G4: used only when config.runtimeEffect is on. */
+  admitGovernedOperation?: typeof admitGovernedOperation;
+  establishGovernedEffect?: typeof establishGovernedEffect;
+  /** Test seam for the establishment wait. */
+  runtimeEffectTiming?: { waitMs?: number; pollMs?: number; sleep?: (ms: number) => Promise<void> };
   fetchImpl?: typeof globalThis.fetch;
   now?: () => Date;
 }
@@ -95,8 +108,14 @@ export function registerAiActionTools(
   server: McpServer,
   config: AiActionConfig,
   rateLimitOk: (tool: string) => boolean,
-  deps: AiActionDeps = { authorize, verify, getMode, awaitApproval, recordCircuitTrip },
+  deps: AiActionDeps = { authorize, verify, getMode, awaitApproval, recordCircuitTrip, admitGovernedOperation, establishGovernedEffect },
 ): { breaker: CircuitBreaker } {
+  if (config.runtimeEffect && !(deps.admitGovernedOperation && deps.establishGovernedEffect)) {
+    // Configured for runtime-established effects but unable to ask the
+    // runtime: refuse to register rather than fall back to the adapter's own
+    // observation, which would read as established without runtime evidence.
+    throw new Error("ATLASENT_AI_ACTION_RUNTIME_EFFECT is on but the runtime admit/establish calls are unavailable");
+  }
   const breaker = new CircuitBreaker({ stateFile: config.breakerFile, stopFile: config.stopFile, now: deps.now });
   const held = new Map<string, HeldAction>();
   const log = (event: string, data: Record<string, unknown>) =>
@@ -122,6 +141,14 @@ export function registerAiActionTools(
       now: deps.now,
       argumentsCheck: () =>
         sha256Hex(action.content) === action.spec.arguments.content_sha256 ? null : "content does not match the authorized content_sha256",
+      ...(config.runtimeEffect && deps.admitGovernedOperation && deps.establishGovernedEffect && {
+        runtimeEffect: {
+          admit: deps.admitGovernedOperation,
+          establish: deps.establishGovernedEffect,
+          provider: "github",
+          ...deps.runtimeEffectTiming,
+        },
+      }),
       ...(deps.recordCircuitTrip && {
         reportTrip: async (r) => {
           const rec = await deps.recordCircuitTrip!(r);
@@ -211,7 +238,7 @@ export function registerAiActionTools(
         return reply({ outcome: "refused", reason: `could not read the target's current state: ${e instanceof Error ? e.message : String(e)}` }, true);
       }
       const environment = process.env.ATLASENT_ENVIRONMENT?.trim() || "production";
-      const spec = githubFileChangeSpec(change, baseState, environment);
+      const spec = githubFileChangeSpec(change, baseState, environment, { withExpectedEffect: config.runtimeEffect === true });
       const actorId = args.actor_id ?? "agent:unspecified";
       const auth = await requestAuthorization(spec, actorId, deps);
       const d = auth.decision;
