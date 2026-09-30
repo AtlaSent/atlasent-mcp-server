@@ -52,6 +52,21 @@ export type ActionContext = {
   request_id?: string;
 };
 
+/**
+ * The inputs the runtime's source-provenance sealer hashed into the sealed
+ * action hash (atlasent-api _shared/source-provenance-attestation.ts
+ * computeSourceProvenanceActionHash). An executor recomputes the hash from the
+ * action it is ABOUT to run, so a changed action presents a different hash at
+ * verify and the runtime refuses it (PAYLOAD_MISMATCH).
+ */
+export type SealedBinding = {
+  tenant_id: string;
+  actor_id: string;
+  environment: string;
+  resource_id: string | null;
+  context: Record<string, unknown>;
+};
+
 export type AllowDecision = {
   decision: "allow";
   permit_token: string;
@@ -68,6 +83,8 @@ export type AllowDecision = {
   bound_payload_hash?: string;
   /** The actor the permit was issued to, when it differs from the caller's. */
   bound_actor_id?: string;
+  /** What the sealed action hash was computed over, when provenance was admitted. */
+  sealed_binding?: SealedBinding;
 };
 
 export type DenyDecision = {
@@ -102,6 +119,16 @@ export type HoldDecision = {
   audit_id?: string;
   envelope_hash?: string;
   notes?: string[];
+  /**
+   * What the permit claimed after approval will be bound to, when the runtime
+   * admitted sealed source provenance for this held request (the sealed action
+   * hash). Present it as `payload_hash` at verify after the claim.
+   */
+  bound_payload_hash?: string;
+  /** The actor the permit will be issued to, when it differs from the caller's. */
+  bound_actor_id?: string;
+  /** What the sealed action hash was computed over, when provenance was admitted. */
+  sealed_binding?: SealedBinding;
 };
 
 export type Decision = AllowDecision | DenyDecision | HoldDecision;

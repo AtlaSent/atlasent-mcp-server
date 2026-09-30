@@ -1,0 +1,103 @@
+# AI Action Protection: the MCP execution adapter
+
+Status: reference implementation, 2026-09-30. Product contract:
+atlasent-docs `architecture/ai-action-protection/AI_ACTION_PROTECTION.md`.
+Decision: atlasent-docs `architecture/adr/CROSS-064` (PROPOSED).
+
+**Not generally production-ready.** This is the design-partner reference. It
+is not a production claim until the acceptance criteria (DP-1 to DP-12 in the
+product contract) have been demonstrated on production.
+
+## What this server is in AI Action Protection
+
+MCP is an **execution adapter**. It is the place where an agent's request
+becomes a real change, so it is where the permit is verified and the effect is
+observed. It is **not** where authority comes from.
+
+| Guidance (never enforcement) | Enforcement |
+|---|---|
+| Tool names, descriptions, annotations (`destructiveHint`, ...) | The runtime's `agent.tool.invoke` decision for this org |
+| `serverInstructions()` telling the agent to evaluate first | A permit bound to agent, target, environment and the action digest |
+| The agent choosing to call `atlasent_evaluate` | `v1-verify-permit` at this boundary, immediately before the write |
+| Installing this server, or the reference tool appearing in `tools/list` | Org policy + approvals; installing authorizes nothing |
+
+A prompt can persuade an agent. It cannot produce a permit.
+
+## `atlasent_governed_file_change`
+
+The reference tool. An agent changes one file in one GitHub repository. It is
+registered only when an operator sets all of:
+
+```
+ATLASENT_AI_ACTION_GITHUB_REPO=owner/repo        # the one repo it may change
+ATLASENT_AI_ACTION_GITHUB_BRANCH=<branch>        # never defaulted
+ATLASENT_AI_ACTION_GITHUB_TOKEN=<token>          # never read from GITHUB_TOKEN
+ATLASENT_AI_ACTION_PATH_PREFIX=config/           # optional confinement
+ATLASENT_AI_ACTION_BREAKER_FILE=~/.atlasent/breaker.json   # optional: trips survive restarts
+ATLASENT_AI_ACTION_STOP_FILE=/etc/atlasent/STOP  # optional: operator stop
+```
+
+Flow (`src/aiActionTools.ts` → `src/governedAction.ts` → `src/githubFileAdapter.ts`):
+
+1. It reads the file's current blob. The action is
+   `{tool: github.contents.put, target: github:owner/repo@branch:path, arguments: {base_state, content_sha256, message, ...}}`.
+   Its digest is `sha256(JCS(action))`.
+2. `engine.authorize` sends `agent.tool.invoke`. The agent identity is minted
+   from the agent-bound key. The digest is placed in `context.action_digest`,
+   which the runtime seals. The runtime evaluates the org's policy.
+3. The runtime returns `allow`, `deny` or `hold`. On a hold, the tool returns
+   `approval_request_id` and changes nothing. After a person approves in
+   AtlaSent, the agent calls the tool again with the **same** change and the
+   id. A different change is refused and the approval is not spent.
+4. At the boundary, in this order:
+   - circuit breaker;
+   - content bytes match `content_sha256`;
+   - the target is unchanged since authorization;
+   - `v1-verify-permit` with a hash **recomputed from the action about to run**.
+
+   It never replays the hash from the decision, so a changed action fails
+   `PAYLOAD_MISMATCH` at the runtime.
+5. It performs one `PUT`, using GitHub's own optimistic `sha`.
+6. Effect: it re-reads the file at the new commit and at the branch head.
+   `established` means both are exactly the authorized bytes.
+7. It returns `ai_action_proof.v1`: agent, action and digest, decision (and
+   approval), permit verification, execution receipt, effect and circuit
+   state, plus `proof_sha256` over the record. The runtime's own evaluation and
+   `verification_events` rows are the authoritative record. This is the
+   adapter's view of them.
+
+Local mode never changes a real system (`RUNTIME_REQUIRED`).
+
+## Circuit breaker (execution-boundary half)
+
+`CircuitBreaker` in `src/governedAction.ts`. It can only stop an action. It
+never authorizes one, never overrides a runtime refusal, and is not a policy
+engine.
+
+| Condition | Where | Effect |
+|---|---|---|
+| E1 target changed since authorization | before verify | refused; the permit is not spent |
+| E2 execution outcome unknown (error or timeout) | after execute | trips `agent:` and `target:` scopes |
+| E3 effect not established | after the effect read | trips |
+| E4 operator stop (`ATLASENT_AI_ACTION_STOP_FILE`, `ATLASENT_CIRCUIT_BREAKER_STOP=1`) | before verify | refused |
+
+A trip is sticky, persists across restarts when a state file is set, and is
+reset only by a named person through `CircuitBreaker.reset(scope, by)`. No MCP
+tool can reset it: an agent must not be able to clear its own stop. The
+runtime half (B1 to B8: an agent no longer active, bindings, provenance,
+approvals, expiry, replay, runtime unavailable) is enforced by the runtime and
+is listed in the product contract.
+
+## Proof it works
+
+- Offline: `src/governedAction.test.ts`. It runs the real tool and the real
+  engine against an in-memory runtime and an in-memory GitHub. It covers the
+  untrusted agent, the hold, a changed action (refused locally and at verify),
+  the exact action with its effect, replay (at the approval and at verify),
+  local mode, path confinement, B1, and E1 to E4. Mutation-checked: removing
+  the breaker, the target check, the recomputed hash, or the sealed
+  `action_digest` each fails the suite.
+- Live: `scripts/acceptance/ai-action-reference/run.mjs`. It runs on runtime
+  staging and a real GitHub branch, and needs a person to approve in the
+  console. **Not yet run.** The session that built it could not reach the
+  staging runtime. Record the result in `docs/acceptance/` when it runs.
