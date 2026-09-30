@@ -323,7 +323,12 @@ export interface AiActionProof {
   };
   execution?: { receipt: ExecutionReceipt; at: string } | { error: string; at: string };
   effect?: EffectObservation & { at: string };
-  circuit?: { open?: BreakerTrip; tripped?: BreakerTrip[] };
+  circuit?: {
+    open?: BreakerTrip;
+    tripped?: BreakerTrip[];
+    /** CROSS-064 G3: whether the runtime recorded the trip (so other adapter instances and verify see it). */
+    runtime_record?: { recorded: boolean; trip_id?: string; reason?: string };
+  };
   /** sha256 of this record's canonical JSON with proof_sha256 omitted. */
   proof_sha256: string;
 }
@@ -346,10 +351,31 @@ export interface ExecuteGovernedParams {
   now?: () => Date;
   /** Optional check that the bytes about to be written are the bytes the digest names. */
   argumentsCheck?: () => string | null;
+  /**
+   * CROSS-064 G3: record a trip in the runtime (engine.recordCircuitTrip).
+   * Called after the local trip; its failure never un-trips anything.
+   */
+  reportTrip?: (report: { condition: "E2" | "E3"; reason: string; target: string | null; evidence: Record<string, unknown> })
+    => Promise<{ recorded: true; trip_id: string } | { recorded: false; reason: string }>;
 }
 
 function finalize(p: Omit<AiActionProof, "proof_sha256">): AiActionProof {
   return { ...p, proof_sha256: sha256Hex(canonicalJson(p)) };
+}
+
+async function reportToRuntime(
+  p: ExecuteGovernedParams,
+  condition: "E2" | "E3",
+  reason: string,
+): Promise<{ recorded: boolean; trip_id?: string; reason?: string } | undefined> {
+  if (!p.reportTrip) return undefined;
+  try {
+    // Whole-agent trip, mirroring the local agent scope; the target is evidence.
+    const r = await p.reportTrip({ condition, reason, target: null, evidence: { target_id: p.spec.target_id, tool: p.spec.tool, action_digest: actionDigest(p.spec) } });
+    return r.recorded ? { recorded: true, trip_id: r.trip_id } : { recorded: false, reason: r.reason };
+  } catch (e) {
+    return { recorded: false, reason: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /**
@@ -440,7 +466,11 @@ export async function executeGoverned(p: ExecuteGovernedParams): Promise<AiActio
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
     const tripped = p.breaker.trip(scopes, "execution_outcome_unknown", detail);
-    return finalize({ ...base, outcome: "outcome_unknown", permit, execution: { error: detail, at: now() }, circuit: { tripped } });
+    const runtime_record = await reportToRuntime(p, "E2", `execution outcome unknown: ${detail}`);
+    return finalize({
+      ...base, outcome: "outcome_unknown", permit, execution: { error: detail, at: now() },
+      circuit: { tripped, ...(runtime_record && { runtime_record }) },
+    });
   }
   const execution = { receipt, at: now() };
 
@@ -452,8 +482,13 @@ export async function executeGoverned(p: ExecuteGovernedParams): Promise<AiActio
     effect = { established: false, expected: "authorized result", observed: null, detail: { error: e instanceof Error ? e.message : String(e) } };
   }
   if (!effect.established) {
-    const tripped = p.breaker.trip(scopes, "effect_not_established", `expected ${effect.expected}, observed ${effect.observed ?? "unreadable"}`);
-    return finalize({ ...base, outcome: "effect_not_established", permit, execution, effect: { ...effect, at: now() }, circuit: { tripped } });
+    const detail = `expected ${effect.expected}, observed ${effect.observed ?? "unreadable"}`;
+    const tripped = p.breaker.trip(scopes, "effect_not_established", detail);
+    const runtime_record = await reportToRuntime(p, "E3", `effect not established: ${detail}`);
+    return finalize({
+      ...base, outcome: "effect_not_established", permit, execution, effect: { ...effect, at: now() },
+      circuit: { tripped, ...(runtime_record && { runtime_record }) },
+    });
   }
   return finalize({ ...base, outcome: "executed", permit, execution, effect: { ...effect, at: now() } });
 }

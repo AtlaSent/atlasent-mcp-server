@@ -88,13 +88,31 @@ runtime half (B1 to B8: an agent no longer active, bindings, provenance,
 approvals, expiry, replay, runtime unavailable) is enforced by the runtime and
 is listed in the product contract.
 
+### Runtime record of a trip (CROSS-064 G3)
+
+When E2 or E3 trips, the adapter also reports it to `POST /v1-agent-circuit-trips`
+(`engine.recordCircuitTrip`). The runtime records it for the calling key's own
+bound agent, never an agent named in the request. While that trip is unreset,
+`v1-verify-permit` refuses the agent's permits, so every other adapter instance
+stops too, and the console can show it. Only a person in an owner or admin
+session can reset it; no API key can, including the one that recorded it.
+
+- The agent-bound key needs the `agent_circuit:write` scope. Without it, or on
+  a runtime without the endpoint, the proof's `circuit.runtime_record` says
+  `recorded: false` with the reason. The local trip still stops this adapter.
+- The runtime trip covers the whole agent; the target is kept as evidence.
+- This needs atlasent-api migration `20261360000000` and function
+  `v1-agent-circuit-trips` on the runtime you target.
+
 ## Proof it works
 
 - Offline: `src/governedAction.test.ts`. It runs the real tool and the real
   engine against an in-memory runtime and an in-memory GitHub. It covers the
   untrusted agent, the hold, a changed action (refused locally and at verify),
   the exact action with its effect, replay (at the approval and at verify),
-  local mode, path confinement, B1, and E1 to E4. Mutation-checked: removing
+  local mode, path confinement, B1, E1 to E4, and recording a trip in the
+  runtime (a second adapter instance with a clear local breaker is then refused
+  at verify). Mutation-checked: removing
   the breaker, the target check, the recomputed hash, or the sealed
   `action_digest` each fails the suite.
 - Live: `scripts/acceptance/ai-action-reference/run.mjs`. It runs on runtime

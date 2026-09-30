@@ -2236,3 +2236,61 @@ export async function createEvidenceExport(
 ): Promise<unknown> {
   return post(`/v1/orgs/${encodeURIComponent(orgId)}/evidence-exports`, payload);
 }
+
+// ---------------------------------------------------------------------------
+// CROSS-064 G3: report an execution-boundary circuit trip to the runtime.
+//
+// POST /v1-agent-circuit-trips records the trip for the calling key's OWN
+// bound agent (the runtime takes the agent from the key, never this body).
+// While it is unreset, v1-verify-permit refuses that agent's permits, so every
+// other adapter instance stops too. Only a person in an owner/admin session can
+// reset it. This never throws: the local trip already stopped this adapter,
+// and the proof records whether the runtime has it.
+// ---------------------------------------------------------------------------
+
+export interface CircuitTripReport {
+  condition: "E1" | "E2" | "E3" | "E4";
+  reason: string;
+  /** null = the whole agent. */
+  target: string | null;
+  evidence?: Record<string, unknown>;
+}
+
+export type CircuitTripRecord =
+  | { recorded: true; trip_id: string }
+  | { recorded: false; unsupported: boolean; reason: string };
+
+export async function recordCircuitTrip(report: CircuitTripReport): Promise<CircuitTripRecord> {
+  if (getMode() !== "remote") {
+    return { recorded: false, unsupported: true, reason: "local mode: there is no runtime to record the trip in" };
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl()}/v1-agent-circuit-trips`, {
+      method: "POST",
+      headers: buildHeaders(),
+      body: JSON.stringify({
+        condition: report.condition,
+        reason: report.reason.slice(0, 1000),
+        target: report.target,
+        evidence: report.evidence ?? {},
+      }),
+      signal: makeAbortSignal(REQUEST_TIMEOUT_MS),
+    });
+  } catch (e) {
+    return { recorded: false, unsupported: false, reason: `network error: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  let json: Record<string, unknown> | null = null;
+  try {
+    json = (await res.json()) as Record<string, unknown>;
+  } catch {
+    json = null;
+  }
+  if (res.status === 404) {
+    return { recorded: false, unsupported: true, reason: "this AtlaSent runtime has no circuit-trip endpoint (HTTP 404)" };
+  }
+  const trip = json?.trip as Record<string, unknown> | undefined;
+  if (res.status === 201 && typeof trip?.id === "string") return { recorded: true, trip_id: trip.id };
+  const code = typeof json?.error === "string" ? json.error : `HTTP ${res.status}`;
+  return { recorded: false, unsupported: false, reason: code };
+}
