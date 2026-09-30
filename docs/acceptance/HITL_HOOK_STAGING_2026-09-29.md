@@ -1,24 +1,51 @@
-# D2 — HITL hook staging acceptance (2026-09-29) — INTERIM, NOT PASSED
+# D2 — HITL hook staging acceptance (2026-09-29/30) — PASSED on staging
 
-Status: **blocked on a founder decision.** Hold and deny work end to end. The
-approve-then-execute path cannot mint a permit on staging until IMPL-026B is
-accepted and `APPROVAL_CLAIM_TIME_REEVAL` is turned on there. See "Blocker".
+Status: **passed on runtime staging.** Every case below ran against the live
+staging runtime with the real hook. Production was not touched, and nothing here
+is a production claim. IMPL-026B claim-time reevaluation is on for staging only,
+by founder decision (2026-09-29, scoped acceptance recorded in atlasent-api's
+IMPL-026B ADR).
+
+Replay: [`scripts/acceptance/d2-hitl-staging/`](../../scripts/acceptance/d2-hitl-staging/)
+(`run.mjs A|B|C|D|all`). Secrets come from a local file and are never
+committed. The trace redacts tokens, signatures and keys to a short sha256.
 
 ## Setup
 
-- Runtime **staging** only (`lwnqpmnxpeyhpxvastku`). Nothing touched production.
-- Hook: `packages/agent-hooks` 0.2.6 from `main`, driven in-process through
-  `decide()` with Claude Code's PreToolUse payload (`permission_mode:
-  bypassPermissions`, so the ask is unattended). `hooks.json`:
-  `{"connected":{"environment":"staging"}}`.
-- Tenant: a synthetic acceptance org on staging. It holds one
-  `agent.tool.invoke` class (`requires_human_approval`, `requires_verified_actor`,
-  no independent approval, per the founder decision), one registered agent with a
-  bound key (`evaluate:write`, `verify:execute`, `approvals:read`), one approver
-  (`org_members.role = approver`), and a staging-only test IdP issuer for
-  `qa_reviewer` resolver assertions.
-- Action under test: `Bash` `git push --force origin d2-acceptance-*` (rule
+- Runtime **staging** only (`lwnqpmnxpeyhpxvastku`). The driver refuses any
+  other base URL.
+- Hook: `packages/agent-hooks` with this branch's call-budget fix, driven
+  in-process through `decide()` with Claude Code's PreToolUse payload
+  (`permission_mode: bypassPermissions`, so the ask is unattended).
+  `hooks.json`: `{"connected":{"environment":"staging"}}`.
+- Tenant: a synthetic acceptance org on staging, containing:
+  - one `agent.tool.invoke` class: `requires_human_approval`,
+    `requires_verified_actor`, no independent approval (founder decision:
+    self-approval OK);
+  - one registered agent with a recorded owner and a bound key
+    (`evaluate:write`, `verify:execute`, `approvals:read`);
+  - one approver (`org_members.role = approver`);
+  - a staging-only test IdP issuer (actor, identity and approval trust roots)
+    for `qa_reviewer`.
+- Action: `Bash` `git push --force origin d2-acceptance-*` (rule
   `git.force-push`, effect ask).
+
+## Flow proven
+
+1. The agent's unattended ask goes out: identity is minted, source provenance
+   is sealed for this exact action, and evaluate returns `escalate` with an
+   approval request. The hook denies now, with the approval id.
+2. Re-running before a decision returns "still waiting".
+3. The approver resolves with a JWT, an IdP-signed `identity_assertion.v1`
+   (resolver authority, role `qa_reviewer`), and a signed `approval_artifact.v1`.
+   Both are bound to the approval's own snapshot: approval id, tenant, action
+   type, target and action hash. The approval goes to `approved_awaiting_claim`.
+4. The same exact action re-run claims with the agent's own `actor_identity.v1`.
+   The claim-time reevaluation verifies the artifact and returns `allow`, and a
+   permit is minted.
+5. The hook verifies that permit at its boundary, bound to the sealed action
+   hash, target, environment and agent. The result is `allow`, and the permit is
+   consumed exactly once.
 
 ## Results
 
@@ -26,43 +53,46 @@ accepted and `APPROVAL_CLAIM_TIME_REEVAL` is turned on there. See "Blocker".
 |---|---|---|
 | A | Unattended ask is held (denied now) with an approval id | PASS |
 | A | Re-running before a decision says "still waiting" | PASS |
-| A | Approver resolves with a JWT plus an IdP-signed `identity_assertion.v1` bound to the approval's own snapshot | PASS |
-| A | Same exact action is then allowed on a claimed, verified permit | **BLOCKED** (see Blocker) |
+| A | Approver resolves (JWT + resolver assertion + approval artifact) | PASS |
+| A | Same exact action is allowed on a claimed, verified permit | PASS |
+| A | Running it again is a new request (single use, no reuse) | PASS |
+| B | A changed command is held separately and not allowed by the original's approval | PASS |
 | C | Approver denies with a note; `resolution_note` persists | PASS |
-| C | Agent is denied with the approver's note verbatim, told not to retry unchanged | PASS |
-| B, D | Changed action gets no reuse; token-level negatives (second claim, wrong target, wrong payload hash, replay) | NOT RUN (need a minted permit) |
+| C | Agent is denied with the note verbatim and told not to retry unchanged | PASS |
+| D | A second claim of the same approval yields no second permit | PASS |
+| D | Permit refused for a different target (`PERMIT_BINDING_MISMATCH`) | PASS |
+| D | Permit refused for a different payload hash (`PAYLOAD_MISMATCH`) | PASS |
+| D | Permit verifies once; a replay gets `PERMIT_ALREADY_USED` | PASS |
 
-Every failure along the way was fail-closed: nothing executed without a verified
-permit.
+Every failure seen on the way was fail-closed: nothing executed without a
+verified permit.
 
-## Defects found and their state
+## Defects found and fixed during the run
 
-1. **Idempotent replay lost the approval id** (atlasent-api#3790, open). The
-   first evaluate after a deploy outlived the hook's 6 s call budget. The honest
-   retry with the same `request_id` replayed `escalate` without
-   `approval_request_id`, so a real pending approval was orphaned and the hook
-   (correctly) blocked it as unrecorded. The fix returns the id on a hold or
-   escalate replay.
-2. **Fixture: agent had no recorded owner.** The sealer refused with
-   `agent_owner_required`. That is correct behaviour, and the fixture was fixed
-   by recording the acceptance approver as owner.
-3. **Deploy flake:** a staging function deploy exited non-zero on a Supabase CLI
-   telemetry timeout after a successful upload, then rolled back. A later deploy
-   of `main` succeeded. No code change.
+| # | Defect | Fix |
+|---|---|---|
+| 1 | The idempotent replay of a held evaluate lost `approval_request_id`, orphaning a real approval after a client timeout. It also replayed an envelope-promoted hold as `allow`, and raced the approval insert | atlasent-api#3790 (merged, deployed to staging) |
+| 2 | The idempotent replay omitted admitted `source_provenance`, so a retrying hook bound verify to the digest instead of the sealed hash (fails closed) | atlasent-api#3802 (open) |
+| 3 | The hook's 6 s per-call cap aborted a ~7 s claim-time reevaluation after the permit was minted, burning the approval | This PR: evaluate and claim-permit get 15 s, overall budget 25 s |
+| 4 | Verified-actor classes can't mint at resolve time (`ACTOR_UNVERIFIED`) | IMPL-026B claim-time reevaluation, accepted for staging only (founder, 2026-09-29) and set by a declared `deploy-staging.yml` step |
+| 5 | Fixture: the agent had no recorded owner, so the sealer refused (`agent_owner_required`, correct) | Owner recorded on the staging fixture |
+| 6 | Staging function deploy exited non-zero on a Supabase CLI telemetry timeout after upload, then rolled back | No code change; a later deploy succeeded |
 
-## Blocker
+## Observed, not defects
 
-This class requires a verified actor. At resolve time only the approver is
-present, so the resolve-time reevaluation denies `ACTOR_UNVERIFIED` and no permit
-is minted (observed: approval approved, `re_evaluation_decision = deny`, claim
-returns `claimed:false`). The designed path is IMPL-026B: resolve moves to
-`approved_awaiting_claim`, and the reevaluation runs at claim with the agent's
-own `actor_identity.v1`. The hook already sends that at claim. It is behind
-`APPROVAL_CLAIM_TIME_REEVAL`, and the ADR (status PROPOSED) says not to turn it
-on in any environment until it is ACCEPTED.
+- **Behavioural risk envelope escalated a claim** (`RISK_ENVELOPE_ESCALATE`)
+  during a burst of back-to-back acceptance runs. The runtime refused the claim
+  and minted nothing. Re-run after the burst, it passed. This is the runtime
+  working as designed.
+- Several staging approvals from debugging runs are left pending, or approved
+  but unclaimable. They expire on their own and grant nothing.
 
-Not done, deliberately: turning the flag on, or dropping `requires_verified_actor`
-on the class (that would trust a client-supplied actor).
+## Not claimed
 
-Needed to finish D2: founder acceptance of IMPL-026B (at least for staging), then
-`APPROVAL_CLAIM_TIME_REEVAL=true` on runtime staging, then cases A, B and D re-run.
+- **Production.** IMPL-026B stays PROPOSED for production; runbook step 9 needs
+  its own founder decision. D6 (production default policy) is not approved.
+- **The plugin install.** It stays local only. Connected mode is the unpublished
+  npm CLI path.
+- Items 2 and 3 above are verified in unit tests and on staging with the hook
+  fix. Item 2's runtime fix is not yet merged or deployed. This run passed
+  without needing a replay, so it does not exercise that path live.
