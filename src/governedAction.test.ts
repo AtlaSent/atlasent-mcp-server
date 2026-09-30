@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { authorize, awaitApproval, getMode, verify } from "./engine.js";
+import { authorize, awaitApproval, getMode, recordCircuitTrip, verify } from "./engine.js";
 import { registerAiActionTools, GOVERNED_FILE_CHANGE_TOOL, aiActionConfigFromEnv } from "./aiActionTools.js";
 import {
   CircuitBreaker,
@@ -106,10 +106,13 @@ interface Runtime {
   permits: Map<string, Permit>;
   approvals: Map<string, { status: string; binding: Omit<Permit, "used">; claimed: boolean }>;
   verifies: Array<Record<string, unknown>>;
+  /** CROSS-064 G3: runtime circuit-trip records (unreset). */
+  trips: Array<Record<string, unknown>>;
+  tripsSupported: boolean;
   n: number;
 }
 function newRuntime(policy: Policy): Runtime {
-  return { policy, agentBound: true, agentActive: true, seals: [], evaluations: [], permits: new Map(), approvals: new Map(), verifies: [], n: 0 };
+  return { policy, agentBound: true, agentActive: true, seals: [], evaluations: [], permits: new Map(), approvals: new Map(), verifies: [], trips: [], tripsSupported: true, n: 0 };
 }
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
@@ -169,6 +172,13 @@ function runtimeRoute(rt: Runtime, url: URL, init?: RequestInit): Response | nul
     rt.permits.set(token, { ...a.binding, used: false });
     return json(200, { claimed: true, permit_token: token });
   }
+  if (p === "/v1-agent-circuit-trips") {
+    if (!rt.tripsSupported) return json(404, { error: "not_found" });
+    if (!rt.agentBound) return json(403, { error: "forbidden" });
+    const trip = { id: `trip-${rt.trips.length + 1}`, agent_identity_id: AGENT, ...body };
+    rt.trips.push(trip);
+    return json(201, { trip: { ...trip, reset: null } });
+  }
   if (p === "/v1-verify-permit") {
     rt.verifies.push(body);
     const permit = rt.permits.get(String(body.permit_token));
@@ -176,6 +186,7 @@ function runtimeRoute(rt: Runtime, url: URL, init?: RequestInit): Response | nul
     if (!permit) return deny("PERMIT_NOT_FOUND");
     if (permit.used) return deny("PERMIT_ALREADY_USED");
     if (!rt.agentActive) return deny("AUTHORIZATION_STATE_CHANGED");
+    if (rt.trips.length > 0) return deny("AUTHORIZATION_STATE_CHANGED");
     if (body.actor_id !== permit.actor) return deny("ACTOR_MISMATCH");
     if (body.target_id !== permit.target) return deny("PERMIT_BINDING_MISMATCH");
     if (body.environment !== permit.environment) return deny("ENVIRONMENT_MISMATCH");
@@ -218,12 +229,12 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-async function connect(extra: { stopFile?: string } = {}) {
+async function connect(extra: { stopFile?: string; breakerFile?: string } = {}) {
   const server = new McpServer({ name: "t", version: "1" });
   const { breaker } = registerAiActionTools(server, {
     owner: OWNER, repo: REPO, branch: BRANCH, token: "ghs_test", pathPrefix: "config/",
-    breakerFile: join(dir, "breaker.json"), ...(extra.stopFile && { stopFile: extra.stopFile }),
-  }, () => true, { authorize, verify, getMode, awaitApproval });
+    breakerFile: extra.breakerFile ?? join(dir, "breaker.json"), ...(extra.stopFile && { stopFile: extra.stopFile }),
+  }, () => true, { authorize, verify, getMode, awaitApproval, recordCircuitTrip });
   const [c, s] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "t", version: "1" });
   await Promise.all([client.connect(c), server.connect(s)]);
@@ -434,6 +445,55 @@ describe("Circuit breaker (CROSS-064)", () => {
     assert.equal(r.outcome, "effect_not_established");
     assert.equal(r.proof.effect.established, false);
     assert.ok(breaker.list().some((t) => t.reason === "effect_not_established"));
+  });
+
+  it("G3: an E2 trip is recorded in the runtime for the whole agent, and a second adapter instance is stopped there", async () => {
+    rt.policy = "allow";
+    const { call } = await connect();
+    repo.failNextPut = 502;
+    const r = await call(change);
+    assert.equal(r.outcome, "outcome_unknown");
+    assert.equal(r.proof.circuit.runtime_record.recorded, true);
+    assert.equal(rt.trips.length, 1);
+    assert.equal(rt.trips[0].condition, "E2");
+    assert.equal(rt.trips[0].target, null, "whole-agent trip, mirroring the local agent scope");
+    assert.equal((rt.trips[0].evidence as Record<string, unknown>).target_id, r.proof.action.target_id);
+    // A fresh adapter with no local state: its own breaker is clear, the runtime is not.
+    const other = await connect({ breakerFile: join(dir, "other-breaker.json") });
+    const putsBefore = repo.puts;
+    const next = await other.call({ ...change, path: "config/other.json", content: "{}\n" });
+    assert.equal(next.outcome, "refused_verify");
+    assert.equal(next.proof.permit.verify_error_code, "AUTHORIZATION_STATE_CHANGED");
+    assert.equal(repo.puts, putsBefore, "the second instance wrote nothing");
+  });
+
+  it("G3: an E3 trip is recorded as E3", async () => {
+    rt.policy = "allow";
+    const { call } = await connect();
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const res = await orig(input, init);
+      if (init?.method === "PUT") repo.lieOnRead = true;
+      return res;
+    }) as typeof fetch;
+    const r = await call(change);
+    assert.equal(r.outcome, "effect_not_established");
+    assert.equal(r.proof.circuit.runtime_record.recorded, true);
+    assert.equal(rt.trips[0].condition, "E3");
+  });
+
+  it("G3: a runtime without the endpoint -> proof says not recorded; the local trip still stops this adapter", async () => {
+    rt.policy = "allow";
+    rt.tripsSupported = false;
+    const { call, breaker } = await connect();
+    repo.failNextPut = 502;
+    const r = await call(change);
+    assert.equal(r.outcome, "outcome_unknown");
+    assert.equal(r.proof.circuit.runtime_record.recorded, false);
+    assert.match(String(r.proof.circuit.runtime_record.reason), /404/);
+    assert.ok(breaker.list().length > 0);
+    const next = await call({ ...change, path: "config/other.json", content: "{}\n" });
+    assert.equal(next.outcome, "refused_circuit_open");
   });
 
   it("E4: operator stop file -> refused before verify", async () => {

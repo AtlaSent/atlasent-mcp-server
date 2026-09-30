@@ -20,7 +20,7 @@
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { authorize, awaitApproval, getMode, verify } from "./engine.js";
+import { authorize, awaitApproval, getMode, recordCircuitTrip, verify } from "./engine.js";
 import {
   CircuitBreaker,
   executeGoverned,
@@ -85,6 +85,8 @@ export interface AiActionDeps {
   verify: typeof verify;
   getMode: typeof getMode;
   awaitApproval: typeof awaitApproval;
+  /** CROSS-064 G3: record a trip in the runtime. Omitted in tests that do not exercise it. */
+  recordCircuitTrip?: typeof recordCircuitTrip;
   fetchImpl?: typeof globalThis.fetch;
   now?: () => Date;
 }
@@ -93,7 +95,7 @@ export function registerAiActionTools(
   server: McpServer,
   config: AiActionConfig,
   rateLimitOk: (tool: string) => boolean,
-  deps: AiActionDeps = { authorize, verify, getMode, awaitApproval },
+  deps: AiActionDeps = { authorize, verify, getMode, awaitApproval, recordCircuitTrip },
 ): { breaker: CircuitBreaker } {
   const breaker = new CircuitBreaker({ stateFile: config.breakerFile, stopFile: config.stopFile, now: deps.now });
   const held = new Map<string, HeldAction>();
@@ -120,6 +122,13 @@ export function registerAiActionTools(
       now: deps.now,
       argumentsCheck: () =>
         sha256Hex(action.content) === action.spec.arguments.content_sha256 ? null : "content does not match the authorized content_sha256",
+      ...(deps.recordCircuitTrip && {
+        reportTrip: async (r) => {
+          const rec = await deps.recordCircuitTrip!(r);
+          if (!rec.recorded) log("ai_action.circuit_trip_not_recorded", { reason: rec.reason });
+          return rec.recorded ? rec : { recorded: false as const, reason: rec.reason };
+        },
+      }),
     });
   }
 
