@@ -255,7 +255,15 @@ export function contextFor(spec: GovernedActionSpec, actorId: string, requestId:
     payload_hash: actionDigest(spec),
     request_id: requestId,
     state_snapshot: { source: "atlasent-mcp-governed-action", complete: true, system: spec.system },
+    // CROSS-064 G4: when the action names its exact provider effect, the
+    // runtime sees it in the evaluated (sealed) context and can later
+    // establish the effect against it.
+    ...(isPlainObject(spec.arguments.expected_effect) && { expected_effect: spec.arguments.expected_effect }),
   };
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 export async function requestAuthorization(
@@ -287,6 +295,7 @@ export async function requestAuthorization(
 
 export type GovernedOutcome =
   | "executed"             // verified, executed, effect established
+  | "effect_pending"       // executed; the RUNTIME has not yet established the effect from provider events (NOT ESTABLISHED)
   | "effect_not_established" // executed, but the system does not show the authorized result
   | "outcome_unknown"      // the execution call failed or timed out; result unknown
   | "refused_circuit_open"
@@ -322,7 +331,8 @@ export interface AiActionProof {
     verified_at?: string;
   };
   execution?: { receipt: ExecutionReceipt; at: string } | { error: string; at: string };
-  effect?: EffectObservation & { at: string };
+  /** The adapter's own observation, plus (CROSS-064 G4) the runtime's verdict from provider events. */
+  effect?: EffectObservation & { at: string; runtime?: RuntimeEffectResult & { at: string } };
   circuit?: {
     open?: BreakerTrip;
     tripped?: BreakerTrip[];
@@ -330,6 +340,8 @@ export interface AiActionProof {
     runtime_record?: { recorded: boolean; trip_id?: string; reason?: string };
   };
   /** sha256 of this record's canonical JSON with proof_sha256 omitted. */
+  /** CROSS-064 G4: the consequential operation the permit was admitted under. */
+  operation?: { operation_id: string; attempt_id: string };
   proof_sha256: string;
 }
 
@@ -357,6 +369,43 @@ export interface ExecuteGovernedParams {
    */
   reportTrip?: (report: { condition: "E2" | "E3"; reason: string; target: string | null; evidence: Record<string, unknown> })
     => Promise<{ recorded: true; trip_id: string } | { recorded: false; reason: string }>;
+  /**
+   * CROSS-064 G4: runtime-established effect. Requires the spec to carry
+   * arguments.expected_effect. Without it, the adapter's observation decides
+   * (unchanged behaviour).
+   */
+  runtimeEffect?: RuntimeEffectMode;
+}
+
+/** The runtime's establishment verdict, as engine.establishGovernedEffect reports it. */
+export interface RuntimeEffectResult {
+  verdict: "established" | "superseded" | "mismatch" | "not_established" | "unavailable";
+  reason: string | null;
+  recorded: boolean;
+  reauthorization_required?: boolean;
+  evidence?: Record<string, unknown>;
+}
+
+/**
+ * CROSS-064 G4: consume the permit by admitting a consequential operation,
+ * and let the runtime establish the effect from the provider's own events.
+ */
+export interface RuntimeEffectMode {
+  admit: (
+    permitToken: string,
+    ctx: { action_type: string; actor_id: string; target_id: string; environment: string; payload_hash: string },
+    opts: { provider: string; operation_key: string },
+  ) => Promise<
+    | { valid: true; operation_id: string; attempt_id: string }
+    | { valid: false; outcome: string; verify_error_code?: string; reason: string }
+  >;
+  establish: (req: { operation_id: string; attempt_id: string; expected_effect: Record<string, unknown> }) => Promise<RuntimeEffectResult>;
+  /** consequential_operations.provider for this system, e.g. "github". */
+  provider: string;
+  /** How long to wait for the provider event to reach the runtime (default 30 s). */
+  waitMs?: number;
+  pollMs?: number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 function finalize(p: Omit<AiActionProof, "proof_sha256">): AiActionProof {
@@ -439,14 +488,35 @@ export async function executeGoverned(p: ExecuteGovernedParams): Promise<AiActio
     });
   }
 
+  const expectedEffect = isPlainObject(p.spec.arguments.expected_effect) ? p.spec.arguments.expected_effect : null;
+  if (p.runtimeEffect && !expectedEffect) {
+    return finalize({
+      ...base, outcome: "refused_arguments_mismatch", permit: permitBase,
+      execution: { error: "runtime effect establishment needs the action to name its expected_effect", at: now() },
+    });
+  }
+
   // Execution-boundary verification: the runtime consumes the permit here.
-  const v = await p.verify(p.permitToken, {
+  // With runtimeEffect, consume-and-admit also opens the operation the runtime
+  // will establish the effect for.
+  const boundary = {
     action_type: AI_ACTION_TYPE,
     actor_id: p.actorId,
     environment: p.spec.environment,
     target_id: p.spec.target_id,
     payload_hash: p.sealedBinding ? sealedActionHash(p.sealedBinding, p.spec) : digest,
-  });
+  };
+  let operation: { operation_id: string; attempt_id: string } | undefined;
+  let v: { valid: boolean; outcome: string; verify_error_code?: string };
+  if (p.runtimeEffect) {
+    const a = await p.runtimeEffect.admit(p.permitToken, boundary, { provider: p.runtimeEffect.provider, operation_key: `ai-action:${digest}` });
+    v = a.valid
+      ? { valid: true, outcome: "allow" }
+      : { valid: false, outcome: a.outcome, ...(a.verify_error_code && { verify_error_code: a.verify_error_code }) };
+    if (a.valid) operation = { operation_id: a.operation_id, attempt_id: a.attempt_id };
+  } else {
+    v = await p.verify(p.permitToken, boundary);
+  }
   const verifiedAt = now();
   const permit = {
     ...permitBase,
@@ -458,6 +528,7 @@ export async function executeGoverned(p: ExecuteGovernedParams): Promise<AiActio
   if (v.valid !== true) {
     return finalize({ ...base, outcome: "refused_verify", permit });
   }
+  const opField = operation ? { operation } : {};
 
   // Execute exactly once. An exception means we do not know what happened.
   let receipt: ExecutionReceipt;
@@ -468,7 +539,7 @@ export async function executeGoverned(p: ExecuteGovernedParams): Promise<AiActio
     const tripped = p.breaker.trip(scopes, "execution_outcome_unknown", detail);
     const runtime_record = await reportToRuntime(p, "E2", `execution outcome unknown: ${detail}`);
     return finalize({
-      ...base, outcome: "outcome_unknown", permit, execution: { error: detail, at: now() },
+      ...base, outcome: "outcome_unknown", permit, ...opField, execution: { error: detail, at: now() },
       circuit: { tripped, ...(runtime_record && { runtime_record }) },
     });
   }
@@ -486,9 +557,51 @@ export async function executeGoverned(p: ExecuteGovernedParams): Promise<AiActio
     const tripped = p.breaker.trip(scopes, "effect_not_established", detail);
     const runtime_record = await reportToRuntime(p, "E3", `effect not established: ${detail}`);
     return finalize({
-      ...base, outcome: "effect_not_established", permit, execution, effect: { ...effect, at: now() },
+      ...base, outcome: "effect_not_established", permit, ...opField, execution, effect: { ...effect, at: now() },
       circuit: { tripped, ...(runtime_record && { runtime_record }) },
     });
   }
-  return finalize({ ...base, outcome: "executed", permit, execution, effect: { ...effect, at: now() } });
+  if (!p.runtimeEffect || !operation || !expectedEffect) {
+    return finalize({ ...base, outcome: "executed", permit, execution, effect: { ...effect, at: now() } });
+  }
+
+  // CROSS-064 G4: the runtime establishes the effect from the provider's own
+  // events. The adapter's observation above is necessary but not sufficient.
+  const runtime = await awaitRuntimeEffect(p.runtimeEffect, { ...operation, expected_effect: expectedEffect });
+  const effectWithRuntime = { ...effect, at: now(), runtime: { ...runtime, at: now() } };
+  if (runtime.verdict === "established") {
+    return finalize({ ...base, outcome: "executed", permit, ...opField, execution, effect: effectWithRuntime });
+  }
+  if (runtime.verdict === "superseded" || runtime.verdict === "mismatch") {
+    const detail = `runtime ${runtime.verdict}: ${runtime.reason ?? "no reason"}`;
+    const tripped = p.breaker.trip(scopes, "effect_not_established", detail);
+    const runtime_record = await reportToRuntime(p, "E3", `effect not established: ${detail}`);
+    return finalize({
+      ...base, outcome: "effect_not_established", permit, ...opField, execution, effect: effectWithRuntime,
+      circuit: { tripped, ...(runtime_record && { runtime_record }) },
+    });
+  }
+  // No provider evidence yet: NOT ESTABLISHED, and not inferred from the
+  // adapter's own read. The operation stays open for a later establishment.
+  return finalize({ ...base, outcome: "effect_pending", permit, ...opField, execution, effect: effectWithRuntime });
+}
+
+async function awaitRuntimeEffect(
+  mode: RuntimeEffectMode,
+  req: { operation_id: string; attempt_id: string; expected_effect: Record<string, unknown> },
+): Promise<RuntimeEffectResult> {
+  const waitMs = mode.waitMs ?? 30_000;
+  const pollMs = Math.max(1, mode.pollMs ?? 2_000);
+  const sleep = mode.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let last: RuntimeEffectResult = { verdict: "not_established", reason: "not checked", recorded: false };
+  for (let waited = 0; ; waited += pollMs) {
+    try {
+      last = await mode.establish(req);
+    } catch (e) {
+      last = { verdict: "unavailable", reason: e instanceof Error ? e.message : String(e), recorded: false };
+    }
+    if (last.verdict === "established" || last.verdict === "superseded" || last.verdict === "mismatch") return last;
+    if (waited + pollMs > waitMs) return last;
+    await sleep(pollMs);
+  }
 }

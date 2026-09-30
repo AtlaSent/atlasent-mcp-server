@@ -14,6 +14,7 @@
  * branch B". Different content, a different base, path, branch or repo is a
  * different digest.
  */
+import { createHash } from "node:crypto";
 import { sha256Hex, type ExecutionAdapter, type GovernedActionSpec } from "./governedAction.js";
 
 export interface GithubFileTarget {
@@ -127,8 +128,35 @@ export function githubFileAdapter(target: GithubFileTarget, content: string, opt
   };
 }
 
+/** Git's blob id for these bytes: sha1("blob <len>\\0" + bytes). What GitHub reports as the file's sha. */
+export function gitBlobSha(content: string): string {
+  const bytes = Buffer.from(content, "utf8");
+  return createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`, "utf8"), bytes])).digest("hex");
+}
+
+/**
+ * CROSS-064 G4: the effect this change is authorized to produce, in the
+ * runtime's github_contents_write.v1 form. prior_blob_sha is the blob the
+ * write replaces (null for a create); blob_sha is the blob it writes.
+ */
+export function githubExpectedEffect(change: GithubFileChange, baseState: string): Record<string, unknown> {
+  return {
+    kind: "github_contents_write.v1",
+    repository: `${change.owner}/${change.repo}`,
+    branch: change.branch,
+    path: change.path,
+    prior_blob_sha: baseState.startsWith("blob:") ? baseState.slice("blob:".length).toLowerCase() : null,
+    blob_sha: gitBlobSha(change.content),
+  };
+}
+
 /** The canonical action for "set this file to this content", authorized against its current state. */
-export function githubFileChangeSpec(change: GithubFileChange, baseState: string, environment: string): GovernedActionSpec {
+export function githubFileChangeSpec(
+  change: GithubFileChange,
+  baseState: string,
+  environment: string,
+  opts: { withExpectedEffect?: boolean } = {},
+): GovernedActionSpec {
   return {
     tool: GITHUB_CONTENTS_TOOL,
     system: "github",
@@ -141,6 +169,9 @@ export function githubFileChangeSpec(change: GithubFileChange, baseState: string
       base_state: baseState,
       content_sha256: sha256Hex(change.content),
       message: change.message,
+      // CROSS-064 G4: part of the action digest, and of the evaluated context,
+      // only when the runtime is to establish the effect.
+      ...(opts.withExpectedEffect && { expected_effect: githubExpectedEffect(change, baseState) }),
     },
   };
 }

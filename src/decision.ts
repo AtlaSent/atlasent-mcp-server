@@ -12,6 +12,13 @@ export type ActionContext = {
   approvals?: string[];
   change_window?: string;
   tool_name?: string;
+  /**
+   * CROSS-064 G4: the exact provider effect this action is authorized to
+   * produce (e.g. github_contents_write.v1). Sent inside the evaluated (and,
+   * for agent.*, sealed) context so the runtime can later establish the effect
+   * from the provider's own events against what was authorized.
+   */
+  expected_effect?: Record<string, unknown>;
   /** Tool being invoked; the agent.tool.invoke class requires `context.tool`. */
   tool?: string;
   state_snapshot?: Record<string, unknown>;
