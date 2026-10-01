@@ -1,8 +1,8 @@
 {
   "name": "@atlasent/agent-hooks",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "type": "module",
-  "description": "Stops AI coding agents from destroying production. A Claude Code PreToolUse guard: dropping databases, deleting volumes, force-pushing, terraform destroy and deploys wait for a person. Local, no account, no dependencies.",
+  "description": "Stops AI coding agents from destroying production. A Claude Code PreToolUse guard: dropping databases, deleting volumes, force-pushing, terraform destroy and deploys wait for a person. Local, no account, no dependencies. Requires Node.js 18 or later.",
   "keywords": ["claude-code", "claude-code-plugin", "hooks", "ai-agent", "guardrail", "production", "database", "security", "fail-closed"],
   "bin": { "atlasent-hooks": "cli.mjs" },
   "scripts": { "test": "node --test ../agent-hooks-test/*.node.mjs" },

@@ -278,6 +278,8 @@ stable and will not change without a major version bump.
     final answer, a sealer 409 or `idempotency_key_reused`.
   - Refused requests show the runtime's error code and message.
   - Still not commercially ready until the live staging proof passes.
+- 0.2.7: the plugin and marketplace descriptions, and the top of the README,
+  now state that Node.js 18 or later is required. Behavior is unchanged.
 
 ### `@atlasent/mcp-gate` 0.1.0 (tag `gate-v0.1.0`) — 2026-09-25
 
