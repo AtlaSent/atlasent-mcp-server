@@ -101,6 +101,13 @@ active rules recorded in `metadata.hitl_default.previous`.
   never edits or deletes a row.
 - If the seed created the class, rollback sets it `inactive` and archives its
   bundle.
+- **Permits go with the policy that issued them.** Seed and rollback both
+  revoke the outstanding permits of the bundle they replace
+  (`revoke_permits_for_archived_bundle`, the cascade `activate_constraint_bundle`
+  runs; `publish_new_bundle_version` alone skips it). They also read the prior
+  bundle under the bundle writer's advisory lock. Live on staging: a permit
+  minted under the restored baseline was revoked by the next seed. Found by
+  Copilot review on `atlasent-api#3835`.
 - **Holds raised before a rollback stay pending.** They still need a person, and
   nothing is approved by the rollback. The packet does not propose withdrawing
   them automatically.
