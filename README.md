@@ -205,6 +205,36 @@ The protected-tool response includes the action-specific Verification result alo
 
 The returned Permit has already been consumed by the execution-boundary Verification. Verifying it again should be treated as a replay, not as a step required after deployment.
 
+## Human-in-the-loop demo: hold, approve, execute, record
+
+`examples/hitl-demo.mjs` shows one uninterrupted sequence against a hosted runtime and a real GitHub repository, using [`atlasent_governed_file_change`](docs/AI_ACTION_PROTECTION.md) (AI Action Protection, a design partner program):
+
+| Stage | What you see |
+|---|---|
+| 1 ATTEMPT | The agent asks to change a config file |
+| 2 HOLD | The runtime holds it and returns an `approval_request_id`. The file is re-read and is unchanged |
+| 3 BOUND | The same request with different content is refused, so the approval covers only this change |
+| 4 APPROVE | A person approves the request in the AtlaSent console (Approvals) |
+| 5 EXECUTE | The permit is verified at the boundary, then exactly one write is made, and the commit sha is printed |
+| 6 RECORD | The tool re-reads the effect at the commit and at the branch head, the demo re-reads it again, and the `ai_action_proof.v1` hash is printed |
+
+The key must be agent-bound (console: Settings → Connect an AI agent). Use a dedicated demo repository.
+
+```bash
+npm run build
+ATLASENT_API_KEY=ask_test_... \
+ATLASENT_BASE_URL=https://<ref>.supabase.co/functions/v1 \
+ATLASENT_ENVIRONMENT=staging \
+ATLASENT_AI_ACTION_GITHUB_REPO=owner/demo-repo \
+ATLASENT_AI_ACTION_GITHUB_BRANCH=main \
+ATLASENT_AI_ACTION_GITHUB_TOKEN=<token that can write only that repo> \
+npm run demo:hitl
+```
+
+The demo prints only what the tool returned or the repository showed. If a stage doesn't happen, the demo stops with `FAIL at <stage>` and exits 1. For example, if the org's `agent.tool.invoke` policy allows the change with no person involved, the demo fails at ATTEMPT rather than skipping the hold. The org's policy must require human approval. It writes `hitl-demo-evidence-<ts>.json`, and the permit appears in it only as a sha256.
+
+`npm run demo:hitl -- --simulate` rehearses the same stages offline with an in-memory runtime, repository and approver. Every line it prints starts with `[SIMULATED]`, and it refuses any real network call. Don't present a simulated run as a live one.
+
 ## Self-gating agent pattern
 
 For an agent or MCP host that owns its own native tool boundary, the safe pattern is:
