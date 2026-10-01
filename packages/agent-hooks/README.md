@@ -19,6 +19,8 @@ else runs exactly as before.
 
 Local: no account, no network, no dependencies. Apache-2.0 licensed.
 
+**Requires Node.js 18 or later** on your `PATH` (check with `node --version`).
+
 ## Install (30 seconds)
 
 In Claude Code:

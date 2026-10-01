@@ -9,7 +9,7 @@
     {
       "name": "atlasent-guard",
       "source": "./packages/agent-hooks",
-      "description": "Stops AI coding agents from destroying production: destructive and shipping commands wait for a person. Local, no account."
+      "description": "Stops AI coding agents from destroying production: destructive and shipping commands wait for a person. Local, no account. Requires Node.js 18 or later."
     }
   ]
 }
