@@ -550,3 +550,183 @@ function memAdapter(base = "absent"): ExecutionAdapter & { executed: number } {
     observeEffect: async () => ({ established: true, expected: "x", observed: "x" }),
   };
 }
+
+// ---------------------------------------------------------------------------
+// CROSS-064 G4: runtime-established effect (consume-and-admit + establish)
+// ---------------------------------------------------------------------------
+describe("runtime-established effect (CROSS-064 G4)", () => {
+  const expected_effect = {
+    kind: "github_contents_write.v1", repository: "a/b", branch: "main", path: "f.json",
+    prior_blob_sha: null, blob_sha: "b".repeat(40),
+  };
+  const spec: GovernedActionSpec = {
+    tool: "github.contents.put", system: "mem", target_id: "github:a/b@main:f.json", environment: "production",
+    arguments: { base_state: "absent", expected_effect },
+  };
+  type Verdict = "established" | "superseded" | "mismatch" | "not_established" | "unavailable";
+  function mode(verdicts: Verdict[], admitOk = true) {
+    const calls = { admit: 0, establish: 0, admitCtx: undefined as unknown, establishReq: undefined as unknown };
+    return {
+      calls,
+      mode: {
+        provider: "github",
+        waitMs: 5,
+        pollMs: 1,
+        sleep: async () => {},
+        admit: async (_t: string, ctx: unknown) => {
+          calls.admit++;
+          calls.admitCtx = ctx;
+          return admitOk
+            ? { valid: true as const, operation_id: "op-1", attempt_id: "att-1" }
+            : { valid: false as const, outcome: "deny", verify_error_code: "AUTHORIZATION_STATE_CHANGED", reason: "held" };
+        },
+        establish: async (req: unknown) => {
+          calls.establishReq = req;
+          const v = verdicts[Math.min(calls.establish++, verdicts.length - 1)];
+          return { verdict: v, reason: v === "established" ? null : `r:${v}`, recorded: v !== "not_established" && v !== "unavailable" };
+        },
+      },
+    };
+  }
+  const run = (m: ReturnType<typeof mode>["mode"], adapter = memAdapter(), s: GovernedActionSpec = spec) =>
+    executeGoverned({
+      spec: s, actorId: AGENT, permitToken: "pt", decision: { decision: "allow" }, adapter,
+      breaker: new CircuitBreaker({}),
+      verify: async () => { throw new Error("verify must not be called when the operation is admitted"); },
+      runtimeEffect: m,
+    });
+
+  it("established by the runtime: executed, with the operation and the runtime verdict in the proof", async () => {
+    const { mode: m, calls } = mode(["established"]);
+    const proof = await run(m);
+    assert.equal(proof.outcome, "executed");
+    assert.deepEqual(proof.operation, { operation_id: "op-1", attempt_id: "att-1" });
+    assert.equal(proof.effect?.runtime?.verdict, "established");
+    assert.deepEqual((calls.establishReq as Record<string, unknown>).expected_effect, expected_effect);
+    assert.equal((calls.admitCtx as Record<string, unknown>).payload_hash, actionDigest(spec));
+  });
+
+  it("waits for the provider event: not_established then established", async () => {
+    const { mode: m, calls } = mode(["not_established", "not_established", "established"]);
+    const proof = await run(m);
+    assert.equal(proof.outcome, "executed");
+    assert.equal(calls.establish, 3);
+  });
+
+  it("no provider evidence in time: effect_pending (NOT ESTABLISHED), never executed, even though the adapter saw it", async () => {
+    const { mode: m } = mode(["not_established"]);
+    const adapter = memAdapter();
+    const proof = await run(m, adapter);
+    assert.equal(adapter.executed, 1);
+    assert.equal(proof.outcome, "effect_pending");
+    assert.equal(proof.effect?.established, true, "the adapter's own read is kept as evidence");
+    assert.equal(proof.effect?.runtime?.verdict, "not_established");
+    assert.equal(proof.circuit, undefined, "latency is not a trip");
+  });
+
+  it("superseded or mismatch: effect_not_established and the circuit trips", async () => {
+    for (const v of ["superseded", "mismatch"] as const) {
+      const { mode: m } = mode([v]);
+      const breaker = new CircuitBreaker({});
+      const proof = await executeGoverned({
+        spec, actorId: AGENT, permitToken: "pt", decision: { decision: "allow" }, adapter: memAdapter(), breaker,
+        verify: async () => { throw new Error("unused"); }, runtimeEffect: m,
+      });
+      assert.equal(proof.outcome, "effect_not_established", v);
+      assert.equal(proof.effect?.runtime?.verdict, v);
+      assert.ok(breaker.check([`agent:${AGENT}`]), `${v} must trip the agent`);
+    }
+  });
+
+  it("admission refused: nothing executes", async () => {
+    const { mode: m } = mode(["established"], false);
+    const adapter = memAdapter();
+    const proof = await run(m, adapter);
+    assert.equal(proof.outcome, "refused_verify");
+    assert.equal(adapter.executed, 0);
+  });
+
+  it("an action without expected_effect is refused before admission", async () => {
+    const { mode: m, calls } = mode(["established"]);
+    const adapter = memAdapter();
+    const proof = await run(m, adapter, { ...spec, arguments: { base_state: "absent" } });
+    assert.equal(proof.outcome, "refused_arguments_mismatch");
+    assert.equal(calls.admit, 0);
+    assert.equal(adapter.executed, 0);
+  });
+
+  it("expected_effect is in the action digest and in the evaluated context", () => {
+    const without = { ...spec, arguments: { base_state: "absent" } };
+    assert.notEqual(actionDigest(spec), actionDigest(without));
+    const change = { owner: "a", repo: "b", branch: "main", path: "f.json", content: "hello\n", message: "m" };
+    const s = githubFileChangeSpec(change, "absent", "production", { withExpectedEffect: true });
+    const ee = s.arguments.expected_effect as Record<string, unknown>;
+    // git hash-object of "hello\n"
+    assert.equal(ee.blob_sha, "ce013625030ba8dba906f756967f9e9ca394464a");
+    assert.equal(ee.prior_blob_sha, null);
+    assert.equal(githubFileChangeSpec(change, "blob:ABC", "p", { withExpectedEffect: true }).arguments.expected_effect
+      && (githubFileChangeSpec(change, "blob:ABC", "p", { withExpectedEffect: true }).arguments.expected_effect as Record<string, unknown>).prior_blob_sha, "abc");
+    assert.equal(githubFileChangeSpec(change, "absent", "production").arguments.expected_effect, undefined, "off by default");
+  });
+});
+
+describe("engine: admitGovernedOperation / establishGovernedEffect (CROSS-064 G4)", () => {
+  const saved = { fetch: globalThis.fetch, key: process.env.ATLASENT_API_KEY, base: process.env.ATLASENT_BASE_URL, mode: process.env.ATLASENT_MODE };
+  beforeEach(() => {
+    process.env.ATLASENT_API_KEY = "ask_test_x";
+    process.env.ATLASENT_BASE_URL = "https://rt.example/functions/v1";
+    process.env.ATLASENT_MODE = "remote";
+  });
+  afterEach(() => {
+    globalThis.fetch = saved.fetch;
+    for (const [k, v] of [["ATLASENT_API_KEY", saved.key], ["ATLASENT_BASE_URL", saved.base], ["ATLASENT_MODE", saved.mode]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  });
+  const respond = (status: number, body: unknown) => {
+    const seen: Array<{ url: string; body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      seen.push({ url: String(url), body: JSON.parse(String(init?.body ?? "{}")) });
+      return new Response(JSON.stringify(body), { status });
+    }) as typeof fetch;
+    return seen;
+  };
+
+  it("admit: posts to consume-and-admit and returns the operation", async () => {
+    const { admitGovernedOperation } = await import("./engine.js");
+    const seen = respond(200, { operation_id: "op", attempt_id: "att", decision_id: "d" });
+    const r = await admitGovernedOperation("pt", { action_type: "agent.tool.invoke", actor_id: AGENT, target_id: TARGET, environment: "production", payload_hash: "a".repeat(64) }, { provider: "github", operation_key: "k" });
+    assert.deepEqual(r, { valid: true, operation_id: "op", attempt_id: "att" });
+    assert.match(seen[0].url, /\/v1-consequential-operations\/consume-and-admit$/);
+    assert.equal(seen[0].body.provider, "github");
+    assert.equal(seen[0].body.payload_hash, "a".repeat(64));
+  });
+
+  it("admit: a refusal or a network error is never valid", async () => {
+    const { admitGovernedOperation } = await import("./engine.js");
+    respond(403, { error: "permit_verification_failed", outcome: "deny", verify_error_code: "AUTHORIZATION_STATE_CHANGED" });
+    const r = await admitGovernedOperation("pt", { action_type: "a", actor_id: "x", target_id: "t", environment: "e", payload_hash: "h" }, { provider: "github", operation_key: "k" });
+    assert.equal(r.valid, false);
+    globalThis.fetch = (async () => { throw new Error("down"); }) as typeof fetch;
+    assert.equal((await admitGovernedOperation("pt", { action_type: "a", actor_id: "x", target_id: "t", environment: "e", payload_hash: "h" }, { provider: "github", operation_key: "k" })).valid, false);
+  });
+
+  it("establish: only a 200 with a verdict counts; 409 is not_established, 503 unavailable", async () => {
+    const { establishGovernedEffect } = await import("./engine.js");
+    const req = { operation_id: "op", attempt_id: "att", expected_effect: {} };
+    respond(200, { effect_establishment: { verdict: "established", reason: null, recorded: true, observation: { evidence: { effect_commit: "c" } } } });
+    const ok = await establishGovernedEffect(req);
+    assert.equal(ok.verdict, "established");
+    assert.deepEqual(ok.evidence, { effect_commit: "c" });
+    respond(200, { effect_establishment: { verdict: "superseded", reason: "later_change_to_same_path", recorded: true, reauthorization_required: true } });
+    const sup = await establishGovernedEffect(req);
+    assert.equal(sup.verdict, "superseded");
+    assert.equal(sup.reauthorization_required, true);
+    respond(409, { error: "effect_not_established", effect_establishment: { verdict: "unknown", reason: "no_provider_event_after_admission", recorded: false } });
+    assert.equal((await establishGovernedEffect(req)).verdict, "not_established");
+    respond(503, { error: "effect_verification_unavailable" });
+    assert.equal((await establishGovernedEffect(req)).verdict, "unavailable");
+    respond(200, { effect_establishment: { verdict: "maybe" } });
+    assert.equal((await establishGovernedEffect(req)).verdict, "not_established", "an unknown verdict is never success");
+  });
+});

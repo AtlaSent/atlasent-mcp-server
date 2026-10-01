@@ -68,6 +68,41 @@ Flow (`src/aiActionTools.ts` → `src/governedAction.ts` → `src/githubFileAdap
 
 Local mode never changes a real system (`RUNTIME_REQUIRED`).
 
+## Runtime-established effect (CROSS-064 G4, opt-in)
+
+By default the adapter decides whether the write took effect by re-reading
+GitHub itself. That is the adapter's own observation. With
+`ATLASENT_AI_ACTION_RUNTIME_EFFECT=true` the runtime decides instead, from
+GitHub's signed push webhooks:
+
+1. The action names its exact effect, `expected_effect`
+   (`github_contents_write.v1`: repository, branch, path, the blob it replaces
+   and the blob it writes). It is part of the action digest and of the
+   evaluated, sealed context.
+2. At the boundary the permit is consumed by
+   `/v1-consequential-operations/consume-and-admit`, which also opens a
+   consequential operation for the action.
+3. After the write, the server calls `/establish-effect` and waits briefly for
+   the push event to arrive. The outcome depends on the runtime's verdict:
+   - `established`: the outcome is `executed`.
+   - `superseded` (a later change to the same file landed first) or
+     `mismatch`: the outcome is `effect_not_established`, the circuit trips
+     (E3), and a new authorization is needed.
+   - No verdict yet: the outcome is `effect_pending`. The effect is **not
+     established**, even if the adapter's own read matched. The operation
+     stays open for a later establishment.
+
+Requirements:
+- The key must hold `consequential_operations:write` (Tier 2) as well as
+  `verify:execute`.
+- The repository must be enrolled with the org's GitHub App, so its push
+  webhooks reach the runtime.
+
+The server refuses to start the tool if the flag is on but it cannot call the
+runtime. The runtime-side enforcement flag
+(`ATLASENT_ENFORCE_EFFECT_ESTABLISHMENT`) is separate and stays off until
+staging proves the path.
+
 ## Circuit breaker (execution-boundary half)
 
 `CircuitBreaker` in `src/governedAction.ts`. It can only stop an action. It

@@ -1,0 +1,285 @@
+{
+  "version": "l2_commit_point_acceptance.v1",
+  "binding_profile": "BP-000009",
+  "action_type": "agent.tool.invoke",
+  "level_claimed": "L2",
+  "level_definition": "L2 = deterministic simulated execution through the binding's own commit-point code path",
+  "run_at": "2026-09-30T20:25:14.331Z",
+  "code_under_test": {
+    "repository": "Atlasent/atlasent-mcp-server",
+    "commit": "e954819d2b367d01177440122955d01cef25c022",
+    "path": "MCP client > atlasent_governed_file_change > engine.authorize (identity, seal, evaluate) / awaitApproval > executeGoverned (verify, execute once, observe effect) > githubFileAdapter"
+  },
+  "simulated": {
+    "runtime": "local HTTP server speaking the v1 wire: identity mint, provenance seal (runtime action-hash algorithm), evaluate, approvals/claim, verify with runtime error codes; HMAC-signed 300 s single-use permits",
+    "provider": "in-process GitHub contents API behind the adapter's fetchImpl seam, counting every mutation call"
+  },
+  "not_proven": [
+    "the real AtlaSent runtime's semantics (L3+ / staging acceptance: scripts/acceptance/ai-action-reference/run.mjs)",
+    "a real provider or vendor sandbox (L3)",
+    "customer acceptance (G4) or production validation (G5)",
+    "the LangChain/LlamaIndex binding profile (BP-000010); this evidence covers BP-000009 only"
+  ],
+  "checks": [
+    {
+      "id": "R1.exact_request",
+      "requirement": "exact actor/action/resource/context request",
+      "passed": true,
+      "detail": "action_type=agent.tool.invoke actor=agent:11111111-1111-4111-8111-111111111111 resource_id=github:AtlaSent-Reference/l2-simulated@l2-commit-point:config/feature-flags.json env=staging tool=github.contents.put"
+    },
+    {
+      "id": "R2.payload_bound_at_evaluate",
+      "requirement": "payload hash bound during evaluation",
+      "passed": true,
+      "detail": "execution_payload_hash=14ebe56945bf3df37ef94b248fee53b564c1c0d1f09b69fec89d875fc523a002 context.action_digest=14ebe56945bf3df37ef94b248fee53b564c1c0d1f09b69fec89d875fc523a002 expected=14ebe56945bf3df37ef94b248fee53b564c1c0d1f09b69fec89d875fc523a002"
+    },
+    {
+      "id": "R3.target_environment_bound",
+      "requirement": "environment/target binding",
+      "passed": true,
+      "detail": "permit target=github:AtlaSent-Reference/l2-simulated@l2-commit-point:config/feature-flags.json environment=staging actor=agent:11111111-1111-4111-8111-111111111111"
+    },
+    {
+      "id": "R4.bounded_signed_permit",
+      "requirement": "ALLOW produces a bounded signed permit",
+      "passed": true,
+      "detail": "permit exp=1790769900 (TTL 300s), HMAC-signed"
+    },
+    {
+      "id": "R5.same_facts_at_verify",
+      "requirement": "binding presents the same material facts at verification",
+      "passed": true,
+      "detail": "verify presented target=github:AtlaSent-Reference/l2-simulated@l2-commit-point:config/feature-flags.json env=staging payload_hash=== bound"
+    },
+    {
+      "id": "R6.verify_immediately_before_effect",
+      "requirement": "permit verifies immediately before the consequential effect",
+      "passed": true,
+      "detail": "sequence: provider.read > runtime.identity_mint > runtime.seal > runtime.evaluate > runtime.permit_issued > provider.read > runtime.verify > provider.mutation > provider.read > provider.read"
+    },
+    {
+      "id": "R7.single_use_consumed",
+      "requirement": "permit atomically consumed / single-use",
+      "passed": true,
+      "detail": "permit.used=true"
+    },
+    {
+      "id": "R13.execution_effect_separate",
+      "requirement": "execution and effect evidence separate from authorization",
+      "passed": true,
+      "detail": "outcome=executed provider_mutations=1 provider_content_matches=true"
+    },
+    {
+      "id": "R8.replay_refused",
+      "requirement": "replay is refused",
+      "passed": true,
+      "detail": "first=executed replay=refused_verify/PERMIT_ALREADY_USED provider_mutations_during_replay=0"
+    },
+    {
+      "id": "R9.changed_payload_refused",
+      "requirement": "changed payload is refused",
+      "passed": true,
+      "detail": "outcome=refused_verify code=PAYLOAD_MISMATCH (expected PAYLOAD_MISMATCH) provider_mutations=0 permit_used=false"
+    },
+    {
+      "id": "R10a.changed_target_refused",
+      "requirement": "changed target is refused",
+      "passed": true,
+      "detail": "outcome=refused_verify code=PERMIT_BINDING_MISMATCH (expected PERMIT_BINDING_MISMATCH) provider_mutations=0 permit_used=false"
+    },
+    {
+      "id": "R10b.changed_environment_refused",
+      "requirement": "changed environment is refused",
+      "passed": true,
+      "detail": "outcome=refused_verify code=ENVIRONMENT_MISMATCH (expected ENVIRONMENT_MISMATCH) provider_mutations=0 permit_used=false"
+    },
+    {
+      "id": "R11.deny_zero_provider_mutations",
+      "requirement": "DENY causes zero simulated provider mutation calls",
+      "passed": true,
+      "detail": "outcome=refused deny_code=POLICY_DENY provider_mutations=0 permits_issued=0"
+    },
+    {
+      "id": "R12.hold_zero_until_resolved",
+      "requirement": "HOLD causes zero provider mutation calls until properly resolved",
+      "passed": true,
+      "detail": "held=held pending_rerun=held altered_after_approval=refused resolved=executed provider_mutations=1"
+    },
+    {
+      "id": "R13b.not_inferred_write_error",
+      "requirement": "execution is never inferred from authorization",
+      "passed": true,
+      "detail": "permit.verified=true outcome=outcome_unknown (expected outcome_unknown) provider_content_unchanged=true"
+    },
+    {
+      "id": "R13b.not_inferred_write_dropped",
+      "requirement": "execution is never inferred from authorization",
+      "passed": true,
+      "detail": "permit.verified=true outcome=effect_not_established (expected effect_not_established) provider_content_unchanged=true"
+    },
+    {
+      "id": "R14.deterministic_rerun",
+      "requirement": "deterministic rerun produces the expected outcomes",
+      "passed": true,
+      "detail": "outcome vectors identical=true; failures run1=0 run2=0"
+    }
+  ],
+  "outcomes": [
+    {
+      "scenario": "S1_allow",
+      "outcome": "executed",
+      "verify_codes": [
+        "ok"
+      ],
+      "provider_mutations": 1,
+      "verifies": 1,
+      "permits_issued": 1
+    },
+    {
+      "scenario": "S2_replay",
+      "outcome": "refused_verify",
+      "verify_codes": [
+        "ok",
+        "PERMIT_ALREADY_USED"
+      ],
+      "provider_mutations": 1,
+      "verifies": 2,
+      "permits_issued": 1
+    },
+    {
+      "scenario": "S3_changed_payload",
+      "outcome": "refused_verify",
+      "verify_codes": [
+        "PAYLOAD_MISMATCH"
+      ],
+      "provider_mutations": 0,
+      "verifies": 1,
+      "permits_issued": 1
+    },
+    {
+      "scenario": "S4_changed_target",
+      "outcome": "refused_verify",
+      "verify_codes": [
+        "PERMIT_BINDING_MISMATCH"
+      ],
+      "provider_mutations": 0,
+      "verifies": 1,
+      "permits_issued": 1
+    },
+    {
+      "scenario": "S5_changed_environment",
+      "outcome": "refused_verify",
+      "verify_codes": [
+        "ENVIRONMENT_MISMATCH"
+      ],
+      "provider_mutations": 0,
+      "verifies": 1,
+      "permits_issued": 1
+    },
+    {
+      "scenario": "S6_deny",
+      "outcome": "refused",
+      "verify_codes": [],
+      "provider_mutations": 0,
+      "verifies": 0,
+      "permits_issued": 0
+    },
+    {
+      "scenario": "S7_hold",
+      "outcome": "executed",
+      "verify_codes": [
+        "ok"
+      ],
+      "provider_mutations": 1,
+      "verifies": 1,
+      "permits_issued": 1
+    },
+    {
+      "scenario": "S8_write_error",
+      "outcome": "outcome_unknown",
+      "verify_codes": [
+        "ok"
+      ],
+      "provider_mutations": 1,
+      "verifies": 1,
+      "permits_issued": 1
+    },
+    {
+      "scenario": "S8_write_dropped",
+      "outcome": "effect_not_established",
+      "verify_codes": [
+        "ok"
+      ],
+      "provider_mutations": 1,
+      "verifies": 1,
+      "permits_issued": 1
+    }
+  ],
+  "deterministic_rerun": {
+    "identical": true,
+    "runs": 2
+  },
+  "mutants": [
+    {
+      "name": "verify_bypassed",
+      "description": "the executor treats every permit as verified without asking the runtime",
+      "applied_count": 9,
+      "caught": true,
+      "failed_checks": [
+        "R5.same_facts_at_verify",
+        "R6.verify_immediately_before_effect",
+        "R7.single_use_consumed",
+        "R8.replay_refused",
+        "R9.changed_payload_refused",
+        "R10a.changed_target_refused",
+        "R10b.changed_environment_refused",
+        "R12.hold_zero_until_resolved"
+      ]
+    },
+    {
+      "name": "payload_binding_removed",
+      "description": "the payload digest is neither bound at evaluate nor presented at verify",
+      "applied_count": 19,
+      "caught": true,
+      "failed_checks": [
+        "R2.payload_bound_at_evaluate",
+        "R5.same_facts_at_verify",
+        "R6.verify_immediately_before_effect",
+        "R7.single_use_consumed",
+        "R13.execution_effect_separate",
+        "R9.changed_payload_refused",
+        "R12.hold_zero_until_resolved"
+      ]
+    },
+    {
+      "name": "replay_possible",
+      "description": "verify never consumes the permit",
+      "applied_count": 6,
+      "caught": true,
+      "failed_checks": [
+        "R7.single_use_consumed",
+        "R8.replay_refused"
+      ]
+    },
+    {
+      "name": "deny_reaches_provider",
+      "description": "a runtime deny is coerced to allow and the unverifiable permit is accepted",
+      "applied_count": 2,
+      "caught": true,
+      "failed_checks": [
+        "R11.deny_zero_provider_mutations"
+      ]
+    },
+    {
+      "name": "execution_inferred_from_authorization",
+      "description": "the adapter reports the effect established from the write acknowledgement (or a swallowed write error) instead of re-reading the provider",
+      "applied_count": 4,
+      "caught": true,
+      "failed_checks": [
+        "R13b.not_inferred_write_error",
+        "R13b.not_inferred_write_dropped"
+      ]
+    }
+  ],
+  "result": "pass"
+}

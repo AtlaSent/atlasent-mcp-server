@@ -901,6 +901,7 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
   if (ctx.change_window !== undefined) context.change_window = ctx.change_window;
   if (ctx.tool_name !== undefined) context.tool_name = ctx.tool_name;
   if (ctx.tool !== undefined) context.tool = ctx.tool;
+  if (ctx.expected_effect !== undefined) context.expected_effect = ctx.expected_effect;
   // agent.*: admitted sealed provenance binds the permit to the SEALED action
   // hash, which covers `context` and `resource_id` but not the top-level
   // execution_payload_hash. Without the digest inside the sealed context, a
@@ -2293,4 +2294,118 @@ export async function recordCircuitTrip(report: CircuitTripReport): Promise<Circ
   if (res.status === 201 && typeof trip?.id === "string") return { recorded: true, trip_id: trip.id };
   const code = typeof json?.error === "string" ? json.error : `HTTP ${res.status}`;
   return { recorded: false, unsupported: false, reason: code };
+}
+
+// ---------------------------------------------------------------------------
+// CROSS-064 G4: runtime-established effect for a governed action.
+//
+// Instead of a bare verify, the permit is consumed by
+// /v1-consequential-operations/consume-and-admit, which also opens a
+// consequential operation for the action. After the adapter executes, the
+// RUNTIME decides whether the effect happened, from the provider's own signed
+// events (/establish-effect). The adapter's own re-read stays in the proof,
+// but it is no longer what "established" rests on.
+//
+// Requires the calling key to hold consequential_operations:write (Tier 2) in
+// addition to verify:execute.
+// ---------------------------------------------------------------------------
+
+export type AdmitResult =
+  | { valid: true; operation_id: string; attempt_id: string }
+  | { valid: false; outcome: string; verify_error_code?: string; reason: string };
+
+export async function admitGovernedOperation(
+  permitToken: string,
+  ctx: { action_type: string; actor_id: string; target_id: string; environment: string; payload_hash: string },
+  opts: { provider: string; operation_key: string },
+): Promise<AdmitResult> {
+  if (getMode() !== "remote") return { valid: false, outcome: "error", reason: "local mode: there is no runtime to admit the operation" };
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl()}/v1-consequential-operations/consume-and-admit`, {
+      method: "POST",
+      headers: buildHeaders(),
+      body: JSON.stringify({
+        permit_token: permitToken,
+        action_type: ctx.action_type,
+        actor_id: ctx.actor_id,
+        target_id: ctx.target_id,
+        environment: ctx.environment,
+        payload_hash: ctx.payload_hash,
+        operation_key: opts.operation_key,
+        provider: opts.provider,
+      }),
+      signal: makeAbortSignal(REQUEST_TIMEOUT_MS),
+    });
+  } catch (e) {
+    // Unknown whether the permit was consumed: never execute on this.
+    return { valid: false, outcome: "error", reason: `network error: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  let json: Record<string, unknown> | null = null;
+  try {
+    json = (await res.json()) as Record<string, unknown>;
+  } catch {
+    json = null;
+  }
+  const op = (json?.operation ?? json) as Record<string, unknown> | null;
+  const operationId = typeof op?.operation_id === "string" ? op.operation_id : typeof op?.id === "string" ? op.id : null;
+  const attemptId = typeof op?.attempt_id === "string" ? op.attempt_id : null;
+  if (res.ok && operationId && attemptId) return { valid: true, operation_id: operationId, attempt_id: attemptId };
+  return {
+    valid: false,
+    outcome: typeof json?.outcome === "string" ? json.outcome : "deny",
+    ...(typeof json?.verify_error_code === "string" && { verify_error_code: json.verify_error_code }),
+    reason: typeof json?.message === "string" ? json.message : typeof json?.error === "string" ? json.error : `HTTP ${res.status}`,
+  };
+}
+
+export type RuntimeEffectVerdict = "established" | "superseded" | "mismatch" | "not_established" | "unavailable";
+
+export interface RuntimeEffect {
+  verdict: RuntimeEffectVerdict;
+  reason: string | null;
+  recorded: boolean;
+  reauthorization_required?: boolean;
+  evidence?: Record<string, unknown>;
+}
+
+export async function establishGovernedEffect(req: {
+  operation_id: string;
+  attempt_id: string;
+  expected_effect: Record<string, unknown>;
+}): Promise<RuntimeEffect> {
+  if (getMode() !== "remote") return { verdict: "unavailable", reason: "local mode", recorded: false };
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl()}/v1-consequential-operations/establish-effect`, {
+      method: "POST",
+      headers: buildHeaders(),
+      body: JSON.stringify(req),
+      signal: makeAbortSignal(REQUEST_TIMEOUT_MS),
+    });
+  } catch (e) {
+    return { verdict: "unavailable", reason: `network error: ${e instanceof Error ? e.message : String(e)}`, recorded: false };
+  }
+  let json: Record<string, unknown> | null = null;
+  try {
+    json = (await res.json()) as Record<string, unknown>;
+  } catch {
+    json = null;
+  }
+  const ee = json?.effect_establishment as Record<string, unknown> | undefined;
+  const reason = typeof ee?.reason === "string" ? ee.reason : typeof json?.message === "string" ? json.message : null;
+  if (res.status === 200 && (ee?.verdict === "established" || ee?.verdict === "superseded" || ee?.verdict === "mismatch")) {
+    const obs = ee.observation as Record<string, unknown> | undefined;
+    return {
+      verdict: ee.verdict,
+      reason,
+      recorded: ee.recorded === true,
+      ...(ee.reauthorization_required === true && { reauthorization_required: true }),
+      ...(obs && typeof obs.evidence === "object" && obs.evidence !== null && { evidence: obs.evidence as Record<string, unknown> }),
+    };
+  }
+  // Anything else is NOT ESTABLISHED: the runtime has not seen evidence yet,
+  // or it could not look. Never success.
+  const unavailable = res.status >= 500 || json?.error === "effect_verification_unavailable";
+  return { verdict: unavailable ? "unavailable" : "not_established", reason: reason ?? `HTTP ${res.status}`, recorded: false };
 }
