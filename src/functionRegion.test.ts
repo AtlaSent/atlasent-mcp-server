@@ -9,6 +9,7 @@ import {
   DEFAULT_FUNCTION_REGION,
   FUNCTION_REGION_ENV,
   FunctionRegionConfigError,
+  SUPPORTED_FUNCTION_REGIONS,
   functionRegionHeaders,
   resolveFunctionRegion,
 } from "./functionRegion.js";
@@ -43,6 +44,19 @@ describe("resolveFunctionRegion", () => {
     for (const bad of ["US-WEST-1", "west", "us-west-1\r\nx-evil: 1"]) {
       assert.throws(() => resolveFunctionRegion(HOSTED, bad, {}), FunctionRegionConfigError);
     }
+  });
+
+  it("rejects a well-formed region Supabase does not support", () => {
+    // A pattern check would accept these; a typo must not silently go unpinned.
+    for (const bad of ["us-wset-1", "us-east-2", "eu-north-1"]) {
+      assert.throws(() => resolveFunctionRegion(HOSTED, bad, {}), FunctionRegionConfigError);
+    }
+  });
+
+  it("accepts every region Supabase documents for x-region", () => {
+    assert.equal(SUPPORTED_FUNCTION_REGIONS.size, 14);
+    assert.ok(SUPPORTED_FUNCTION_REGIONS.has(DEFAULT_FUNCTION_REGION));
+    for (const r of SUPPORTED_FUNCTION_REGIONS) assert.equal(resolveFunctionRegion(HOSTED, r, {}), r);
   });
 
   it("returns no headers when unpinned", () => {
