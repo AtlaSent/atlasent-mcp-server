@@ -30,6 +30,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { toolResult } from "./decision.js";
+import { functionRegionHeaders } from "./functionRegion.js";
 
 const MAX_FIELD_LEN = 256;
 const VQP_TIMEOUT_MS = 30_000;
@@ -105,6 +106,7 @@ async function postSupabase<T>(path: string, body: unknown): Promise<T> {
         "Content-Type": "application/json",
         Accept: "application/json",
         Authorization: `Bearer ${key}`,
+        ...functionRegionHeaders(base),
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -133,7 +135,7 @@ function apiHeaders(): Record<string, string> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const key = process.env.ATLASENT_API_KEY;
   if (key) headers["Authorization"] = `Bearer ${key}`;
-  return headers;
+  return { ...headers, ...functionRegionHeaders(apiBaseUrl()) };
 }
 
 async function getApi<T>(

@@ -36,6 +36,7 @@ import { upgradeHint } from "./upgrade.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import { VERSION } from "./version.js";
+import { functionRegionHeaders } from "./functionRegion.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -181,7 +182,7 @@ function buildHeaders(): Record<string, string> {
   if (key) headers["Authorization"] = `Bearer ${key}`;
   const anon = process.env.ATLASENT_ANON_KEY;
   if (anon) headers["x-anon-key"] = anon;
-  return headers;
+  return { ...headers, ...functionRegionHeaders(baseUrl()) };
 }
 
 function baseUrl(): string {
