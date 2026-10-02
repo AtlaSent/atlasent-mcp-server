@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "atlasent": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@atlasent/mcp-server"],
+      "env": {
+        "ATLASENT_MODE": "local"
+      }
+    }
+  }
+}

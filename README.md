@@ -76,7 +76,7 @@ Action proposed
 
 You don't need an AtlaSent account or API key to try this server. With no credentials set, it runs in **local mode**: an in-process rules engine that works offline.
 
-Add this to your MCP host config (Claude Desktop, Cursor, Windsurf, and others; per-host file locations are [below](#claude-desktop)):
+Add this to your MCP host config (Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, and others; per-host file locations are [below](#claude-desktop)):
 
 ```json
 {
@@ -509,6 +509,8 @@ Shadow/advisory evaluation is useful for observation, but it is not the same as 
 
 ## Claude Desktop
 
+Add to `claude_desktop_config.json`. A ready-made file with remote, local, and HTTP variants is in [`examples/claude_desktop_config.json`](./examples/claude_desktop_config.json).
+
 ```json
 {
   "mcpServers": {
@@ -526,9 +528,60 @@ Shadow/advisory evaluation is useful for observation, but it is not the same as 
 }
 ```
 
+## Claude Code
+
+Add the server with `claude mcp add`. It runs over stdio. Everything after `--` is the command Claude Code starts:
+
+```bash
+claude mcp add atlasent -e ATLASENT_MODE=local -- npx -y @atlasent/mcp-server
+```
+
+Run `claude mcp list` to check it connects, or `/mcp` inside a Claude Code session to see its tools.
+
+**Scope.** `--scope` (`-s`) controls where the entry is stored:
+
+| Scope | Stored in | Use it for |
+|---|---|---|
+| `local` (default) | your user config, for the current project only | trying it out |
+| `project` | `.mcp.json` at the repo root, checked in | sharing the server with everyone who works on the repo. Claude Code asks each person to approve a project server before it starts. |
+| `user` | your user config, for every project | using it everywhere you run Claude Code |
+
+```bash
+claude mcp add atlasent --scope project -e ATLASENT_MODE=local -- npx -y @atlasent/mcp-server
+```
+
+writes this `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "atlasent": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@atlasent/mcp-server"],
+      "env": { "ATLASENT_MODE": "local" }
+    }
+  }
+}
+```
+
+Don't commit an API key in a project-scope `.mcp.json`. For remote mode, use `local` or `user` scope.
+
+**Remote mode.** Set `ATLASENT_API_KEY`. A key on its own switches the server to remote mode, and `ATLASENT_BASE_URL` defaults to `https://api.atlasent.io/functions/v1`. `ATLASENT_MODE=remote` makes the choice explicit, and `ATLASENT_MODE=local` forces local mode even when a key is set. See [Local vs remote mode](#local-vs-remote-mode).
+
+```bash
+claude mcp add atlasent --scope user \
+  -e ATLASENT_MODE=remote \
+  -e ATLASENT_API_KEY=ask_live_xxxxxxxxxxxxxxxx \
+  -e ATLASENT_BASE_URL=https://api.atlasent.io/functions/v1 \
+  -- npx -y @atlasent/mcp-server
+```
+
+To switch modes, remove the entry with `claude mcp remove atlasent` and add it again.
+
 ## Cursor
 
-Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
+Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global). A local-mode file you can copy as-is, no account needed: [`examples/cursor_mcp.json`](./examples/cursor_mcp.json).
 
 ```json
 {
@@ -549,7 +602,7 @@ Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
 
 ## Windsurf
 
-Add to `~/.codeium/windsurf/mcp_config.json`:
+Add to `~/.codeium/windsurf/mcp_config.json`. A local-mode file you can copy as-is, no account needed: [`examples/windsurf_mcp_config.json`](./examples/windsurf_mcp_config.json).
 
 ```json
 {
@@ -567,6 +620,25 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   }
 }
 ```
+
+## VS Code
+
+Add to `.vscode/mcp.json` in your workspace. VS Code's top-level key is `servers`, not `mcpServers`. A local-mode file you can copy as-is, no account needed: [`examples/vscode_mcp.json`](./examples/vscode_mcp.json).
+
+```json
+{
+  "servers": {
+    "atlasent": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@atlasent/mcp-server"],
+      "env": { "ATLASENT_MODE": "local" }
+    }
+  }
+}
+```
+
+For remote mode, replace the `env` block with the one shown in the [Cursor](#cursor) section.
 
 ## Other MCP clients
 
