@@ -15,6 +15,14 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ### Added
 
+- Every call to the AtlaSent runtime now pins the edge-function region with an
+  `x-region` header. The hosted runtime defaults to `us-west-1`, the region of
+  its database. Supabase otherwise runs the function nearest the caller; on
+  staging, with the same request shape, evaluate went from a p50 of 4.70 s to
+  1.42 s once pinned. Set `ATLASENT_FUNCTION_REGION` to override the region,
+  or to `auto` to turn pinning off. A self-hosted `ATLASENT_BASE_URL` is
+  unpinned unless the variable is set. A malformed value makes the call fail
+  closed (deny), and no request is sent.
 - The `agent.tool.invoke` gate now presents what the runtime requires for an
   agent tool call (ADR CROSS-063):
   - It sends the agent's own verified identity, minted for exactly

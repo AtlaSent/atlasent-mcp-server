@@ -17,6 +17,7 @@
  */
 
 import { VERSION } from "./version.js";
+import { functionRegionHeaders } from "./functionRegion.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const STREAM_TIMEOUT_MS = 60_000;
@@ -67,6 +68,7 @@ function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   if (key) headers["Authorization"] = `Bearer ${key}`;
   const anon = process.env.ATLASENT_ANON_KEY;
   if (anon) headers["x-anon-key"] = anon;
+  Object.assign(headers, functionRegionHeaders(baseUrl()));
   if (extra) Object.assign(headers, extra);
   return headers;
 }

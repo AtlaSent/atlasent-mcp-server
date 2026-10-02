@@ -478,6 +478,12 @@ the server automatically strips the `/functions/v1` suffix for those calls, so a
 single `ATLASENT_BASE_URL` value works for both families — no separate configuration
 needed.
 
+`ATLASENT_FUNCTION_REGION` controls where the runtime's edge functions execute.
+Unset, calls to the hosted runtime run in `us-west-1`, next to its database. A
+self-hosted base URL is left to Supabase's nearest-region default. Set it to a
+region id to pin elsewhere, or to `auto` to disable pinning. Execution next to
+the database matters: evaluate makes dozens of sequential database round trips.
+
 ## Read-only mode for live demos
 
 Set:
