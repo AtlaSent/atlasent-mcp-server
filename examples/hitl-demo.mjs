@@ -29,8 +29,16 @@
  * SIMULATED (`--simulate`). In-memory runtime, repository and approver, for
  * rehearsal only. Every line is prefixed [SIMULATED]; no network call is made.
  *
+ * PREFLIGHT (`--preflight`). Read-only setup check before presenting: env,
+ * GitHub repository and branch (GET only), the built server's tools/list, and
+ * one read of the org's pending approvals (needs approvals:read). Creates no
+ * request, approval, permit or commit. See examples/hitl-demo/preflight.mjs.
+ *
+ *   npm run build && npm run demo:hitl -- --preflight  # setup check, ten minutes before
  *   npm run build && npm run demo:hitl                 # live
  *   npm run build && npm run demo:hitl -- --simulate   # rehearsal
+ *
+ * Presenter run sheet: docs/DEMO_90_SECONDS.md.
  *
  * Exit code 0 only when every stage was observed. Writes nothing except the
  * one demo file in the configured repository, and a JSON evidence file in the
@@ -44,10 +52,13 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { runHitlDemo } from "./hitl-demo/core.mjs";
 import { createSimulatedBackends } from "./hitl-demo/simulated-backends.mjs";
+import { runPreflight } from "./hitl-demo/preflight.mjs";
+import { existsSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DIST = resolve(__dirname, "..", "dist");
 const simulate = process.argv.includes("--simulate");
+const preflight = process.argv.includes("--preflight");
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 
 /** Reads the file at the branch head straight from GitHub's contents API, independently of the tool. */
@@ -71,7 +82,37 @@ function die(msg) {
   process.exit(2);
 }
 
+async function preflightMain() {
+  if (simulate) die("--preflight checks a live setup; it cannot be combined with --simulate.");
+  if (!existsSync(resolve(DIST, "index.js"))) die("dist/index.js not found. Run npm run build first.");
+  const { functionRegionHeaders } = await import(resolve(DIST, "functionRegion.js"));
+  const listToolNames = async () => {
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [resolve(DIST, "index.js")],
+      env: { ...process.env, ATLASENT_MODE: "remote" },
+      stderr: "ignore",
+    });
+    const c = new Client({ name: "atlasent-demo-preflight", version: "1.0.0" });
+    await c.connect(transport);
+    try {
+      return (await c.listTools()).tools.map((t) => t.name);
+    } finally {
+      await c.close();
+    }
+  };
+  const { ok } = await runPreflight({
+    env: process.env,
+    fetch: globalThis.fetch,
+    listToolNames,
+    fileExists: (p) => existsSync(p),
+    runtimeHeaders: (base) => functionRegionHeaders(base),
+  });
+  process.exit(ok ? 0 : 1);
+}
+
 async function main() {
+  if (preflight) return preflightMain();
   let client;
   let target;
   let sim;
