@@ -211,17 +211,21 @@ The key's server-side scope determines the organization; a caller-supplied organ
 ID is never used to select another tenant.
 
 **There is no shipped default action type, and the example does not name a real one.**
-An `actionType` must be a class your organization has provisioned. Two facts are worth
-knowing before you map one, both read directly from the runtime rather than inferred:
+An `actionType` must be a class your organization has provisioned.
 `action_classes.requires_verified_actor` defaults to **`true`** (its
 `requires_human_approval` / `requires_independent_approval` siblings default to `false`
-— the asymmetry is deliberate for a security product), so a newly created class requires
-a verified actor unless someone explicitly opted out; and connected mode presents
-`actorId` as a plain string, so a class requiring a verified actor answers
-`ACTOR_UNVERIFIED`, which arrives here as an ordinary `cloud_deny` indistinguishable
-from a policy refusal. Whether that should change is open on
-[#175](https://github.com/Atlasent/atlasent-mcp-server/issues/175) and is not settled by
-this note.
+— the asymmetry is deliberate for a security product). Connected mode therefore mints a
+fresh runtime-signed `actor_identity.v1` for every invocation through
+`/v1-agent-actor-identity` and supplies it to `v1-evaluate`. There is no identity cache.
+A mint failure, unsupported endpoint, malformed assertion, wrong principal, wrong action,
+or wrong environment blocks the call before evaluation.
+
+The execution key must be bound server-side to a registered agent, and `actorId` must be
+that runtime principal in `agent:<uuid>` form. The key and actor must refer to the same
+agent; the Gate never invents or self-asserts that binding. Production use remains gated
+by the runtime's own classification/promotion and live acceptance of the agent-identity
+endpoint; source support in this package is not evidence that a given production runtime
+has enabled it.
 
 ```sh
 npx @atlasent/mcp-gate check-connection connection.json
@@ -240,20 +244,20 @@ credential. This variable is removed from the upstream subprocess environment; t
 is hygiene, not process isolation against a malicious server running as the same OS user.
 The generated JSON contains no API key. Changing mappings requires a restart.
 
-The configured actor is an assertion checked by the runtime, not newly verified actor
-identity supplied by Gate. `gateId` is local attribution bound into the execution digest,
-not a registered device identity. Backend action setup, entitlements, independent approval
-requirements and actor restrictions still apply. Setup does not modify any of them.
+The configured `actorId` is not trusted by itself. Gate first asks the runtime to mint
+the registered agent's signed `actor_identity.v1`, then verifies that the returned
+assertion is for the exact configured principal, mapped action, and environment before it
+will call `v1-evaluate`. `gateId` remains local attribution bound into the execution
+digest, not a registered device identity. Backend action setup, entitlements, independent
+approval requirements and actor restrictions still apply. Setup does not modify any of
+them.
 
-**A class that requires a verified actor cannot be authorized by this package.** That
-follows from the sentence above: Gate presents `actorId` as an assertion and mints no
-`actor_identity.v1`, so a class whose `requires_verified_actor` is set denies every call.
-Map only to classes that do not require one. Gate flags are per-organization, read from
-your own `action_classes` row and not implied by an action type's name, so check the row
-rather than the slug. `@atlasent/mcp-server` is the surface that does mint an agent
-identity — from an API key bound to a registered agent — so verified-actor classes go
-through it today. The refusal arrives as a plain `cloud_deny`, indistinguishable from an
-ordinary policy denial, which is worth knowing before you go looking for a policy bug.
+For approval-required actions, a held call is not released with the identity from the
+initial evaluation. Once the approval reaches `approved_awaiting_claim`, Gate requires the
+runtime's `claim_environment`, mints a **fresh** assertion for the same actor/action/
+environment, and sends that assertion to `claim-permit`. A legacy `approved` row, missing
+claim environment, changed environment, or failed identity mint blocks rather than
+falling back.
 
 Requests send mapped action, target, actor, environment, a fresh request UUID, and a
 SHA-256 digest covering the entire invocation including exact arguments. Raw arguments
@@ -306,11 +310,14 @@ The originating execution key also needs `approvals:read`. Gate does not obtain
 creates/routes the approval; the authorized reviewer uses the existing console.
 
 Sequence: evaluate returns hold/escalate plus an approval UUID → record
-`awaiting_approval` → poll status every two seconds → require approved and a fresh
-allow reevaluation → claim the permit once with the originating key → verify and
-consume it against the **original** digest/actor/action/target/environment → dispatch.
-No second evaluate, changed payload, or token from a status GET is used. Denial,
-withdrawal, expiry, missing claim, HTTP failure or timeout blocks. Polling never calls
+`awaiting_approval` → poll status every two seconds → require
+`approved_awaiting_claim` plus the exact `claim_environment` → mint a fresh
+`actor_identity.v1` for the original actor/action/environment → claim the permit once
+with the originating key and that assertion → require a fresh allow reevaluation → verify
+and consume it against the **original** digest/actor/action/target/environment → dispatch.
+No second caller-initiated evaluate, changed payload, or token from a status GET is used.
+Denial, withdrawal, expiry, legacy approval state, missing claim environment, failed
+identity mint, missing claim, HTTP failure or timeout blocks. Polling never calls
 `resolve` or the retired approval queue/service. The local report shows the approval
 UUID, never a permit token or approval bearer link.
 
