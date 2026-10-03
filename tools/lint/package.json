@@ -3,7 +3,7 @@
   "private": true,
   "description": "ESLint toolchain for the repo root. Kept in its own package because the root builds with TypeScript 7, which has no JavaScript API, and typescript-eslint needs one (peer typescript <6.1). See scripts/lint.mjs.",
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
+    "@eslint/js": "^10.0.1",
     "eslint": "^9.39.5",
     "globals": "^17.0.0",
     "typescript": "~6.0.3",
