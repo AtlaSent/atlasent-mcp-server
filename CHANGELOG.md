@@ -45,6 +45,16 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
   plan change gets a new id under the same attempt, because reusing the held
   request's id would make the runtime replay that hold.
 
+### Fixed
+
+- `atlasent_evaluate_many` and `atlasent_evaluate_stream` now check each item's
+  `action` against the runtime's action-type pattern (lowercase dot-notation,
+  for example `production.deploy`), the same check `evaluate`,
+  `verify_permit` and `atlasent_evaluate` gained in #229. The batch and stream
+  endpoints run every item through the single-evaluate handler, which rejects
+  anything else. One bad item now fails the whole call before anything is
+  sent.
+
 ## [2.16.0] - 2026-09-27
 
 ### Fixed

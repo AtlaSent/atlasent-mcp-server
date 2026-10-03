@@ -33,13 +33,25 @@ import {
   FeatureNotEnabledError,
   type BatchEvaluateItem,
 } from "./v2Client.js";
+import { ACTION_TYPE_PATTERN, ACTION_TYPE_PATTERN_MESSAGE } from "./actionTypePattern.js";
 
 const MAX_FIELD_LEN = 256;
 const MAX_BATCH_ITEMS = 100;
 const MAX_GRAPHQL_QUERY_LEN = 100_000;
 
+// `action` is the per-item action type. Both /v1/evaluate/batch and
+// /v1/evaluate/stream (atlasent-api v1-evaluate-batch / v1-evaluate-stream)
+// pass each item verbatim to the canonical v1-evaluate handleEvaluate, so every
+// item meets the same ACTION_TYPE_RE check as a single evaluate (after the
+// Deploy Gate alias map, whose aliases all match it). A failing item can only
+// ever come back as a per-item 400 `invalid_action_type`, never an allow, so
+// refusing the whole call here refuses nothing the runtime would accept.
 const batchItemSchema = z.object({
-  action: z.string().min(1).max(MAX_FIELD_LEN),
+  action: z
+    .string()
+    .min(1)
+    .max(MAX_FIELD_LEN)
+    .regex(ACTION_TYPE_PATTERN, ACTION_TYPE_PATTERN_MESSAGE),
   agent: z.string().min(1).max(MAX_FIELD_LEN),
   context: z.record(z.string(), z.unknown()).optional(),
 });

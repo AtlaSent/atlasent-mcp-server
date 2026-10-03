@@ -123,7 +123,7 @@ describe("Streamable HTTP transport — end-to-end", () => {
     try {
       const result = await client.callTool({
         name: "atlasent_evaluate_many",
-        arguments: { items: [{ action: "deploy", agent: "agent-1" }] },
+        arguments: { items: [{ action: "production.deploy", agent: "agent-1" }] },
       });
       const data = parseToolResult(result);
       assert.equal(data.batch_id, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
