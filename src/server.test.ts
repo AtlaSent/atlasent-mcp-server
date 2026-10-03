@@ -238,7 +238,7 @@ describe("evaluate (local mode)", () => {
     const result = await client.callTool({
       name: "evaluate",
       arguments: {
-        action_type: "delete_table",
+        action_type: "table.delete",
         actor_id: "user-1",
         environment: "staging",
       },
@@ -255,7 +255,7 @@ describe("evaluate (local mode)", () => {
     const result = await client.callTool({
       name: "evaluate",
       arguments: {
-        action_type: "delete_table",
+        action_type: "table.delete",
         actor_id: "user-1",
         environment: "staging",
         change_window: "2025-01-15T02:00:00Z/PT4H",

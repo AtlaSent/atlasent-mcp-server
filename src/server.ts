@@ -57,6 +57,7 @@ import { NO_MATCH_HINT, rankActions, type RetrievalResult } from "./actionRetrie
 import { ATLAS_CONCEPTS, ATLAS_NODES, ATLAS_SOURCE } from "./atlasCatalog.js";
 
 import { VERSION } from "./version.js";
+import { ACTION_TYPE_PATTERN, ACTION_TYPE_PATTERN_MESSAGE } from "./actionTypePattern.js";
 
 export { VERSION };
 
@@ -71,14 +72,7 @@ const actionType = z
   .string()
   .min(1)
   .max(MAX_FIELD_LEN)
-  .regex(
-    // NOTE: `.-:` inside this class is a RANGE (0x2E-0x3A), so it also admits
-    // `/` and digits. Kept byte-for-byte here; tightening it changes which
-    // action types are accepted and belongs in its own reviewed change.
-    // eslint-disable-next-line no-useless-escape
-    /^[A-Za-z0-9_.\.-:]+$/,
-    "action_type must be lowercase identifier characters (A-Z, a-z, 0-9, _ . - :)",
-  )
+  .regex(ACTION_TYPE_PATTERN, ACTION_TYPE_PATTERN_MESSAGE)
   .describe("Canon-backed action type (for example production.deploy, agent.tool.invoke, access.grant). Use atlasent_lookup_action to discover governed Action Types.");
 const actorId = z
   .string()
@@ -687,6 +681,7 @@ export function createServer(): McpServer {
           .string()
           .min(1)
           .max(MAX_FIELD_LEN)
+          .regex(ACTION_TYPE_PATTERN, ACTION_TYPE_PATTERN_MESSAGE)
           .describe("Canon-backed Action Type (for example 'production.deploy' or 'agent.tool.invoke')."),
         context: z
           .record(z.string(), z.unknown())
