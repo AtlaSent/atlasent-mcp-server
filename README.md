@@ -233,6 +233,8 @@ npm run demo:hitl
 
 The demo prints only what the tool returned or the repository showed. If a stage doesn't happen, the demo stops with `FAIL at <stage>` and exits 1. For example, if the org's `agent.tool.invoke` policy allows the change with no person involved, the demo fails at ATTEMPT rather than skipping the hold. The org's policy must require human approval. It writes `hitl-demo-evidence-<ts>.json`, and the permit appears in it only as a sha256.
 
+Before presenting, run `npm run demo:hitl:preflight`. It's a read-only setup check: it makes GET requests only and creates no request, approval, permit or commit. The presenter run sheet, with prerequisites, console clicks and expected output, is [`docs/DEMO_90_SECONDS.md`](docs/DEMO_90_SECONDS.md).
+
 `npm run demo:hitl -- --simulate` rehearses the same stages offline with an in-memory runtime, repository and approver. Every line it prints starts with `[SIMULATED]`, and it refuses any real network call. Don't present a simulated run as a live one.
 
 ## Self-gating agent pattern
