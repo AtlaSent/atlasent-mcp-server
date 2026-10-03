@@ -365,7 +365,7 @@ The following atlasent-api edge functions are intentionally **not deployed** on 
 > `runtime-functions.json`. **`v1-sso` is shipped, not disabled** — it is distinct from the
 > three `v1-sso-*` skeletons above; do not conflate them.
 
-Source of truth: `atlasent-api/supabase/runtime-functions-disabled.json`. The V2 Wave A batch/stream/graphql endpoints (`/v1/evaluate/batch`, `/v1/evaluate/stream`, `/v1/graphql`) are separate from this list and are properly gated at the tenant level (`FeatureNotEnabledError` on 404).
+Source of truth: `atlasent-api/supabase/runtime-functions-disabled.json`. The V2 Wave A batch/stream/graphql functions (`v1-evaluate-batch`, `v1-evaluate-stream`, `v1-graphql`, called as `{ATLASENT_BASE_URL}/v1-evaluate-batch` etc.) are separate from this list and are gated at the tenant level. A flag-off answer is a 404 with `{"error":"not_found"}`, surfaced as `FeatureNotEnabledError`; any other 404 is a `V2HttpError`. The `/v1/evaluate/batch` form under the functions base is not a deployed function. Batch/stream items go on the wire as `{action_type, actor_id, context}`.
 
 ## Vault cron secret requirement (atlasent-api operators)
 

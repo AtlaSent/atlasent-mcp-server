@@ -2,9 +2,12 @@
  * V2 Wave B MCP tools — wraps the three Wave A endpoints landed in
  * atlasent-api #742 / #745 / #746.
  *
- *   atlasent_evaluate_many   → POST /v1/evaluate/batch   (v2_batch flag)
- *   atlasent_evaluate_stream → POST /v1/evaluate/stream  (v2_streaming flag)
- *   atlasent_query           → POST /v1/graphql          (v2_graphql flag)
+ *   atlasent_evaluate_many   → POST {base}/v1-evaluate-batch   (v2_batch flag)
+ *   atlasent_evaluate_stream → POST {base}/v1-evaluate-stream  (v2_streaming flag)
+ *   atlasent_query           → POST {base}/v1-graphql          (v2_graphql flag)
+ *
+ * Each item's `action` / `agent` is sent as `action_type` / `actor_id`
+ * (v2Client.ts toWireItem).
  *
  * Closed-by-default discipline: every endpoint 404s when the tenant flag
  * is off. The HTTP client surfaces that as `FeatureNotEnabledError`; the
@@ -39,8 +42,8 @@ const MAX_FIELD_LEN = 256;
 const MAX_BATCH_ITEMS = 100;
 const MAX_GRAPHQL_QUERY_LEN = 100_000;
 
-// `action` is the per-item action type. Both /v1/evaluate/batch and
-// /v1/evaluate/stream (atlasent-api v1-evaluate-batch / v1-evaluate-stream)
+// `action` is the per-item action type. Both /v1-evaluate-batch and
+// /v1-evaluate-stream (atlasent-api)
 // pass each item verbatim to the canonical v1-evaluate handleEvaluate, so every
 // item meets the same ACTION_TYPE_RE check as a single evaluate (after the
 // Deploy Gate alias map, whose aliases all match it). A failing item can only
@@ -51,8 +54,13 @@ const batchItemSchema = z.object({
     .string()
     .min(1)
     .max(MAX_FIELD_LEN)
-    .regex(ACTION_TYPE_PATTERN, ACTION_TYPE_PATTERN_MESSAGE),
-  agent: z.string().min(1).max(MAX_FIELD_LEN),
+    .regex(ACTION_TYPE_PATTERN, ACTION_TYPE_PATTERN_MESSAGE)
+    .describe("Action type for this item, e.g. production.deploy. Sent as action_type."),
+  agent: z
+    .string()
+    .min(1)
+    .max(MAX_FIELD_LEN)
+    .describe("Actor identity for this item. Sent as actor_id."),
   context: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -203,7 +211,7 @@ function checkEscalate(result: unknown): ReturnType<typeof toolResult> | null {
  */
 export function registerV2Tools(server: McpServer): void {
   // -------------------------------------------------------------------------
-  // atlasent_evaluate_many — POST /v1/evaluate/batch
+  // atlasent_evaluate_many — POST /v1-evaluate-batch
   // -------------------------------------------------------------------------
   server.registerTool(
     "atlasent_evaluate_many",
@@ -258,7 +266,7 @@ export function registerV2Tools(server: McpServer): void {
   );
 
   // -------------------------------------------------------------------------
-  // atlasent_evaluate_stream — POST /v1/evaluate/stream (buffered)
+  // atlasent_evaluate_stream — POST /v1-evaluate-stream (buffered)
   // -------------------------------------------------------------------------
   server.registerTool(
     "atlasent_evaluate_stream",
@@ -314,7 +322,7 @@ export function registerV2Tools(server: McpServer): void {
   );
 
   // -------------------------------------------------------------------------
-  // atlasent_query — POST /v1/graphql (read-only)
+  // atlasent_query — POST /v1-graphql (read-only)
   // -------------------------------------------------------------------------
   server.registerTool(
     "atlasent_query",

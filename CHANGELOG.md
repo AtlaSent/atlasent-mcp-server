@@ -54,6 +54,22 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
   endpoints run every item through the single-evaluate handler, which rejects
   anything else. One bad item now fails the whole call before anything is
   sent.
+- `atlasent_evaluate_many`, `atlasent_evaluate_stream` and `atlasent_query`
+  could not reach the runtime. They called `{base}/v1/evaluate/batch`,
+  `/v1/evaluate/stream` and `/v1/graphql`. None of these is a deployed
+  function under the Supabase functions base, so every call got a 404 and
+  was reported as `feature_not_enabled`. They now call `/v1-evaluate-batch`,
+  `/v1-evaluate-stream` and `/v1-graphql`, the way `/v1-evaluate` is called,
+  and `ATLASENT_BASE_URL` defaults to `https://api.atlasent.io/functions/v1`
+  here as it does everywhere else in the server.
+- Batch and stream items are now sent as `{ action_type, actor_id, context }`,
+  the shape the runtime reads. They used to go out as `{ action, agent }`,
+  which the runtime would answer with a per-item 400 ("action_type and
+  actor_id are required"). The tool input keeps `action` and `agent`.
+- `feature_not_enabled` is now reported only for the runtime's tenant-flag
+  404 (`{"error":"not_found"}`). Any other 404, for example a wrong
+  `ATLASENT_BASE_URL`, is reported as "endpoint not found" rather than as a
+  missing flag.
 
 ## [2.16.0] - 2026-09-27
 

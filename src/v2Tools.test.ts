@@ -96,7 +96,7 @@ describe("atlasent_evaluate_many", () => {
   });
 
   it("surfaces 404 as feature_not_enabled with v2_batch flag", async () => {
-    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_enabled" }, 404));
+    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_found", message: "Not found", status: 404 }, 404));
     const { client } = await setup();
     const result = await client.callTool({
       name: "atlasent_evaluate_many",
@@ -216,7 +216,10 @@ describe("atlasent_evaluate_many", () => {
     });
     const body = captured[0].body as Record<string, unknown>;
     const items = body.items as Array<Record<string, unknown>>;
-    assert.deepEqual(items[0].context, { environment: "prod" });
+    // Exact wire item: the runtime's BatchItem reads action_type / actor_id.
+    assert.deepEqual(items, [
+      { action_type: "production.deploy", actor_id: "agent-1", context: { environment: "prod" } },
+    ]);
   });
 });
 
@@ -286,7 +289,7 @@ describe("atlasent_evaluate_stream", () => {
   });
 
   it("surfaces 404 as feature_not_enabled with v2_streaming flag", async () => {
-    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_enabled" }, 404));
+    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_found", message: "Not found", status: 404 }, 404));
     const { client } = await setup();
     const result = await client.callTool({
       name: "atlasent_evaluate_stream",
@@ -324,7 +327,7 @@ describe("atlasent_query", () => {
   });
 
   it("surfaces 404 as feature_not_enabled with v2_graphql flag", async () => {
-    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_enabled" }, 404));
+    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_found", message: "Not found", status: 404 }, 404));
     const { client } = await setup();
     const result = await client.callTool({
       name: "atlasent_query",
@@ -447,9 +450,9 @@ for (const tool of ["atlasent_evaluate_many", "atlasent_evaluate_stream"] as con
         const sent: string[] = [];
         globalThis.fetch = mock.fn(async (_url: unknown, init?: RequestInit) => {
           const body = JSON.parse((init?.body as string) ?? "{}") as {
-            items: Array<{ action: string }>;
+            items: Array<{ action_type: string }>;
           };
-          sent.push(...body.items.map((it) => it.action));
+          sent.push(...body.items.map((it) => it.action_type));
           if (tool === "atlasent_evaluate_stream") {
             return sseResponse('event: complete\ndata: {"batch_id":"x","partial":false}\n\n');
           }
