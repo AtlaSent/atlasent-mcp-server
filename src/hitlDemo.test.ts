@@ -23,6 +23,7 @@ const PATH = "atlasent-demo/flags.json";
 const CONTENT = '{\n  "instant_payouts": true\n}\n';
 const ENV_KEYS = ["ATLASENT_MODE", "ATLASENT_API_KEY", "ATLASENT_BASE_URL", "ATLASENT_ENVIRONMENT"];
 const saved: Record<string, string | undefined> = {};
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
 let sim: any;
 
 beforeEach(() => {
@@ -70,7 +71,7 @@ async function run(opts: { register?: boolean; approvalWaitSeconds?: number; pol
 
 describe("hitl demo (examples/hitl-demo)", () => {
   it("shows hold -> approve -> exactly that change executes once -> effect recorded, with real ids", async () => {
-    const { result, lines, out } = await run();
+    const { result, out } = await run();
     assert.equal(result.ok, true, out);
     assert.match(result.ids.approval_request_id, /^sim-apr-/);
     assert.equal(result.proof.decision.approval_request_id, result.ids.approval_request_id);

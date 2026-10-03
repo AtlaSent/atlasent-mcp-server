@@ -14,6 +14,7 @@ cd atlasent-mcp-server
 npm install
 npm run build
 npm test          # offline: no network, no credentials
+npm run lint      # ESLint; installs its own toolchain on first run
 npm run demo      # end-to-end local-mode demo
 ```
 
@@ -79,6 +80,7 @@ These keep the project trustworthy as a security component. PRs that break them 
 ## Pull request checklist
 
 - [ ] `npm run typecheck` passes
+- [ ] `npm run lint` passes (no `any` in new code)
 - [ ] `npm test` passes
 - [ ] `npm run demo` still runs end-to-end
 - [ ] New or changed tool handlers have a matching test

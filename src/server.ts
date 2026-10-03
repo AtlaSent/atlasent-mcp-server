@@ -49,6 +49,7 @@ import { registerV2Tools } from "./v2Tools.js";
 import { registerComplianceTools } from "./complianceTools.js";
 import { registerVqpTools } from "./vqpTools.js";
 import { registerEvidenceGapTool } from "./evidenceGap.js";
+import { registerPrompts } from "./prompts.js";
 import { aiActionConfigFromEnv, registerAiActionTools } from "./aiActionTools.js";
 import { CANON_ACT_CATALOG, type ActSpecEntry } from "./canonCatalog.js";
 import { CANON_ACTION_GRAPH } from "./canonGraph.js";
@@ -71,6 +72,10 @@ const actionType = z
   .min(1)
   .max(MAX_FIELD_LEN)
   .regex(
+    // NOTE: `.-:` inside this class is a RANGE (0x2E-0x3A), so it also admits
+    // `/` and digits. Kept byte-for-byte here; tightening it changes which
+    // action types are accepted and belongs in its own reviewed change.
+    // eslint-disable-next-line no-useless-escape
     /^[A-Za-z0-9_.\.-:]+$/,
     "action_type must be lowercase identifier characters (A-Z, a-z, 0-9, _ . - :)",
   )
@@ -2129,6 +2134,10 @@ export function createServer(): McpServer {
   // this server never grants write access to anything by default.
   const aiActionConfig = aiActionConfigFromEnv();
   if (aiActionConfig) registerAiActionTools(server, aiActionConfig, rateLimitOk);
+
+  // Prompts (issue #163): templates that guide an agent through
+  // authorize-before-execute. Guidance only; they enforce nothing.
+  registerPrompts(server);
 
   return server;
 }

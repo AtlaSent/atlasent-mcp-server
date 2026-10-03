@@ -393,6 +393,18 @@ Permit tools never return the permit's `token` (its bearer credential) or `signa
 
 The server also exposes policy, permit, approval, evidence, compliance, and VQP tools. Use MCP `tools/list` for the exact tool inventory supported by the installed version.
 
+## Prompts
+
+The server also exposes MCP [Prompts](https://modelcontextprotocol.io/docs/concepts/prompts): templates you can pick in your host to start the authorize-before-execute flow.
+
+| Prompt | Arguments | What it asks the agent to do |
+|---|---|---|
+| `gate-action` | `action`, `environment` (optional) | Look up the Canon action type with `atlasent_lookup_action`, call `evaluate`, stop unless the decision is `allow`, call `verify_permit` immediately before acting, and only then act. |
+| `explain-decision` | `decision` (the decision JSON) | Explain in plain language why an action was allowed, denied or held, and what could change the outcome, without suggesting a bypass. |
+| `find-action-type` | `description` | Resolve a plain-language description with `atlasent_lookup_action` and handle `confident` / `ambiguous` / `none` without inventing a slug. |
+
+A prompt only guides the agent. It is not a Gate: an agent can ignore it. The action is protected only where a permit is verified immediately before it runs (see [The invariant](#the-invariant)).
+
 ## Approval workflow
 
 Approval can be required, but resolving an Approval is not equivalent to executing the protected Action.
@@ -653,6 +665,7 @@ This server is also listed on [Glama](https://glama.ai/mcp/servers/Atlasent/atla
 ```bash
 npm install
 npm run typecheck
+npm run lint      # ESLint (toolchain in tools/lint, installed on first run)
 npm test          # offline: no network, no API key
 npm run build
 npm run demo

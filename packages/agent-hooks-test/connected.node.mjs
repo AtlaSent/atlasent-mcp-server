@@ -531,11 +531,6 @@ test('CLI end to end: hold, approve, re-run allows; pending file is private', as
 // Plugin settings (userConfig): Claude Code exports them as CLAUDE_PLUGIN_OPTION_*
 // ---------------------------------------------------------------------------
 
-const withAuth = rt => {
-  const auth = [];
-  return { auth, fetchImpl: async (url, init) => { auth.push(init.headers?.authorization ?? init.headers?.Authorization); return rt.fetchImpl(url, init); } };
-};
-
 test('a blank plugin api_key setting counts as unset: local guard, nothing sent', async () => {
   const s = setup({ key: null }); const rt = fakeRuntime();
   s.env.CLAUDE_PLUGIN_OPTION_API_KEY = '   ';

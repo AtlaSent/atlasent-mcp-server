@@ -25,6 +25,7 @@ src/
   localEngine.ts                Tiny rules engine used when no hosted backend is configured
   engine.ts                     authorize() / verify(): dispatches to local or remote; fail-closed wrapper
   server.ts                     createServer(): registers evaluate, verify_permit, deploy_service + 20+ tools
+  prompts.ts                    MCP Prompts (gate-action, explain-decision, find-action-type). Guidance only, never enforcement; tests in server.test.ts
   canonCatalog.ts               GENERATED-DERIVED: the canonical action specs incl. canon_id (from the atlasent repo); backs atlasent_lookup_action. Re-sync with scripts/sync-canon.mjs
   canonGraph.ts                 GENERATED-DERIVED: per-action knowledge-graph neighborhood + compliance (from atlasent/generated/authorization-graph.json); enriches atlasent_lookup_action. Re-sync with scripts/sync-canon.mjs
   actionRetrieval.ts            Offline, deterministic natural-language → Canon ranker behind atlasent_lookup_action's `query` (field-weighted BM25 + light stemmer); returns confident / ambiguous / none and never synthesizes a slug
@@ -97,6 +98,7 @@ The guarantee: if `authorize()` does not return `allow`, the action code never r
 
 ```bash
 npm run build             # tsc -> dist/
+npm run lint              # ESLint (eslint.config.mjs); toolchain lives in tools/lint because root TypeScript 7 has no JS API for typescript-eslint
 npm test                  # 158 unit tests, no network (count grows as tools are added)
 npm run test:integration  # live API; needs ATLASENT_API_KEY + ATLASENT_BASE_URL
 npm run demo              # end-to-end demo in local mode

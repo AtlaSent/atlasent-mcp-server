@@ -12,7 +12,7 @@
 //
 // Writes trace-<case>.json beside the secrets file: every call, with tokens,
 // signatures and keys replaced by a short sha256.
-import { readFileSync, writeFileSync, mkdtempSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';

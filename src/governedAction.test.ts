@@ -117,6 +117,7 @@ function newRuntime(policy: Policy): Runtime {
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 /** Same algorithm as atlasent-api computeSourceProvenanceActionHash. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
 const sealHash = (b: Record<string, any>) => sha(canonicalJson({
   version: "source_provenance_action.v1", tenant_id: "org-1", actor_id: AGENT, action_type: b.action_type,
   environment: b.context.environment, resource_id: b.resource_id ?? null, context: b.context,
@@ -240,6 +241,7 @@ async function connect(extra: { stopFile?: string; breakerFile?: string } = {}) 
   await Promise.all([client.connect(c), server.connect(s)]);
   const call = async (args: Record<string, unknown>) => {
     const r = await client.callTool({ name: GOVERNED_FILE_CHANGE_TOOL, arguments: args });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
     return JSON.parse((r.content as Array<{ text: string }>)[0].text) as Record<string, any>;
   };
   return { call, breaker };

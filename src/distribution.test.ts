@@ -36,6 +36,7 @@ describe("distribution metadata", () => {
   });
 
   it("smithery.yaml parses and its commandFunction maps config to the server's env vars", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
     const doc = parseYamlSubset(read("smithery.yaml")) as Record<string, any>;
     assert.equal(doc.startCommand.type, "stdio");
     const props = Object.keys(doc.startCommand.configSchema.properties);

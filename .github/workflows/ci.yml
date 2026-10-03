@@ -21,6 +21,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      # ESLint (eslint.config.mjs). Installs its own toolchain from
+      # tools/lint/package-lock.json: see scripts/lint.mjs for why.
+      - run: npm run lint
       - name: One license (Apache-2.0) across server, packages and plugin manifests
         run: |
           node scripts/check-package-licenses.mjs --self-test
