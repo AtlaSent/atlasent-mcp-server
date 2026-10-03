@@ -24,8 +24,8 @@ export function validateConnection(c) {
   // third did not, which invited keeping the one value that cannot work. The failure then
   // landed past validation as an ordinary `cloud_deny` — indistinguishable from a policy
   // refusal, which is the shape this package's own README warns `check-connection` cannot
-  // detect. This does not assert which action types mcp-gate SHOULD support; that is open
-  // on issue #175 and deliberately not decided here.
+  // detect. Issue #175 subsequently decided that connected mode must use the existing
+  // runtime-minted agent identity path rather than excluding verified-actor classes.
   if (u.hostname.toLowerCase() === 'your-approved-runtime' || c.actorId.toUpperCase() === 'YOUR-REGISTERED-ACTOR-ID') throw Error('Replace the example placeholders before connecting');
   if (!agentActorId(c.actorId)) throw Error('Registered actor must be an agent:<uuid> identity');
   if (c.approvalWaitMs !== undefined && (!Number.isInteger(c.approvalWaitMs) || c.approvalWaitMs < 0 || c.approvalWaitMs > 120000)) throw Error('Invalid approval wait');
@@ -39,7 +39,8 @@ export function validateConnection(c) {
   }
   return c;
 }
-// Wire contract checked against atlasent-api a76beb0b (2026-09-16).
+// Wire contract composes the existing evaluate/verify path plus CROSS-056
+// actor_identity.v1 minting and IMPL-026B claim-time reevaluation.
 // Hash the entire execution subject, including exact arguments, tool, target,
 // actor, environment, gate, and a fresh invocation nonce. No raw args uploaded.
 export function executionHash(subject) {
