@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 const text = x => typeof x === 'string' && x.length > 0 && x.length <= 256 && !/[\r\n]/.test(x);
 const name = x => typeof x === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(x);
+const agentActorId = x => typeof x === 'string' && /^agent:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x);
 export function validateConnection(c) {
   if (!object(c) || c.version !== 1 || !text(c.actorId) || !name(c.gateId) || !['sandbox','production'].includes(c.environment) || !object(c.tools) || !Object.keys(c.tools).length || Object.keys(c).some(k => !['version','apiUrl','actorId','gateId','environment','tools','approvalWaitMs','approvalsUrl'].includes(k))) throw Error('Invalid connection');
   const u = new URL(c.apiUrl);
@@ -26,6 +27,7 @@ export function validateConnection(c) {
   // detect. This does not assert which action types mcp-gate SHOULD support; that is open
   // on issue #175 and deliberately not decided here.
   if (u.hostname.toLowerCase() === 'your-approved-runtime' || c.actorId.toUpperCase() === 'YOUR-REGISTERED-ACTOR-ID') throw Error('Replace the example placeholders before connecting');
+  if (!agentActorId(c.actorId)) throw Error('Registered actor must be an agent:<uuid> identity');
   if (c.approvalWaitMs !== undefined && (!Number.isInteger(c.approvalWaitMs) || c.approvalWaitMs < 0 || c.approvalWaitMs > 120000)) throw Error('Invalid approval wait');
   if (c.approvalsUrl !== undefined || c.approvalWaitMs > 0) {
     const a = new URL(c.approvalsUrl);
@@ -74,12 +76,22 @@ export function cloudAuthorizer(connection, apiKey, { fetchImpl = fetch, timeout
     const post = (path, body) => request(c.apiUrl.replace(/\/$/, '') + path, body, signal);
     const mapping = Object.hasOwn(c.tools, params.name) ? c.tools[params.name] : undefined;
     if (!mapping) return { effect: 'deny', reason: 'cloud_unmapped_tool' };
+    const mintActorIdentity = async (actionType, environment) => {
+      const minted = await post('/v1-agent-actor-identity', { action_type: actionType, environment });
+      const assertion = minted.assertion;
+      if (!object(assertion) || assertion.version !== 'actor_identity.v1' || !object(assertion.subject) || assertion.subject.principal_kind !== 'agent' || assertion.subject.principal_id !== c.actorId || !object(assertion.binding) || assertion.binding.action_type !== actionType || assertion.binding.environment !== environment || typeof assertion.signature !== 'string' || !assertion.signature) return null;
+      return assertion;
+    };
     const invocation = randomUUID();
     const subject = { version: 1, invocation, gateId: c.gateId, actorId: c.actorId, environment: c.environment, actionType: mapping.actionType, targetId: mapping.targetId, tool: params.name, arguments: structuredClone(params.arguments ?? {}) };
     const hash = executionHash(subject);
     try {
+      let actorIdentity;
+      try { actorIdentity = await mintActorIdentity(mapping.actionType, c.environment); }
+      catch { return { effect: 'deny', reason: 'cloud_actor_identity_unavailable' }; }
+      if (!actorIdentity) return { effect: 'deny', reason: 'cloud_actor_identity_invalid' };
       const evaluation = await post('/v1-evaluate', {
-        action_type: mapping.actionType, actor_id: c.actorId, resource_id: mapping.targetId,
+        action_type: mapping.actionType, actor_id: c.actorId, actor_identity: actorIdentity, resource_id: mapping.targetId,
         request_id: invocation, execution_payload_hash: hash,
         context: { environment: c.environment, target: { id: mapping.targetId } },
       });
@@ -99,10 +111,15 @@ export function cloudAuthorizer(connection, apiKey, { fetchImpl = fetch, timeout
             await sleepImpl(Math.min(2000, Math.max(1, deadline - performance.now())), undefined, { signal });
             continue;
           }
-          if (row.status !== 'approved' || row.re_evaluation_decision !== 'allow') return { effect: 'deny', reason: 'cloud_approval_not_allowed' };
+          if (row.status !== 'approved_awaiting_claim') return { effect: 'deny', reason: 'cloud_approval_not_allowed' };
+          if (typeof row.claim_environment !== 'string' || row.claim_environment !== c.environment) return { effect: 'deny', reason: 'cloud_approval_binding_mismatch' };
           if (performance.now() >= deadline) return { effect: 'deny', reason: 'cloud_approval_timeout' };
-          const claim = await request(url + '/claim-permit', {}, signal, deadline - performance.now());
-          if (claim.claimed !== true || claim.status !== 'approved' || claim.re_evaluation_decision !== 'allow' || typeof claim.permit_token !== 'string' || !claim.permit_token) return { effect: 'deny', reason: 'cloud_approval_unclaimable' };
+          let claimActorIdentity;
+          try { claimActorIdentity = await mintActorIdentity(mapping.actionType, row.claim_environment); }
+          catch { return { effect: 'deny', reason: 'cloud_actor_identity_unavailable' }; }
+          if (!claimActorIdentity) return { effect: 'deny', reason: 'cloud_actor_identity_invalid' };
+          const claim = await request(url + '/claim-permit', { actor_identity: claimActorIdentity }, signal, deadline - performance.now());
+          if (claim.claimed !== true || claim.re_evaluation_decision !== 'allow' || typeof claim.permit_token !== 'string' || !claim.permit_token) return { effect: 'deny', reason: 'cloud_approval_unclaimable' };
           token = claim.permit_token;
           break;
         }
