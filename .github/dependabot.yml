@@ -18,6 +18,20 @@ updates:
         update-types:
           - minor
           - patch
+    # The lint toolchain is deliberately pinned:
+    # - typescript-eslint supports TypeScript only below 6.1, so newer
+    #   TypeScript (including 7) breaks linting here;
+    # - ESLint 10 (and @eslint/js 10) drop Node 18, which CI and the
+    #   package still support.
+    # Lift these when typescript-eslint supports newer TypeScript and when
+    # Node 18 support is dropped.
+    ignore:
+      - dependency-name: typescript
+        versions: [">=6.1"]
+      - dependency-name: eslint
+        versions: [">=10"]
+      - dependency-name: "@eslint/js"
+        versions: [">=10"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
