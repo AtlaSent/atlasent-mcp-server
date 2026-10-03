@@ -9,6 +9,15 @@ updates:
         update-types:
           - minor
           - patch
+  - package-ecosystem: npm
+    directory: /tools/lint
+    schedule:
+      interval: weekly
+    groups:
+      lint-minor-and-patch:
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: github-actions
     directory: /
     schedule:

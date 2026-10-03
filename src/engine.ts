@@ -61,7 +61,6 @@ function emitLocalModeWarning(): void {
   if (process.env.NODE_ENV === "test") return;
   if (process.env.ATLASENT_SUPPRESS_LOCAL_MODE_WARNING === "true") return;
   LOCAL_MODE_WARNING_EMITTED = true;
-  // eslint-disable-next-line no-console
   console.error(
     "[atlasent-mcp-server] WARNING: running in LOCAL mode. " +
       "Local-mode permits are unsigned and forgeable " +
@@ -82,7 +81,6 @@ function emitBaseUrlWarning(): void {
   // Unset means the default hosted base, which already has the suffix.
   if (url === undefined || url.includes("/functions/v1")) return;
   BASE_URL_WARNING_EMITTED = true;
-  // eslint-disable-next-line no-console
   console.error(
     "[atlasent-mcp-server] WARNING: ATLASENT_BASE_URL does not contain '/functions/v1'. " +
       "For Supabase-hosted AtlaSent instances ATLASENT_BASE_URL must end in /functions/v1 " +
@@ -237,7 +235,7 @@ function handleHttpError(status: number, body: string): never {
     const errMsg = parsed.message ?? parsed.error ?? body;
     throw new Error(`AtlaSent API ${status}: ${errMsg}`);
   } catch (e) {
-    if (e instanceof SyntaxError) throw new Error(`AtlaSent API ${status}: ${body}`);
+    if (e instanceof SyntaxError) throw new Error(`AtlaSent API ${status}: ${body}`, { cause: e });
     throw e;
   }
 }
@@ -647,12 +645,6 @@ export function normalizeChangePlan(value: unknown): ChangePlan {
     throw new Error("change_plan needs a non-empty operation and a revision or artifact_ref");
   }
   return { operation, ...(revision && { revision }), ...(artifact_ref && { artifact_ref }) };
-}
-
-function sameChangePlan(a: ChangePlan, b: ChangePlan): boolean {
-  return a.operation === b.operation &&
-    (a.revision ?? null) === (b.revision ?? null) &&
-    (a.artifact_ref ?? null) === (b.artifact_ref ?? null);
 }
 
 function describeChangePlan(p: ChangePlan): string {

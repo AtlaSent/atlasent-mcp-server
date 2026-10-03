@@ -66,7 +66,7 @@ export function unwrap(argv) {
       }
       continue;
     }
-    if (base === 'npx' || base === 'pnpx' || base === 'bunx') { a = a.slice(1).filter((x, i, all) => !(i === 0 && x === '-y')); continue; }
+    if (base === 'npx' || base === 'pnpx' || base === 'bunx') { a = a.slice(1).filter((x, i) => !(i === 0 && x === '-y')); continue; }
     break;
   }
   if (a.length) a[0] = a[0].split('/').pop();

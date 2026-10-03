@@ -2384,3 +2384,88 @@ describe("upgrade path reaches the agent", () => {
     assert.match(text, /ATLASENT_API_KEY/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// prompts/list + prompts/get (issue #163)
+// ---------------------------------------------------------------------------
+
+describe("prompts", () => {
+  function promptText(result: Awaited<ReturnType<Client["getPrompt"]>>): string {
+    assert.equal(result.messages.length, 1);
+    assert.equal(result.messages[0].role, "user");
+    const content = result.messages[0].content as { type: string; text: string };
+    assert.equal(content.type, "text");
+    return content.text;
+  }
+
+  it("advertises the prompts capability and lists gate-action, explain-decision, find-action-type", async () => {
+    const { client } = await setup();
+    assert.ok(client.getServerCapabilities()?.prompts, "server must advertise prompts");
+    const { prompts } = await client.listPrompts();
+    const byName = new Map(prompts.map((p) => [p.name, p]));
+    assert.deepEqual([...byName.keys()].sort(), ["explain-decision", "find-action-type", "gate-action"]);
+
+    const gate = byName.get("gate-action")!;
+    const args = new Map((gate.arguments ?? []).map((a) => [a.name, a]));
+    assert.equal(args.get("action")?.required, true);
+    assert.notEqual(args.get("environment")?.required, true, "environment is optional");
+    assert.match(gate.description ?? "", /enforces nothing/);
+
+    assert.equal(byName.get("explain-decision")!.arguments?.[0]?.name, "decision");
+    assert.equal(byName.get("find-action-type")!.arguments?.[0]?.name, "description");
+  });
+
+  it("gate-action renders its arguments and walks lookup -> evaluate -> allow-only -> verify_permit, in order", async () => {
+    const { client } = await setup();
+    const text = promptText(
+      await client.getPrompt({
+        name: "gate-action",
+        arguments: { action: "deploy api-service", environment: "production" },
+      }),
+    );
+    assert.match(text, /deploy api-service/);
+    assert.match(text, /`production` environment/);
+    const order = ["`atlasent_lookup_action`", "`evaluate`", "`allow`", "`verify_permit`"].map((t) => text.indexOf(t));
+    for (const i of order) assert.ok(i >= 0, `missing step in:\n${text}`);
+    assert.deepEqual(order, [...order].sort((a, b) => a - b), "steps must appear in gate order");
+    // Fail-closed wording: anything other than allow / valid stops the action.
+    assert.match(text, /Proceed only if `decision` is `allow`/);
+    assert.match(text, /any other answer as `deny`/);
+    assert.match(text, /Proceed only if\s+`valid` is `true`/);
+    assert.match(text, /never invent an action type/);
+    // A prompt must never present itself as the control.
+    assert.match(text, /guidance, not enforcement/);
+  });
+
+  it("gate-action without an environment asks rather than assuming one", async () => {
+    const { client } = await setup();
+    const text = promptText(await client.getPrompt({ name: "gate-action", arguments: { action: "drop the users table" } }));
+    assert.match(text, /drop the users table/);
+    assert.match(text, /ask me if you are not sure/);
+    assert.doesNotMatch(text, /`production` environment/);
+  });
+
+  it("gate-action rejects a missing action argument", async () => {
+    const { client } = await setup();
+    await assert.rejects(client.getPrompt({ name: "gate-action", arguments: {} }));
+  });
+
+  it("explain-decision embeds the decision and forbids bypass advice", async () => {
+    const { client } = await setup();
+    const decision = JSON.stringify({ decision: "deny", reasons: ["outside change window"] });
+    const text = promptText(await client.getPrompt({ name: "explain-decision", arguments: { decision } }));
+    assert.ok(text.includes(decision), "decision JSON must be rendered verbatim");
+    assert.match(text, /must not run/);
+    assert.match(text, /Do not suggest ways to bypass/);
+  });
+
+  it("find-action-type renders the description and covers confident / ambiguous / none", async () => {
+    const { client } = await setup();
+    const text = promptText(
+      await client.getPrompt({ name: "find-action-type", arguments: { description: "rotate the signing key" } }),
+    );
+    assert.match(text, /rotate the signing key/);
+    for (const c of ["`confident`", "`ambiguous`", "`none`"]) assert.ok(text.includes(c), `missing ${c}`);
+    assert.match(text, /Do not invent a slug/);
+  });
+});

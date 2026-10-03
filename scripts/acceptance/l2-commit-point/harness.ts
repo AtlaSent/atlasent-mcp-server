@@ -174,6 +174,7 @@ export class SimRuntime {
   approve(id: string) { const a = this.approvals.get(id); if (a) a.status = "approved_awaiting_claim"; }
 
   /** Same algorithm as atlasent-api computeSourceProvenanceActionHash. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
   static sealHash(b: Record<string, any>): string {
     return sha(canonicalJson({
       version: "source_provenance_action.v1", tenant_id: TENANT, actor_id: AGENT, action_type: b.action_type,
@@ -201,6 +202,7 @@ export class SimRuntime {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
     const raw = Buffer.concat(chunks).toString("utf8");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
     const body = raw ? (JSON.parse(raw) as Record<string, any>) : {};
     const reply = (status: number, j: unknown) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify(j)); };
     const p = (req.url ?? "").split("?")[0].replace("/functions/v1", "");
@@ -428,6 +430,7 @@ interface Ctx {
   authorize: AuthorizeFn;
   verify: VerifyFn;
   mutant?: Mutant;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
   call: (args: Record<string, unknown>) => Promise<Record<string, any>>;
   close: () => Promise<void>;
 }
@@ -462,6 +465,7 @@ async function setup(mutant: Mutant | undefined, policy: Policy, logs?: Array<{ 
     log, rt, provider, authorize: a, verify: v, mutant,
     call: async (args) => {
       const r = await client.callTool({ name: GOVERNED_FILE_CHANGE_TOOL, arguments: args });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
       return JSON.parse((r.content as Array<{ text: string }>)[0].text) as Record<string, any>;
     },
     close: async () => { await client.close(); await rt.stop(); },
@@ -472,6 +476,7 @@ const change = (content: string, path = PATH): GithubFileChange => ({ owner: OWN
 const toolArgs = (content: string) => ({ path: PATH, content, message: "Enable checkout_v2 (AI agent)" });
 
 /** Commit-point level: the same executeGoverned + githubFileAdapter the tool uses, with the adapter injectable for mutants. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
 async function executeAt(ctx: Ctx, spec: GovernedActionSpec, content: string, permit: string, sealedBinding: any, decision: { decision: string }): Promise<AiActionProof> {
   const target: GithubFileChange = { owner: OWNER, repo: REPO, branch: BRANCH, path: String(spec.arguments.path), content, message: String(spec.arguments.message) };
   const realAdapter = githubFileAdapter(target, content, { token: "ghs_l2_sim", fetchImpl: ctx.provider.fetch });
@@ -517,7 +522,9 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
         const r = await ctx.call(toolArgs(NEW));
         const expectedSpec = githubFileChangeSpec(change(NEW), `blob:${sha("blob" + ORIGINAL).slice(0, 40)}`, ENVIRONMENT);
         const digest = actionDigest(expectedSpec);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
         const ev: Record<string, any> = ctx.rt.evaluations[0] ?? {};
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
         const seal: Record<string, any> = ctx.rt.seals[0] ?? {};
         check("R1.exact_request", "exact actor/action/resource/context request",
           ev.action_type === ACTION_TYPE && ev.actor_id === AGENT && ev.resource_id === TARGET &&
@@ -534,6 +541,7 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
         check("R4.bounded_signed_permit", "ALLOW produces a bounded signed permit",
           !!permit && /^pt\.sim\./.test(permit.token) && permit.exp === Math.floor(FIXED_NOW / 1000) + PERMIT_TTL_S,
           `permit exp=${permit?.exp} (TTL ${PERMIT_TTL_S}s), HMAC-signed`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON in a test/acceptance harness
         const vb: Record<string, any> = ctx.rt.verifies[0] ?? {};
         check("R5.same_facts_at_verify", "binding presents the same material facts at verification",
           ctx.rt.verifies.length === 1 && vb.permit_token === permit?.token && vb.action_type === ACTION_TYPE && vb.actor_id === permit?.actor &&

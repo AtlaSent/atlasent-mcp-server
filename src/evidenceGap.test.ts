@@ -5,6 +5,10 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer, _resetRateLimitForTests } from "./server.js";
 import { analyzeWorkflows, detectStep, parseYamlSubset } from "./evidenceGap.js";
 
+// Parsed YAML is read by deep property access in these assertions.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type YamlDoc = Record<string, any>;
+
 const wf = (content: string, path = ".github/workflows/deploy.yml") => [{ path, content }];
 
 const UNGATED = `
@@ -52,7 +56,7 @@ jobs:
         echo one
         echo two
     - uses: x/y@v1 # trailing comment
-`) as Record<string, any>;
+`) as YamlDoc;
     assert.deepEqual(doc.jobs.a.needs, ["b", "c"]);
     assert.equal(doc.jobs.a.steps[0].run, "echo one\necho two");
     assert.equal(doc.jobs.a.steps[1].uses, "x/y@v1");
@@ -61,7 +65,7 @@ jobs:
   it("folds a multi-line plain scalar", () => {
     const doc = parseYamlSubset(
       "jobs:\n  a:\n    steps:\n      - name: p\n        run: bash scripts/provision.sh \\\n          --org x\n        env: {}\n",
-    ) as Record<string, any>;
+    ) as YamlDoc;
     assert.match(doc.jobs.a.steps[0].run, /provision\.sh .*--org x/);
     assert.equal(doc.jobs.a.steps[0].env, "{}");
   });
