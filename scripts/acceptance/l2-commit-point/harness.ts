@@ -92,7 +92,14 @@ export class SimProvider {
     for (const [p, c] of Object.entries(initial)) this.head.set(p, { sha: sha("blob" + c).slice(0, 40), content: c });
   }
   content(path = PATH) { return this.head.get(path)?.content; }
-  setContent(path: string, c: string) { this.head.set(path, { sha: sha("blob" + c).slice(0, 40), content: c }); }
+  /**
+   * Out-of-band change to provider state (another writer, a revert). Logged, so
+   * the adjacency rule can see a state change between verify and mutation.
+   */
+  setContent(path: string, c: string) {
+    this.log.push("provider.state_change", { path });
+    this.head.set(path, { sha: sha("blob" + c).slice(0, 40), content: c });
+  }
   readonly fetch: typeof globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
     const m = /^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(url.pathname);
@@ -274,7 +281,7 @@ export interface Mutant {
   authorize?: (real: AuthorizeFn) => AuthorizeFn;
   verify?: (real: VerifyFn) => VerifyFn;
   runtime?: RuntimeMutations;
-  adapter?: (real: ExecutionAdapter) => ExecutionAdapter;
+  adapter?: (real: ExecutionAdapter, env: { provider: SimProvider }) => ExecutionAdapter;
   /** Set by the mutant's code when it actually ran, so a pass is never vacuous. */
   applied: { count: number };
 }
@@ -341,7 +348,64 @@ export function mutants(): Mutant[] {
     },
   });
   list.push(inferred);
+
+  // Hostile regressions for the adjacency rule (atlasent#794). Both leave every
+  // other check green: the read changes nothing, and the state change touches
+  // a different file, so the provider's own base-sha precondition still passes.
+  // Only a rule that demands verify IMMEDIATELY before the mutation sees them.
+  const readBetween = mk({
+    name: "provider_read_between_verify_and_mutation",
+    description: "the executor reads the provider after the permit is verified and before the governed write",
+  });
+  readBetween.adapter = (real) => ({
+    ...real,
+    async execute(spec) {
+      readBetween.applied.count++;
+      await real.readState(spec);
+      return real.execute(spec);
+    },
+  });
+  list.push(readBetween);
+
+  const changeBetween = mk({
+    name: "provider_state_change_between_verify_and_mutation",
+    description: "provider state changes after the permit is verified and before the governed write",
+  });
+  changeBetween.adapter = (real, env) => ({
+    ...real,
+    async execute(spec) {
+      changeBetween.applied.count++;
+      env.provider.setContent(OTHER_PATH, TAMPERED);
+      return real.execute(spec);
+    },
+  });
+  list.push(changeBetween);
   return list;
+}
+
+// ---------------------------------------------------------------------------
+// Commit-point adjacency (atlasent#794)
+// ---------------------------------------------------------------------------
+/**
+ * Every governed provider mutation must be IMMEDIATELY preceded, in the single
+ * ordered log shared by runtime and provider, by a successful runtime.verify.
+ * Nothing may sit between them: no provider read, no provider state change, no
+ * other runtime call, no second mutation reusing the same verify.
+ *
+ * This replaces the rule the 2026-09-30 record used ("the last RUNTIME call
+ * before the mutation is runtime.verify"), which ignored provider events and so
+ * passed a provider read or state change between verify and write.
+ */
+export function adjacencyViolations(events: Event[]): string[] {
+  const out: string[] = [];
+  events.forEach((e, i) => {
+    if (e.kind !== "provider.mutation") return;
+    const prev = events[i - 1];
+    if (!prev) out.push(`mutation #${e.seq} has no preceding event`);
+    else if (prev.kind !== "runtime.verify") out.push(`mutation #${e.seq} is preceded by ${prev.kind}, not runtime.verify`);
+    else if (prev.detail?.valid !== true) out.push(`mutation #${e.seq} follows a failed runtime.verify`);
+  });
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -349,7 +413,13 @@ export function mutants(): Mutant[] {
 // ---------------------------------------------------------------------------
 export interface Check { id: string; requirement: string; passed: boolean; detail: string }
 export interface ScenarioOutcome { scenario: string; outcome: string; verify_codes: string[]; provider_mutations: number; verifies: number; permits_issued: number }
-export interface SuiteResult { checks: Check[]; outcomes: ScenarioOutcome[]; failures: Check[] }
+export interface SuiteResult {
+  checks: Check[];
+  outcomes: ScenarioOutcome[];
+  failures: Check[];
+  /** Every scenario's ordered runtime+provider event log (for adjacency analysis). */
+  sequences: Array<{ scenario: string; events: Event[] }>;
+}
 
 interface Ctx {
   log: EventLog;
@@ -365,8 +435,9 @@ interface Ctx {
 const FIXED_NOW = Date.parse("2026-09-30T12:00:00Z");
 const ENV_KEYS = ["ATLASENT_MODE", "ATLASENT_API_KEY", "ATLASENT_BASE_URL", "ATLASENT_ENVIRONMENT", "ATLASENT_CIRCUIT_BREAKER_STOP", "ATLASENT_ANON_KEY"];
 
-async function setup(mutant: Mutant | undefined, policy: Policy): Promise<Ctx> {
+async function setup(mutant: Mutant | undefined, policy: Policy, logs?: Array<{ scenario: string; log: EventLog }>, scenario = ""): Promise<Ctx> {
   const log = new EventLog();
+  logs?.push({ scenario, log });
   const now = () => FIXED_NOW;
   const rt = new SimRuntime(log, now, mutant?.runtime);
   await rt.start();
@@ -404,7 +475,7 @@ const toolArgs = (content: string) => ({ path: PATH, content, message: "Enable c
 async function executeAt(ctx: Ctx, spec: GovernedActionSpec, content: string, permit: string, sealedBinding: any, decision: { decision: string }): Promise<AiActionProof> {
   const target: GithubFileChange = { owner: OWNER, repo: REPO, branch: BRANCH, path: String(spec.arguments.path), content, message: String(spec.arguments.message) };
   const realAdapter = githubFileAdapter(target, content, { token: "ghs_l2_sim", fetchImpl: ctx.provider.fetch });
-  const adapter = ctx.mutant?.adapter ? ctx.mutant.adapter(realAdapter) : realAdapter;
+  const adapter = ctx.mutant?.adapter ? ctx.mutant.adapter(realAdapter, { provider: ctx.provider }) : realAdapter;
   return executeGoverned({
     spec, actorId: AGENT, permitToken: permit, sealedBinding, decision, adapter,
     breaker: new CircuitBreaker({ now: () => new Date(FIXED_NOW) }), verify: ctx.verify, now: () => new Date(FIXED_NOW),
@@ -425,6 +496,7 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
   for (const k of ENV_KEYS) saved[k] = process.env[k];
   const checks: Check[] = [];
   const outcomes: ScenarioOutcome[] = [];
+  const sequences: Array<{ scenario: string; log: EventLog }> = [];
   const check = (id: string, requirement: string, passed: boolean, detail: string) => checks.push({ id, requirement, passed, detail });
   const record = (ctx: Ctx, scenario: string, outcome: string) => outcomes.push({
     scenario, outcome,
@@ -440,7 +512,7 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
   try {
     // S1 ALLOW through the MCP tool --------------------------------------
     await guard("S1", async () => {
-      const ctx = await setup(mutant, "allow");
+      const ctx = await setup(mutant, "allow", sequences, "S1_allow");
       try {
         const r = await ctx.call(toolArgs(NEW));
         const expectedSpec = githubFileChangeSpec(change(NEW), `blob:${sha("blob" + ORIGINAL).slice(0, 40)}`, ENVIRONMENT);
@@ -468,13 +540,10 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
           vb.target_id === permit?.target && vb.environment === permit?.environment && vb.payload_hash === permit?.hash,
           `verify presented target=${vb.target_id} env=${vb.environment} payload_hash=${vb.payload_hash === permit?.hash ? "== bound" : vb.payload_hash}`);
         const kinds = ctx.log.events.map((e) => e.kind);
-        const mutIdx = kinds.indexOf("provider.mutation");
-        const lastRuntimeBefore = kinds.slice(0, mutIdx).filter((k) => k.startsWith("runtime.")).pop();
-        const verifyIdx = kinds.indexOf("runtime.verify");
-        check("R6.verify_immediately_before_effect", "permit verifies immediately before the consequential effect",
-          mutIdx > 0 && verifyIdx >= 0 && verifyIdx < mutIdx && lastRuntimeBefore === "runtime.verify" &&
-          ctx.log.events.find((e) => e.kind === "runtime.verify")?.detail?.valid === true,
-          `sequence: ${kinds.join(" > ")}`);
+        const adj = adjacencyViolations(ctx.log.events);
+        check("R6.verify_immediately_before_effect", "permit verifies immediately before the consequential effect (no event of any kind in between)",
+          ctx.provider.mutations === 1 && adj.length === 0,
+          `sequence: ${kinds.join(" > ")}${adj.length ? `; violations: ${adj.join("; ")}` : ""}`);
         check("R7.single_use_consumed", "permit atomically consumed / single-use",
           !!permit && permit.used === true, `permit.used=${permit?.used}`);
         const proof = r.proof as AiActionProof | undefined;
@@ -489,7 +558,7 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
 
     // S2 REPLAY of a consumed permit at the commit point -------------------
     await guard("S2", async () => {
-      const ctx = await setup(mutant, "allow");
+      const ctx = await setup(mutant, "allow", sequences, "S2_replay");
       try {
         const { spec, decision } = await authorizeSpec(ctx, NEW);
         if (decision.decision !== "allow") throw new Error(`expected allow, got ${decision.decision}`);
@@ -510,7 +579,7 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
     // S3-S5 CHANGED payload / target / environment at the commit point -----
     const tamper = async (scenario: string, id: string, requirement: string, code: string, mutate: (spec: GovernedActionSpec) => { spec: GovernedActionSpec; content: string }) => {
       await guard(scenario, async () => {
-        const ctx = await setup(mutant, "allow");
+        const ctx = await setup(mutant, "allow", sequences, `${scenario}`);
         try {
           const { spec, decision } = await authorizeSpec(ctx, NEW);
           if (decision.decision !== "allow") throw new Error(`expected allow, got ${decision.decision}`);
@@ -537,7 +606,7 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
 
     // S6 DENY through the MCP tool -----------------------------------------
     await guard("S6", async () => {
-      const ctx = await setup(mutant, "deny");
+      const ctx = await setup(mutant, "deny", sequences, "S6_deny");
       try {
         const r = await ctx.call(toolArgs(NEW));
         check("R11.deny_zero_provider_mutations", "DENY causes zero simulated provider mutation calls",
@@ -549,7 +618,7 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
 
     // S7 HOLD through the MCP tool, then proper resolution -----------------
     await guard("S7", async () => {
-      const ctx = await setup(mutant, "hold");
+      const ctx = await setup(mutant, "hold", sequences, "S7_hold");
       try {
         const held = await ctx.call(toolArgs(NEW));
         const aid = String(held.approval_request_id ?? "");
@@ -569,7 +638,7 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
     // S8 authorization does not imply execution ----------------------------
     await guard("S8", async () => {
       for (const failure of ["write_error", "write_dropped"] as const) {
-        const ctx = await setup(mutant, "allow");
+        const ctx = await setup(mutant, "allow", sequences, `S8_${failure}`);
         try {
           const { spec, decision } = await authorizeSpec(ctx, NEW);
           if (decision.decision !== "allow") throw new Error(`expected allow, got ${decision.decision}`);
@@ -583,10 +652,17 @@ export async function runL2Suite(mutant?: Mutant): Promise<SuiteResult> {
         } finally { await ctx.close(); }
       }
     });
+    // R6b: adjacency across EVERY scenario, including the commit-point-level
+    // ones that run executeGoverned directly (where adapter mutants apply).
+    const violations = sequences.flatMap(({ scenario, log }) => adjacencyViolations(log.events).map((v) => `${scenario}: ${v}`));
+    const mutationsSeen = sequences.reduce((n, { log }) => n + log.count("provider.mutation"), 0);
+    check("R6b.verify_adjacent_every_mutation", "every governed provider mutation in every scenario is immediately preceded by a successful runtime.verify",
+      mutationsSeen > 0 && violations.length === 0,
+      `provider mutations=${mutationsSeen} across ${sequences.length} scenario runs; violations=${violations.length ? violations.join(" | ") : "none"}`);
   } finally {
     for (const k of ENV_KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
   }
-  return { checks, outcomes, failures: checks.filter((c) => !c.passed) };
+  return { checks, outcomes, failures: checks.filter((c) => !c.passed), sequences: sequences.map(({ scenario, log }) => ({ scenario, events: log.events })) };
 }
 
 /** R14: the full suite twice; the outcome vector must be identical and every check green both times. */

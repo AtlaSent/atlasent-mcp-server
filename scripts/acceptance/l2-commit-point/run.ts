@@ -42,6 +42,16 @@ if (out) {
     action_type: ACTION_TYPE,
     level_claimed: ok ? "L2" : null,
     level_definition: "L2 = deterministic simulated execution through the binding's own commit-point code path",
+    evidence_kind: "simulated_harness",
+    commit_point: {
+      kind: "client_executor_adjacent_verify",
+      description: "The commit point is the MCP server's executeGoverned. The runtime verifies and consumes the permit, and the very next event in the single ordered runtime+provider log is the governed provider write, guarded only by the provider's own base-sha precondition. The provider never sees or checks the permit, so this is NOT a native provider-effect commit point (a provider that checks authorization atomically as part of applying the change).",
+      adjacency_rule: "every provider.mutation in every scenario is immediately preceded by a successful runtime.verify; no provider read, provider state change, other runtime call, or second mutation may sit between them (R6, R6b)",
+    },
+    supersedes: {
+      record: "docs/acceptance/L2_COMMIT_POINT_BP-000009_2026-09-30.json",
+      reason: "its R6 required only that the last RUNTIME call before the mutation was runtime.verify, so a provider read or state change between verify and write passed (atlasent#794)",
+    },
     run_at: new Date().toISOString(),
     code_under_test: { repository: "Atlasent/atlasent-mcp-server", commit, path: "MCP client > atlasent_governed_file_change > engine.authorize (identity, seal, evaluate) / awaitApproval > executeGoverned (verify, execute once, observe effect) > githubFileAdapter" },
     simulated: {
@@ -53,6 +63,7 @@ if (out) {
       "a real provider or vendor sandbox (L3)",
       "customer acceptance (G4) or production validation (G5)",
       "the LangChain/LlamaIndex binding profile (BP-000010); this evidence covers BP-000009 only",
+      "a native provider-effect commit point: the provider does not check the permit, so verify and write remain two calls; their adjacency is shown in the harness's ordered event log, not enforced by the provider",
     ],
     checks,
     outcomes: clean.outcomes,
