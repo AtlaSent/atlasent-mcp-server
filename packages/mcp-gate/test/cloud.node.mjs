@@ -64,7 +64,7 @@ test('bad key, unsafe endpoint, malformed transport and mapping never fall back'
  assert.throws(()=>validateConnection({...connection,apiUrl:'http://runtime.example'}));
  assert.throws(()=>validateConnection({...connection,apiUrl:'https://user:password@runtime.example'}));
  for(const fetchImpl of [async()=>{throw Error('timeout')},async()=>new Response('oops',{status:503}),async()=>new Response('not-json'),async()=>new Response('x'.repeat(1024*1024+1))]) {
-  assert.equal((await cloudAuthorizer(connection,'ask_test_fixture',{fetchImpl})(params())).reason,'cloud_unavailable');
+  assert.equal((await cloudAuthorizer(connection,'ask_test_fixture',{fetchImpl})(params())).reason,'cloud_actor_identity_unavailable');
  }
  const t=transport();assert.equal((await cloudAuthorizer(connection,'ask_test_fixture',t)({name:'unknown',arguments:{}})).effect,'deny');assert.equal(t.calls.length,0);
 });
@@ -243,6 +243,20 @@ test('approval denial, wrong row, nonallow reevaluation, missing claim or bad ve
   assert.ok(!t.calls.some(c=>c.url.endsWith('/resolve')));
  }
 });
+test('approval claim requires a fresh valid actor identity, not only the initial evaluation identity',async()=>{
+ let mints=0;
+ const t=approvalTransport({mint:b=>{
+  mints+=1;
+  return mints===1
+   ? {assertion:actorAssertion(b.action_type,b.environment)}
+   : {assertion:{...actorAssertion(b.action_type,b.environment),subject:{principal_id:'agent:22222222-2222-4222-8222-222222222222',principal_kind:'agent'}}};
+ }});
+ const r=await cloudAuthorizer(waiting,'ask_test_fixture',t)(params());
+ assert.equal(r.reason,'cloud_actor_identity_invalid');
+ assert.equal(t.identityCalls.length,2);
+ assert.equal(t.calls.filter(c=>c.url.endsWith('/claim-permit')).length,0);
+});
+
 test('approval timeout and cancellation never claim a permit',async()=>{
  const t=approvalTransport({row:{id:approvalId,status:'pending'}});
  t.sleepImpl=async()=>{await new Promise(r=>setTimeout(r,10))};
