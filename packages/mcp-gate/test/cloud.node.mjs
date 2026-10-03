@@ -7,23 +7,37 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 
-const connection = {version:1,apiUrl:'https://runtime.example/functions/v1',actorId:'agent-001',gateId:'gate-001',environment:'sandbox',tools:{set_status:{actionType:'tool.set_status',targetId:'demo:sandbox'}}};
+const connection = {version:1,apiUrl:'https://runtime.example/functions/v1',actorId:'agent:11111111-1111-4111-8111-111111111111',gateId:'gate-001',environment:'sandbox',tools:{set_status:{actionType:'tool.set_status',targetId:'demo:sandbox'}}};
 const params = ()=>({name:'set_status',arguments:{environment:'sandbox',status:'ready'}});
-const response = value => new Response(JSON.stringify(value),{status:200,headers:{'Content-Type':'application/json'}});
+const response = (value,status=200) => new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
 const verified = ()=>({valid:true,outcome:'allow',consumed:true,expires_at:new Date(Date.now()+60000).toISOString()});
-function transport({evaluate,verify}={}) {
- const calls=[];
+const actorAssertion = (actionType,environment,over={}) => ({
+ version:'actor_identity.v1',
+ subject:{principal_id:connection.actorId,principal_kind:'agent',role:'agent'},
+ binding:{action_type:actionType,tenant_id:'org-fixture',environment},
+ signature:'ab'.repeat(64),
+ ...over,
+});
+function transport({evaluate,verify,mint,mintStatus=200}={}) {
+ const calls=[],identityCalls=[];
  const fetchImpl=async(url,opts)=>{
-   const body=JSON.parse(opts.body);calls.push({url,body,opts});
+   const body=JSON.parse(opts.body);
+   if(url.endsWith('/v1-agent-actor-identity')) {
+     identityCalls.push({url,body,opts});
+     return response(mint ? mint(body) : {assertion:actorAssertion(body.action_type,body.environment)},mintStatus);
+   }
+   calls.push({url,body,opts});
    return url.endsWith('/v1-evaluate') ? response(evaluate ? evaluate(body) : {decision:'allow',mode:'live',permit_token:'fixture-permit',execution_payload_hash_accepted:true,execution_hash_expected:body.execution_payload_hash}) : response(verify ? verify(body) : verified());
  };
- return {calls,fetchImpl};
+ return {calls,identityCalls,fetchImpl};
 }
 test('wire: fresh full subject binding and consume before allow; no raw args sent',async()=>{
  const t=transport();const auth=cloudAuthorizer(connection,'ask_test_fixture',t);
  assert.equal((await auth(params())).effect,'allow');assert.equal((await auth(params())).effect,'allow');
- assert.equal(t.calls.length,4);const [a,b,c]=t.calls;
+ assert.equal(t.calls.length,4);assert.equal(t.identityCalls.length,2);const [a,b,c]=t.calls;
+ assert.deepEqual(t.identityCalls[0].body,{action_type:'tool.set_status',environment:'sandbox'});
  assert.match(a.body.execution_payload_hash,/^[a-f0-9]{64}$/);assert.notEqual(a.body.execution_payload_hash,c.body.execution_payload_hash);
+ assert.equal(a.body.actor_identity.version,'actor_identity.v1');assert.equal(a.body.actor_identity.subject.principal_id,connection.actorId);assert.equal(a.body.actor_identity.binding.action_type,'tool.set_status');assert.equal(a.body.actor_identity.binding.environment,'sandbox');
  assert.equal(b.body.payload_hash,a.body.execution_payload_hash);assert.equal(b.body.actor_id,connection.actorId);assert.equal(b.body.target_id,'demo:sandbox');assert.equal(b.body.environment,'sandbox');
  assert.equal(a.opts.redirect,'error');assert.equal(a.opts.headers['X-AtlaSent-Key'],'ask_test_fixture');
  assert.ok(!JSON.stringify(a.body).includes('ready'));assert.ok(!('execution_payload_hash' in a.body.context));
@@ -76,9 +90,31 @@ test('the shipped example is rejected until its placeholders are replaced',async
  // Real action types containing 'your' are untouched — exact literal, never a prefix.
  assert.ok(validateConnection({...connection,tools:{set_status:{actionType:'your-team.deploy',targetId:'demo:sandbox'}}}));
  // A real configuration is untouched: no false positive on an ordinary host or actor.
- assert.equal(validateConnection(connection).actorId,'agent-001');
- assert.ok(validateConnection({...connection,apiUrl:'https://yourcompany.example/functions/v1',actorId:'your-team-bot'}));
+ assert.equal(validateConnection(connection).actorId,'agent:11111111-1111-4111-8111-111111111111');
+ assert.throws(()=>validateConnection({...connection,actorId:'agent-001'}),/agent:<uuid>/);
+ assert.throws(()=>validateConnection({...connection,actorId:'your-team-bot'}),/agent:<uuid>/);
+ assert.ok(validateConnection({...connection,apiUrl:'https://yourcompany.example/functions/v1'}));
 });
+test('verified actor mint failures and binding mismatches fail closed before evaluate',async()=>{
+ const bad=[
+  {mint:()=>({assertion:null}),reason:'cloud_actor_identity_invalid'},
+  {mint:b=>({assertion:actorAssertion(b.action_type,b.environment,{version:'actor_identity.v0'})}),reason:'cloud_actor_identity_invalid'},
+  {mint:b=>({assertion:{...actorAssertion(b.action_type,b.environment),subject:{principal_id:connection.actorId,principal_kind:'human'}}}),reason:'cloud_actor_identity_invalid'},
+  {mint:b=>({assertion:{...actorAssertion(b.action_type,b.environment),subject:{principal_id:'agent:22222222-2222-4222-8222-222222222222',principal_kind:'agent'}}}),reason:'cloud_actor_identity_invalid'},
+  {mint:b=>({assertion:{...actorAssertion(b.action_type,b.environment),binding:{action_type:'data.delete',tenant_id:'org-fixture',environment:b.environment}}}),reason:'cloud_actor_identity_invalid'},
+  {mint:b=>({assertion:{...actorAssertion(b.action_type,b.environment),binding:{action_type:b.action_type,tenant_id:'org-fixture',environment:'production'}}}),reason:'cloud_actor_identity_invalid'},
+  {mint:b=>({assertion:{...actorAssertion(b.action_type,b.environment),signature:''}}),reason:'cloud_actor_identity_invalid'},
+ ];
+ for(const fixture of bad){
+  const t=transport(fixture);const r=await cloudAuthorizer(connection,'ask_test_fixture',t)(params());
+  assert.equal(r.reason,fixture.reason);assert.equal(t.calls.length,0);assert.equal(t.identityCalls.length,1);
+ }
+ for(const mintStatus of [403,404,500]){
+  const t=transport({mintStatus});const r=await cloudAuthorizer(connection,'ask_test_fixture',t)(params());
+  assert.equal(r.reason,'cloud_actor_identity_unavailable');assert.equal(t.calls.length,0);assert.equal(t.identityCalls.length,1);
+ }
+});
+
 test('argument mutation during authorization is rejected',async()=>{
  const p=params();const t=transport({verify:()=>{p.arguments.status='tampered';return verified()}});
  assert.equal((await cloudAuthorizer(connection,'ask_test_fixture',t)(p)).reason,'cloud_arguments_changed');
@@ -165,31 +201,39 @@ test('connected setup generates explicit mode without storing credentials',async
 
 const approvalId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const waiting={...connection,approvalWaitMs:5000,approvalsUrl:'https://runtime.example/v1/approvals'};
-function approvalTransport({row,claim,verification,hold}={}) {
- const calls=[];let polls=0;
- return {calls, sleepImpl:async()=>{}, fetchImpl:async(url,opts)=>{
-  const body=opts.body ? JSON.parse(opts.body) : undefined;calls.push({url,body,method:opts.method});
+function approvalTransport({row,claim,verification,hold,mint,mintStatus=200}={}) {
+ const calls=[],identityCalls=[];let polls=0;
+ return {calls,identityCalls, sleepImpl:async()=>{}, fetchImpl:async(url,opts)=>{
+  const body=opts.body ? JSON.parse(opts.body) : undefined;
+  if(url.endsWith('/v1-agent-actor-identity')) {
+   identityCalls.push({url,body,method:opts.method});
+   return response(mint ? mint(body) : {assertion:actorAssertion(body.action_type,body.environment)},mintStatus);
+  }
+  calls.push({url,body,method:opts.method});
   if(url.endsWith('/v1-evaluate')) return response(hold??{decision:'hold',mode:'live',approval_request_id:approvalId});
-  if(url.endsWith('/claim-permit')) return response(claim??{claimed:true,status:'approved',re_evaluation_decision:'allow',permit_token:'fresh-approval-permit'});
+  if(url.endsWith('/claim-permit')) return response(claim??{claimed:true,re_evaluation_decision:'allow',permit_token:'fresh-approval-permit'});
   if(url.endsWith('/v1-verify-permit')) return response(verification??verified());
-  polls++;return response(row??{id:approvalId,status:polls===1?'pending':'approved',re_evaluation_decision:'allow'});
+  polls++;return response(row??{id:approvalId,status:polls===1?'pending':'approved_awaiting_claim',claim_environment:'sandbox'});
  }};
 }
 test('approval resumes original invocation: poll, claim once, verify exact original digest',async()=>{
  const t=approvalTransport();const pending=[];const auth=cloudAuthorizer(waiting,'ask_test_fixture',t);
  assert.equal((await auth(params(),{onPending:id=>pending.push(id)})).effect,'allow');
  assert.deepEqual(pending,[approvalId]);assert.deepEqual(t.calls.map(c=>c.method),['POST','GET','GET','POST','POST']);
- const first=t.calls[0],last=t.calls.at(-1);assert.equal(last.body.payload_hash,first.body.execution_payload_hash);
+ assert.equal(t.identityCalls.length,2);assert.deepEqual(t.identityCalls.map(c=>c.body),[{action_type:'tool.set_status',environment:'sandbox'},{action_type:'tool.set_status',environment:'sandbox'}]);
+ const first=t.calls[0],claimCall=t.calls.find(c=>c.url.endsWith('/claim-permit')),last=t.calls.at(-1);assert.equal(last.body.payload_hash,first.body.execution_payload_hash);
+ assert.equal(claimCall.body.actor_identity.subject.principal_id,connection.actorId);assert.equal(claimCall.body.actor_identity.binding.environment,'sandbox');
  assert.equal(last.body.permit_token,'fresh-approval-permit');assert.equal(last.body.target_id,'demo:sandbox');
  assert.equal(t.calls.filter(c=>c.url.endsWith('/v1-evaluate')).length,1);
 });
 test('approval denial, wrong row, nonallow reevaluation, missing claim or bad verify cannot execute',async()=>{
  for(const fixture of [
   {row:{id:approvalId,status:'denied'}},
-  {row:{id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',status:'approved',re_evaluation_decision:'allow'}},
-  {row:{id:approvalId,status:'approved',re_evaluation_decision:'hold'}},
-  {claim:{claimed:false,status:'approved',re_evaluation_decision:'allow'}},
-  {claim:{claimed:true,status:'approved',re_evaluation_decision:'deny',permit_token:'bad'}},
+  {row:{id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',status:'approved_awaiting_claim',claim_environment:'sandbox'}},
+  {row:{id:approvalId,status:'approved'}},
+  {row:{id:approvalId,status:'approved_awaiting_claim',claim_environment:'production'}},
+  {claim:{claimed:false,re_evaluation_decision:'allow'}},
+  {claim:{claimed:true,re_evaluation_decision:'deny',permit_token:'bad'}},
   {verification:{valid:false,outcome:'deny',consumed:false}},
   {hold:{decision:'hold',mode:'shadow',approval_request_id:approvalId}},
   {hold:{decision:'hold',mode:'live',approval_request_id:'../resolve'}}
