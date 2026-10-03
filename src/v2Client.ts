@@ -1,19 +1,37 @@
 /**
  * V2 Wave A endpoint clients.
  *
- * Wraps three new atlasent-api endpoints landed in Wave A:
- *   - POST /v1/evaluate/batch    (atlasent-api #742, flag v2_batch)
- *   - POST /v1/evaluate/stream   (atlasent-api #745, flag v2_streaming)
- *   - POST /v1/graphql           (atlasent-api #746, flag v2_graphql)
+ * Wraps three atlasent-api edge functions landed in Wave A, called on the
+ * same Supabase functions base as /v1-evaluate (see engine.ts):
+ *   - POST {base}/v1-evaluate-batch    (atlasent-api #742, flag v2_batch)
+ *   - POST {base}/v1-evaluate-stream   (atlasent-api #745, flag v2_streaming)
+ *   - POST {base}/v1-graphql           (atlasent-api #746, flag v2_graphql)
+ *
+ * `{base}` is ATLASENT_BASE_URL, default https://api.atlasent.io/functions/v1.
+ * These are the function names in atlasent-api's runtime-functions.json, and
+ * none of their entry shims route on pathname. The "/v1/evaluate/batch" form
+ * this file used to build appended to that base names a function that does
+ * not exist, so every call 404'd and was reported as "feature not enabled".
+ *
+ * Wire item shape: v1-evaluate-batch and v1-evaluate-stream both declare
+ * `BatchItem { action_type, actor_id, context?, resource_id?, ... }` and pass
+ * each item verbatim to v1-evaluate's handleEvaluate, which reads only
+ * `action_type` and `actor_id`. Callers here use `{ action, agent }` (the MCP
+ * tool input); `toWireItem` maps them at this boundary. Sending
+ * `{ action, agent }` as-is got every item a 400 "action_type and actor_id
+ * are required".
  *
  * Auth is read from the same env vars as the existing remote engine
  * (`ATLASENT_API_KEY`, `ATLASENT_BASE_URL`, optional `ATLASENT_ANON_KEY`)
  * — no new auth surface is introduced.
  *
- * Closed-by-default discipline: every endpoint is gated by a tenant
- * flag at the API. A 404 means "feature not enabled for this tenant" —
- * we surface that as a typed `FeatureNotEnabledError` so the caller
- * can produce an MCP error result rather than a silent fallback.
+ * Closed-by-default discipline: every endpoint is gated by a tenant flag.
+ * With the flag off each handler answers 404 with the canonical envelope
+ * `{ error: "not_found", message: "Not found", status: 404 }` (its only 404).
+ * That exact answer becomes a typed `FeatureNotEnabledError`, so the caller
+ * can produce an MCP error result rather than a silent fallback. Any other
+ * 404 (for example the Supabase gateway's "function not found") is a
+ * `V2HttpError`: it means the URL is wrong, not that the tenant lacks a flag.
  */
 
 import { VERSION } from "./version.js";
@@ -52,7 +70,7 @@ function makeAbortSignal(ms: number): { signal: AbortSignal; cancel: () => void 
 }
 
 function baseUrl(): string {
-  return (process.env.ATLASENT_BASE_URL ?? "https://api.atlasent.io").replace(
+  return (process.env.ATLASENT_BASE_URL ?? "https://api.atlasent.io/functions/v1").replace(
     /\/+$/,
     "",
   );
@@ -73,8 +91,35 @@ function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   return headers;
 }
 
+/**
+ * True only for the handlers' tenant-flag-off answer: a 404 whose JSON body
+ * carries `error: "not_found"` (atlasent-api `_shared/errors.ts`
+ * errorResponse). Exported for tests.
+ */
+export function isFlagDisabledResponse(status: number, body: string): boolean {
+  if (status !== 404) return false;
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    return (
+      !!parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      (parsed as Record<string, unknown>).error === "not_found"
+    );
+  } catch {
+    return false;
+  }
+}
+
 function handleStatus(flag: TenantFlag, status: number, body: string): never {
-  if (status === 404) throw new FeatureNotEnabledError(flag);
+  if (isFlagDisabledResponse(status, body)) throw new FeatureNotEnabledError(flag);
+  if (status === 404) {
+    throw new V2HttpError(
+      status,
+      body,
+      `AtlaSent V2 API 404: endpoint not found (not a tenant-flag response) — check ATLASENT_BASE_URL. ${body}`.trim(),
+    );
+  }
   if (status === 401) {
     throw new V2HttpError(
       status,
@@ -103,13 +148,30 @@ function handleStatus(flag: TenantFlag, status: number, body: string): never {
 }
 
 // ---------------------------------------------------------------------------
-// POST /v1/evaluate/batch — atlasent-api #742 (V2-D3)
+// POST /v1-evaluate-batch — atlasent-api #742 (V2-D3)
 // ---------------------------------------------------------------------------
 
 export interface BatchEvaluateItem {
+  /** Action type; sent on the wire as `action_type`. */
   action: string;
+  /** Actor identity; sent on the wire as `actor_id`. */
   agent: string;
   context?: Record<string, unknown>;
+}
+
+/** The item shape atlasent-api's v1-evaluate-batch / v1-evaluate-stream read. */
+export interface WireBatchItem {
+  action_type: string;
+  actor_id: string;
+  context?: Record<string, unknown>;
+}
+
+export function toWireItem(item: BatchEvaluateItem): WireBatchItem {
+  return {
+    action_type: item.action,
+    actor_id: item.agent,
+    ...(item.context !== undefined ? { context: item.context } : {}),
+  };
 }
 
 export interface BatchEvaluateRequest {
@@ -135,7 +197,7 @@ export async function evaluateBatch(
   if (req.items.length > MAX_BATCH_ITEMS) {
     throw new Error(`items length ${req.items.length} exceeds max ${MAX_BATCH_ITEMS}`);
   }
-  const body: Record<string, unknown> = { items: req.items };
+  const body: Record<string, unknown> = { items: req.items.map(toWireItem) };
   if (req.batch_id !== undefined) body.batch_id = req.batch_id;
   const serialized = JSON.stringify(body);
   if (serialized.length > MAX_BATCH_BYTES) {
@@ -144,7 +206,7 @@ export async function evaluateBatch(
 
   const { signal, cancel } = makeAbortSignal(REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(`${baseUrl()}/v1/evaluate/batch`, {
+    const res = await fetch(`${baseUrl()}/v1-evaluate-batch`, {
       method: "POST",
       headers: buildHeaders(),
       body: serialized,
@@ -161,7 +223,7 @@ export async function evaluateBatch(
 }
 
 // ---------------------------------------------------------------------------
-// POST /v1/evaluate/stream — atlasent-api #745 (V2-D4)
+// POST /v1-evaluate-stream — atlasent-api #745 (V2-D4)
 // Buffers the SSE stream and returns the same shape as batch once `complete`
 // arrives. Per-item RPC errors are surfaced as `error` frames in the items
 // array; the stream itself does not abort on per-item failure.
@@ -187,12 +249,12 @@ export async function evaluateStream(
   if (req.items.length > MAX_BATCH_ITEMS) {
     throw new Error(`items length ${req.items.length} exceeds max ${MAX_BATCH_ITEMS}`);
   }
-  const body: Record<string, unknown> = { items: req.items };
+  const body: Record<string, unknown> = { items: req.items.map(toWireItem) };
   if (req.batch_id !== undefined) body.batch_id = req.batch_id;
 
   const { signal, cancel } = makeAbortSignal(STREAM_TIMEOUT_MS);
   try {
-    const res = await fetch(`${baseUrl()}/v1/evaluate/stream`, {
+    const res = await fetch(`${baseUrl()}/v1-evaluate-stream`, {
       method: "POST",
       headers: buildHeaders({ Accept: "text/event-stream" }),
       body: JSON.stringify(body),
@@ -318,7 +380,7 @@ function findFrameBoundary(buf: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// POST /v1/graphql — atlasent-api #746 (V2-D2 + V2-D8)
+// POST /v1-graphql — atlasent-api #746 (V2-D2 + V2-D8)
 // ---------------------------------------------------------------------------
 
 export interface GraphqlRequest {
@@ -348,7 +410,7 @@ export async function graphqlQuery(req: GraphqlRequest): Promise<GraphqlResponse
 
   const { signal, cancel } = makeAbortSignal(REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(`${baseUrl()}/v1/graphql`, {
+    const res = await fetch(`${baseUrl()}/v1-graphql`, {
       method: "POST",
       headers: buildHeaders(),
       body: serialized,

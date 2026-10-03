@@ -106,7 +106,7 @@ describe("Streamable HTTP transport — end-to-end", () => {
 
   it("calls atlasent_evaluate_many round-trip and parses the canonical shape", async () => {
     installSplitFetch((url) => {
-      if (url.includes("/v1/evaluate/batch")) {
+      if (url === "https://api.test/v1-evaluate-batch") {
         return jsonResponse({
           batch_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           items: [{ decision: "allow", permit_token: "pt_remote" }],
@@ -123,7 +123,7 @@ describe("Streamable HTTP transport — end-to-end", () => {
     try {
       const result = await client.callTool({
         name: "atlasent_evaluate_many",
-        arguments: { items: [{ action: "deploy", agent: "agent-1" }] },
+        arguments: { items: [{ action: "production.deploy", agent: "agent-1" }] },
       });
       const data = parseToolResult(result);
       assert.equal(data.batch_id, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
@@ -137,8 +137,8 @@ describe("Streamable HTTP transport — end-to-end", () => {
 
   it("surfaces upstream 404 as feature_not_enabled over the transport", async () => {
     installSplitFetch((url) => {
-      if (url.includes("/v1/graphql")) {
-        return jsonResponse({ error: "not_enabled" }, 404);
+      if (url === "https://api.test/v1-graphql") {
+        return jsonResponse({ error: "not_found", message: "Not found", status: 404 }, 404);
       }
       return jsonResponse({ error: "unexpected" }, 500);
     });

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer } from "./server.js";
+import { CANON_ACT_CATALOG } from "./canonCatalog.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -84,7 +85,7 @@ describe("atlasent_evaluate_many", () => {
     const result = await client.callTool({
       name: "atlasent_evaluate_many",
       arguments: {
-        items: [{ action: "deploy", agent: "agent-1" }],
+        items: [{ action: "production.deploy", agent: "agent-1" }],
       },
     });
     const data = parseResult(result);
@@ -95,11 +96,11 @@ describe("atlasent_evaluate_many", () => {
   });
 
   it("surfaces 404 as feature_not_enabled with v2_batch flag", async () => {
-    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_enabled" }, 404));
+    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_found", message: "Not found", status: 404 }, 404));
     const { client } = await setup();
     const result = await client.callTool({
       name: "atlasent_evaluate_many",
-      arguments: { items: [{ action: "deploy", agent: "agent-1" }] },
+      arguments: { items: [{ action: "production.deploy", agent: "agent-1" }] },
     });
     const data = parseResult(result);
     assert.equal(data.error, "feature_not_enabled");
@@ -110,7 +111,7 @@ describe("atlasent_evaluate_many", () => {
   it("rejects > 100 items at the tool layer", async () => {
     const { client } = await setup();
     const items = Array.from({ length: 101 }, () => ({
-      action: "deploy",
+      action: "production.deploy",
       agent: "a",
     }));
     const result = await client.callTool({
@@ -125,7 +126,7 @@ describe("atlasent_evaluate_many", () => {
     const result = await client.callTool({
       name: "atlasent_evaluate_many",
       arguments: {
-        items: [{ action: "deploy", agent: "a" }],
+        items: [{ action: "production.deploy", agent: "a" }],
         batch_id: "not-a-uuid",
       },
     });
@@ -151,8 +152,8 @@ describe("atlasent_evaluate_many", () => {
       name: "atlasent_evaluate_many",
       arguments: {
         items: [
-          { action: "deploy", agent: "agent-1" },
-          { action: "wire_transfer", agent: "agent-1" },
+          { action: "production.deploy", agent: "agent-1" },
+          { action: "payment.wire_transfer", agent: "agent-1" },
         ],
       },
     });
@@ -180,8 +181,8 @@ describe("atlasent_evaluate_many", () => {
       name: "atlasent_evaluate_many",
       arguments: {
         items: [
-          { action: "deploy", agent: "agent-1" },
-          { action: "delete", agent: "agent-1" },
+          { action: "production.deploy", agent: "agent-1" },
+          { action: "data.delete", agent: "agent-1" },
         ],
       },
     });
@@ -206,7 +207,7 @@ describe("atlasent_evaluate_many", () => {
       arguments: {
         items: [
           {
-            action: "deploy",
+            action: "production.deploy",
             agent: "agent-1",
             context: { environment: "prod" },
           },
@@ -215,7 +216,10 @@ describe("atlasent_evaluate_many", () => {
     });
     const body = captured[0].body as Record<string, unknown>;
     const items = body.items as Array<Record<string, unknown>>;
-    assert.deepEqual(items[0].context, { environment: "prod" });
+    // Exact wire item: the runtime's BatchItem reads action_type / actor_id.
+    assert.deepEqual(items, [
+      { action_type: "production.deploy", actor_id: "agent-1", context: { environment: "prod" } },
+    ]);
   });
 });
 
@@ -232,7 +236,7 @@ describe("atlasent_evaluate_stream", () => {
     const { client } = await setup();
     const result = await client.callTool({
       name: "atlasent_evaluate_stream",
-      arguments: { items: [{ action: "deploy", agent: "agent-1" }] },
+      arguments: { items: [{ action: "production.deploy", agent: "agent-1" }] },
     });
     const data = parseResult(result);
     assert.equal(data.batch_id, "55555555-5555-4555-8555-555555555555");
@@ -251,8 +255,8 @@ describe("atlasent_evaluate_stream", () => {
       name: "atlasent_evaluate_stream",
       arguments: {
         items: [
-          { action: "a", agent: "x" },
-          { action: "b", agent: "x" },
+          { action: "test.a", agent: "x" },
+          { action: "test.b", agent: "x" },
         ],
       },
     });
@@ -273,8 +277,8 @@ describe("atlasent_evaluate_stream", () => {
       name: "atlasent_evaluate_stream",
       arguments: {
         items: [
-          { action: "deploy", agent: "agent-1" },
-          { action: "wire_transfer", agent: "agent-1" },
+          { action: "production.deploy", agent: "agent-1" },
+          { action: "payment.wire_transfer", agent: "agent-1" },
         ],
       },
     });
@@ -285,11 +289,11 @@ describe("atlasent_evaluate_stream", () => {
   });
 
   it("surfaces 404 as feature_not_enabled with v2_streaming flag", async () => {
-    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_enabled" }, 404));
+    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_found", message: "Not found", status: 404 }, 404));
     const { client } = await setup();
     const result = await client.callTool({
       name: "atlasent_evaluate_stream",
-      arguments: { items: [{ action: "deploy", agent: "a" }] },
+      arguments: { items: [{ action: "production.deploy", agent: "a" }] },
     });
     const data = parseResult(result);
     assert.equal(data.error, "feature_not_enabled");
@@ -323,7 +327,7 @@ describe("atlasent_query", () => {
   });
 
   it("surfaces 404 as feature_not_enabled with v2_graphql flag", async () => {
-    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_enabled" }, 404));
+    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "not_found", message: "Not found", status: 404 }, 404));
     const { client } = await setup();
     const result = await client.callTool({
       name: "atlasent_query",
@@ -362,3 +366,106 @@ describe("atlasent_query", () => {
     assert.deepEqual(body.variables, { n: 7 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-item action type validation (follow-up to #229)
+//
+// atlasent-api v1-evaluate-batch and v1-evaluate-stream hand every item
+// verbatim to the canonical v1-evaluate handleEvaluate, which rejects any
+// action type outside ACTION_TYPE_RE with 400 invalid_action_type. So these
+// tools validate each item with the same pattern, and a single bad item fails
+// the whole call before anything is sent.
+// ---------------------------------------------------------------------------
+
+const BAD_ACTIONS = [
+  "production/deploy",
+  "a/b",
+  "/",
+  "Production.Deploy",
+  "github:production.deploy",
+  "production-deploy.run",
+  "production deploy",
+  "deploy",
+  ".deploy",
+  "production.",
+  "production..deploy",
+  "1production.deploy",
+  "production.deploy\n",
+  "production.d\u0435ploy", // Cyrillic е
+];
+
+for (const tool of ["atlasent_evaluate_many", "atlasent_evaluate_stream"] as const) {
+  describe(`${tool} per-item action validation`, () => {
+    it("refuses every out-of-pattern action, with fetch never called", async () => {
+      const { client } = await setup();
+      for (const bad of BAD_ACTIONS) {
+        const fetchMock = mock.fn(async () =>
+          jsonResponse({ batch_id: "x", items: [{ decision: "allow" }], partial: false }),
+        );
+        globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+        const result = await client.callTool({
+          name: tool,
+          arguments: { items: [{ action: bad, agent: "agent-1" }] },
+        }).then(
+          (r) => r,
+          (e: unknown) => ({ isError: true, content: [{ type: "text", text: String(e) }] }),
+        );
+        assert.equal(result.isError, true, `should refuse ${JSON.stringify(bad)}`);
+        assert.match(JSON.stringify(result.content), /must be canonical/);
+        assert.equal(fetchMock.mock.callCount(), 0, `fetch called for ${JSON.stringify(bad)}`);
+      }
+    });
+
+    it("one bad item among valid ones fails the whole call before any fetch", async () => {
+      const fetchMock = mock.fn(async () =>
+        jsonResponse({ batch_id: "x", items: [], partial: false }),
+      );
+      globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+      const { client } = await setup();
+      const result = await client.callTool({
+        name: tool,
+        arguments: {
+          items: [
+            { action: "production.deploy", agent: "agent-1" },
+            { action: "access.grant", agent: "agent-1" },
+            { action: "production/deploy", agent: "agent-1" },
+            { action: "data.delete", agent: "agent-1" },
+          ],
+        },
+      }).then(
+        (r) => r,
+        (e: unknown) => ({ isError: true, content: [{ type: "text", text: String(e) }] }),
+      );
+      assert.equal(result.isError, true);
+      assert.match(JSON.stringify(result.content), /must be canonical/);
+      assert.equal(fetchMock.mock.callCount(), 0);
+    });
+
+    it("accepts every Canon slug and forwards them unchanged", async () => {
+      assert.ok(CANON_ACT_CATALOG.length > 0, "empty catalog would make this vacuous");
+      const slugs = CANON_ACT_CATALOG.map((c) => c.slug);
+      // The endpoints cap a call at 100 items.
+      for (let i = 0; i < slugs.length; i += 100) {
+        const chunk = slugs.slice(i, i + 100);
+        const sent: string[] = [];
+        globalThis.fetch = mock.fn(async (_url: unknown, init?: RequestInit) => {
+          const body = JSON.parse((init?.body as string) ?? "{}") as {
+            items: Array<{ action_type: string }>;
+          };
+          sent.push(...body.items.map((it) => it.action_type));
+          if (tool === "atlasent_evaluate_stream") {
+            return sseResponse('event: complete\ndata: {"batch_id":"x","partial":false}\n\n');
+          }
+          return jsonResponse({ batch_id: "x", items: [], partial: false });
+        }) as unknown as typeof globalThis.fetch;
+        const { client } = await setup();
+        const result = await client.callTool({
+          name: tool,
+          arguments: { items: chunk.map((action) => ({ action, agent: "agent-1" })) },
+        });
+        assert.doesNotMatch(JSON.stringify(result.content), /must be canonical/);
+        assert.deepEqual(sent, chunk);
+      }
+    });
+  });
+}
