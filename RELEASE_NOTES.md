@@ -1,6 +1,30 @@
 # Release Notes
 
-## Unreleased
+## v2.17.0 — 2026-10-05
+
+### NVIDIA OpenShell adapter (experimental)
+
+- New `atlasent-openshell` executable. Inside an OpenShell sandbox,
+  `atlasent-openshell run --envelope <file|-> -- <command>` evaluates the
+  action, optionally waits on an AtlaSent approval hold (`--wait-ms`), verifies
+  the permit, then runs the command exactly once. It never runs the command on
+  a deny, an unresolved hold or a failed verify.
+- Authority binds to the sandbox's durable `sandbox_id`. Sandbox and workspace
+  names travel as labels for the approval screen and are never identity. The
+  runtime checks the same binding when the permit is verified.
+- OpenShell approvals and AtlaSent approvals stay separate. An OpenShell Policy
+  Advisor approval grants reachability only, and is refused if it appears in
+  the action envelope. If OpenShell's policy changes between evaluate and
+  verify, the adapter evaluates again instead of reusing the old permit.
+- A command killed by a signal or by `--timeout-ms` after its permit was spent
+  has an unknown outcome. The run trips a local circuit breaker (reset only by
+  a person) and reports the trip to the runtime, which then refuses that
+  agent's permits until someone resets it.
+- Not yet production-ready: OpenShell 0.1.2 and 0.1.3-pre.1 to pre.3 carry an
+  upstream startup bug (NVIDIA/OpenShell#3994) whose fix is not in any release
+  yet, and the live startup test (`npm run test:openshell-acceptance`) has not
+  been run against a real OpenShell install.
+
 
 ### Evidence-gap report: where are my deploys ungoverned?
 
