@@ -21,7 +21,17 @@ endpoints:
     rules:
       - allow: { method: POST, path: "/functions/v1/v1-evaluate" }
       - allow: { method: POST, path: "/functions/v1/v1-verify-permit" }
-      - allow: { method: POST, path: "/functions/v1/v1-approvals/**" }
+      # HOLD wait: GET polls status, POST claims the permit.
+      - allow: { method: GET, path: "/functions/v1/v1-approvals/*" }
+      - allow: { method: POST, path: "/functions/v1/v1-approvals/*/claim-permit" }
+      # Agent identity, sealed provenance and auto Change Brief, sent with
+      # agent.* and change-controlled evaluations.
+      - allow: { method: POST, path: "/functions/v1/v1-agent-actor-identity" }
+      - allow: { method: POST, path: "/functions/v1/v1-source-provenance-seal" }
+      - allow: { method: POST, path: "/functions/v1/v1-change-brief" }
+      # E2 trip report when a command's outcome is unknown. Record only:
+      # resetting a trip is a person's console action, never this binary's.
+      - allow: { method: POST, path: "/functions/v1/v1-agent-circuit-trips" }
 binaries:
   - path: /usr/local/bin/atlasent-openshell
   - path: /usr/bin/atlasent-openshell

@@ -1047,6 +1047,10 @@ async function verifyRemote(token: string, ctx: ActionContext): Promise<VerifyRe
     environment: ctx.environment,
     ...(ctx.target_id ? { target_id: ctx.target_id } : {}),
     ...(ctx.payload_hash ? { payload_hash: normalizePayloadHash(ctx.payload_hash) } : {}),
+    // A permit evaluated with context.workload (an OpenShell sandbox_id) is
+    // required-if-bound at the runtime: omitting it here is a
+    // PERMIT_BINDING_MISMATCH. Only kind + id bind; labels are not sent.
+    ...(ctx.workload ? { workload: { kind: ctx.workload.kind, id: ctx.workload.id } } : {}),
   };
 
   const data = await post<RawVerify>("/v1-verify-permit", body);

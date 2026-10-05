@@ -86,6 +86,23 @@ describe("OpenShell sandbox identity", () => {
   });
 });
 
+describe("OpenShell RequestContext shape", () => {
+  it("reads OpenShell's own `sandbox` name field as the display label", () => {
+    // Field names from proto/supervisor_middleware.proto RequestContext.
+    const r = parseSandboxContext({ request_id: "req-1", sandbox_id: "sbx_1", sandbox: "demo", workspace: "ws" });
+    assert.ok(r.ok);
+    assert.deepEqual(toActionContext(ENVELOPE, r.sandbox).workload, {
+      kind: "openshell_sandbox",
+      id: "sbx_1",
+      labels: { sandbox_name: "demo", workspace: "ws" },
+    });
+  });
+
+  it("a `sandbox` name alone is still not an identity", () => {
+    assert.equal(parseSandboxContext({ sandbox: "demo", workspace: "ws" }).ok, false);
+  });
+});
+
 describe("OpenShell approvals never satisfy an AtlaSent HOLD", () => {
   it("refuses an envelope carrying a Policy Advisor approval, naming the field", () => {
     for (const field of ["approvals", "policy_advisor_approval", "openshell_approval", "proposal_id"]) {
@@ -269,6 +286,7 @@ describe("workload binding reaches /v1-evaluate", () => {
 describe("OpenShell version + startup policy-generation probe", () => {
   it("flags 0.1.2 as known-affected and never calls any version ready", () => {
     assert.equal(assessOpenShellVersion("v0.1.2").status, "known_affected");
+    assert.equal(assessOpenShellVersion("0.1.3-pre.3").status, "known_affected");
     assert.equal(assessOpenShellVersion("0.1.3").status, "unverified");
   });
 
