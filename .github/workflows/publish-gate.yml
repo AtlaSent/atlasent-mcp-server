@@ -22,7 +22,7 @@ name: Publish MCP Gate to npm
 # A template must be seeded for the org whose key this repo's ATLASENT_API_KEY
 # resolves to, matching:
 #     actor_id        github:<release manager>
-#     context.repo    Atlasent/atlasent-mcp-server
+#     context.repo    AtlaSent/atlasent-mcp-server
 #     context.workflow "Publish MCP Gate to npm"
 #     context.event_name "push"
 #     context.ref     ^refs/tags/gate-v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$
@@ -80,7 +80,7 @@ jobs:
       # Fail-closed: if the permit is not verified, nothing publishes.
       # See the header for why this denies until a template is seeded.
       - name: AtlaSent release gate
-        uses: Atlasent/atlasent-action@v1
+        uses: AtlaSent/atlasent-action@v1
         env:
           ATLASENT_API_KEY: ${{ secrets.ATLASENT_API_KEY }}
         with:
@@ -120,7 +120,7 @@ jobs:
       #
       # Trusted publishing is also configured PER PACKAGE on npmjs.com, and
       # @atlasent/mcp-gate has never been published: it needs a pending publisher
-      # (repo Atlasent/atlasent-mcp-server, workflow publish-gate.yml,
+      # (repo AtlaSent/atlasent-mcp-server, workflow publish-gate.yml,
       # environment npm) or this step fails on auth. That one is fixable without
       # a new version, since it is not a change to this file.
       - name: Upgrade npm for trusted publishing

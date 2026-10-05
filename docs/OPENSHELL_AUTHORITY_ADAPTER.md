@@ -1,40 +1,40 @@
-# NVIDIA OpenShell × Atlasent
+# NVIDIA OpenShell × AtlaSent
 
 Status: experimental integration surface. OpenShell controls reachability;
-Atlasent controls organizational authority and effect proof.
+AtlaSent controls organizational authority and effect proof.
 
 ## Boundary
 
 OpenShell owns sandbox isolation, network/process policy and credential
-injection. Atlasent owns organizational authorization for consequential
+injection. AtlaSent owns organizational authorization for consequential
 actions: DENY, HOLD/approval, bounded permits and post-execution evidence.
 
-Do not broaden an OpenShell network rule merely because Atlasent authorized an
+Do not broaden an OpenShell network rule merely because AtlaSent authorized an
 action. The intended sequence is:
 
 1. Agent proposes a consequential action.
-2. The Atlasent adapter canonicalizes actor, action, target, revision and
-   intended effect and calls Atlasent evaluation.
-3. DENY stops. HOLD waits for the existing Atlasent approval flow. ALLOW
+2. The AtlaSent adapter canonicalizes actor, action, target, revision and
+   intended effect and calls AtlaSent evaluation.
+3. DENY stops. HOLD waits for the existing AtlaSent approval flow. ALLOW
    returns a bounded permit.
 4. The executor presents and consumes/verifies that permit immediately before
    the external effect.
-5. Atlasent independently establishes the effect where a provider profile
+5. AtlaSent independently establishes the effect where a provider profile
    exists.
 
 OpenShell's default-deny network policy remains a separate enforcement
-boundary. Atlasent authorization never means "give the sandbox general
+boundary. AtlaSent authorization never means "give the sandbox general
 network access."
 
 ## Providers v2
 
 `atlasent-provider.yaml` is a custom OpenShell provider profile. It keeps the
-Atlasent API key in OpenShell's provider credential boundary and grants only
-the Atlasent authority endpoints to the adapter binary.
+AtlaSent API key in OpenShell's provider credential boundary and grants only
+the AtlaSent authority endpoints to the adapter binary.
 
 This is intentionally not a profile for Salesforce, AWS, GitHub or another
 effect provider. Those credentials remain separately scoped. The agent should
-not receive an Atlasent credential value directly.
+not receive an AtlaSent credential value directly.
 
 ## Adapter contract (`src/openshell.ts`, 2026-10-05)
 

@@ -591,7 +591,7 @@ function triggerNames(on: YValue | undefined): string[] {
 // ---------------------------------------------------------------------------
 
 export const SIGN_UP_URL = "https://console.atlasent.io/auth/sign-up?utm_source=evidence-gap&utm_medium=mcp";
-const ACTION_DOCS = "https://github.com/Atlasent/atlasent-action#quick-start";
+const ACTION_DOCS = "https://github.com/AtlaSent/atlasent-action#quick-start";
 const GATE_ID = "atlasent_gate";
 
 /**
@@ -619,7 +619,7 @@ function gateStepYaml(action: string, id: string): string {
   return [
     "- name: AtlaSent gate",
     `  id: ${id}`,
-    "  uses: Atlasent/atlasent-action@v1",
+    "  uses: AtlaSent/atlasent-action@v1",
     "  env:",
     "    ATLASENT_API_KEY: ${{ secrets.ATLASENT_API_KEY }}",
     "    ATLASENT_BASE_URL: ${{ secrets.ATLASENT_BASE_URL }}",

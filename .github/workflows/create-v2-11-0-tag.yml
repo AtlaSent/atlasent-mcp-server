@@ -39,7 +39,7 @@ jobs:
       # just the tag-creation step of it.
       - name: AtlaSent tag gate
         id: atlasent_gate
-        uses: Atlasent/atlasent-action@v1
+        uses: AtlaSent/atlasent-action@v1
         env:
           ATLASENT_API_KEY: ${{ secrets.ATLASENT_API_KEY }}
         with:

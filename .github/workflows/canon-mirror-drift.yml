@@ -4,7 +4,7 @@ name: canon-mirror-drift
 #
 # src/canonCatalog.ts and src/canonGraph.ts are GENERATED-DERIVED read-only
 # mirrors of the Action Canon (the source of truth is
-# Atlasent/atlasent: contract/canonical-actions/ACT-*.yaml ->
+# AtlaSent/atlasent: contract/canonical-actions/ACT-*.yaml ->
 # generated/{act-spec-index,authorization-graph}.json, re-emitted here by
 # scripts/sync-canon.mjs). Before this guard, the mirrors carried NO CI gate,
 # so they could silently lag the Canon (they did: 29 vs 46 records, closed by
@@ -19,7 +19,7 @@ name: canon-mirror-drift
 #     not fail the build on something it cannot verify).
 #   - Provision a read-only cross-repo credential as the CANON_SOURCES_READ_TOKEN
 #     secret (a GitHub App token or fine-grained PAT with read-only `contents` on
-#     Atlasent/atlasent) to make the guard ENFORCING.
+#     AtlaSent/atlasent) to make the guard ENFORCING.
 #   - Set the repo/org variable CANON_MIRROR_DRIFT_STRICT=true (or dispatch with
 #     strict=true) to turn an unreachable source into a hard failure — use only
 #     where the token is guaranteed present.
@@ -65,7 +65,7 @@ jobs:
         continue-on-error: true
         uses: actions/checkout@v7
         with:
-          repository: Atlasent/atlasent
+          repository: AtlaSent/atlasent
           path: __canon_src
           persist-credentials: false
           token: ${{ secrets.CANON_SOURCES_READ_TOKEN || github.token }}
@@ -75,7 +75,7 @@ jobs:
           set -euo pipefail
 
           if [ "${{ steps.canon_src.outcome }}" != "success" ]; then
-            echo "::warning::Could not check out Atlasent/atlasent (the Canon source of truth)."
+            echo "::warning::Could not check out AtlaSent/atlasent (the Canon source of truth)."
             echo "The default CI token is scoped to this repo; provision the CANON_SOURCES_READ_TOKEN secret"
             echo "(read-only 'contents' on atlasent) to make this guard enforcing."
             if [ "${STRICT}" = "true" ]; then

@@ -6,7 +6,7 @@
 # AFTER npm publish), or manually via workflow_dispatch for the first
 # publication / a re-publish.
 #
-# Auth: GitHub OIDC — the io.github.Atlasent/* namespace is
+# Auth: GitHub OIDC — the io.github.AtlaSent/* namespace is
 # owned by this org, so `mcp-publisher login github-oidc` needs no stored
 # secret. Fail-closed: a version mismatch between server.json and
 # package.json aborts before any publish.
@@ -47,7 +47,7 @@ jobs:
       # public registry), just a second registry.
       - name: AtlaSent publish gate
         id: atlasent_gate
-        uses: Atlasent/atlasent-action@v1
+        uses: AtlaSent/atlasent-action@v1
         env:
           ATLASENT_API_KEY: ${{ secrets.ATLASENT_API_KEY }}
         with:

@@ -1,6 +1,6 @@
 {
   "_comment": "Claude Desktop MCP server configuration for @atlasent/mcp-server.",
-  "_docs": "https://github.com/Atlasent/atlasent-mcp-server#readme",
+  "_docs": "https://github.com/AtlaSent/atlasent-mcp-server#readme",
 
   "mcpServers": {
     "atlasent-stdio": {

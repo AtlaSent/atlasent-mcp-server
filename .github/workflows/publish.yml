@@ -55,7 +55,7 @@ jobs:
       #      directly at the runtime project's Supabase URL, matching every
       #      other gate wired this audit.
       - name: AtlaSent release gate
-        uses: Atlasent/atlasent-action@v1
+        uses: AtlaSent/atlasent-action@v1
         env:
           ATLASENT_API_KEY: ${{ secrets.ATLASENT_API_KEY }}
         with:
@@ -87,7 +87,7 @@ jobs:
       # npm trusted publishing (OIDC): npm authenticates this exact workflow
       # via the job's id-token, so there is no long-lived NPM_TOKEN to expire,
       # leak, or be mis-pasted. Configured on npmjs.com -> @atlasent/mcp-server
-      # -> Settings -> Trusted Publisher (repo Atlasent/atlasent-mcp-server,
+      # -> Settings -> Trusted Publisher (repo AtlaSent/atlasent-mcp-server,
       # workflow publish.yml, environment npm). Requires npm >= 11.5.1; the
       # Node 22 runner ships npm 10.x, hence the upgrade. The repo is public,
       # so provenance (publishConfig.provenance) is attached as well, alongside
