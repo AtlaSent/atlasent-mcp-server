@@ -40,6 +40,7 @@ src/
   evidenceGap.ts                atlasent_evidence_gap_report: offline scan of CI workflow YAML for deploy/publish/migrate/apply steps with no (or a skippable) AtlaSent gate. Own block-YAML subset parser (no new dep); unparseable files go to parse_errors, never dropped. Tests in evidenceGap.test.ts carry mutants (continue-on-error, conditional gate, gate-after-step, evaluate-only, commented-out command) that must each change the status
   streamableHttp.ts             Streamable HTTP transport (MCP HTTP mode)
   governedAction.ts             AI Action Protection executor (CROSS-064): action digest, sealed-hash recompute, verify-at-boundary -> execute once -> effect -> ai_action_proof.v1, and the execution-boundary CircuitBreaker (can only stop, never authorize; no MCP tool resets it)
+  openshell.ts                  NVIDIA OpenShell adapter contract: binds to the durable sandbox_id (names/workspace are labels only), refuses OpenShell Policy Advisor approvals as AtlaSent approvals, re-evaluates across an OpenShell policy-generation change, startup probe. Live probe: npm run test:openshell-acceptance. Guide: docs/OPENSHELL_AUTHORITY_ADAPTER.md
   githubFileAdapter.ts          Reference execution adapter: one real GitHub contents write, effect re-read at commit and branch head
   aiActionTools.ts              atlasent_governed_file_change, registered ONLY when ATLASENT_AI_ACTION_GITHUB_{REPO,BRANCH,TOKEN} are all set. Guide: docs/AI_ACTION_PROTECTION.md
   index.ts                      CLI entry point; connects stdio transport

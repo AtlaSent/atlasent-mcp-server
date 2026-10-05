@@ -895,6 +895,7 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
   if (ctx.tool_name !== undefined) context.tool_name = ctx.tool_name;
   if (ctx.tool !== undefined) context.tool = ctx.tool;
   if (ctx.expected_effect !== undefined) context.expected_effect = ctx.expected_effect;
+  if (ctx.workload !== undefined) context.workload = ctx.workload;
   // agent.*: admitted sealed provenance binds the permit to the SEALED action
   // hash, which covers `context` and `resource_id` but not the top-level
   // execution_payload_hash. Without the digest inside the sealed context, a

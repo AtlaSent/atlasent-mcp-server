@@ -57,6 +57,22 @@ export type ActionContext = {
    * authority; the runtime uses it for idempotency.
    */
   request_id?: string;
+  /**
+   * The workload the request comes from, when the host reports one. For an
+   * NVIDIA OpenShell sandbox, `id` is the durable `sandbox_id`; `labels`
+   * (sandbox_name, workspace) are display/evidence context only, may be reused,
+   * and are never authority. Sent inside the evaluated context so the decision
+   * record (and, for agent.* actions, the sealed action hash) names the exact
+   * sandbox. See src/openshell.ts and docs/OPENSHELL_AUTHORITY_ADAPTER.md.
+   */
+  workload?: WorkloadBinding;
+};
+
+export type WorkloadBinding = {
+  kind: "openshell_sandbox";
+  /** Durable identity. The only field a decision or binding may key on. */
+  id: string;
+  labels?: { sandbox_name?: string; workspace?: string };
 };
 
 /**
