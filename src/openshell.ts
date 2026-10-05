@@ -86,7 +86,9 @@ export function parseSandboxContext(raw: unknown): SandboxParse {
     return { ok: false, reason: "OpenShell sandbox_id malformed (whitespace, control characters or over 256 chars)." };
   }
   const out: OpenShellSandboxContext & { sandbox_id: string } = { sandbox_id: id };
-  const name = cleanLabel(r.sandbox_name);
+  // OpenShell's middleware RequestContext (proto/supervisor_middleware.proto)
+  // calls the display name `sandbox`; `sandbox_name` is accepted too.
+  const name = cleanLabel(r.sandbox) ?? cleanLabel(r.sandbox_name);
   if (name !== undefined) out.sandbox_name = name;
   const ws = cleanLabel(r.workspace);
   if (ws !== undefined) out.workspace = ws;
@@ -422,10 +424,17 @@ function errMessage(err: unknown): string {
  * is "unverified", not "ready": readiness comes from a recorded pass of the
  * live startup probe below, never from a version string.
  */
+const ISSUE_3994 =
+  "NVIDIA/OpenShell#3994: the first settings poll after startup can report a spurious provider-env change, " +
+  "advance the policy generation and drop in-flight requests about 10s after startup. Fixed on main by " +
+  "NVIDIA/OpenShell#4122 (ec49209, 2026-10-02), after this release was cut.";
+
 export const OPENSHELL_KNOWN_AFFECTED: Readonly<Record<string, string>> = {
-  "0.1.2":
-    "NVIDIA/OpenShell#3994: the first settings poll after startup can report a spurious provider-env change, " +
-    "advance the policy generation and drop in-flight requests about 10s after startup.",
+  "0.1.2": ISSUE_3994,
+  // Prereleases cut before ec49209 (pre.3 is 6e865df3, 2026-10-02 11:51Z).
+  "0.1.3-pre.1": ISSUE_3994,
+  "0.1.3-pre.2": ISSUE_3994,
+  "0.1.3-pre.3": ISSUE_3994,
 };
 
 export function assessOpenShellVersion(

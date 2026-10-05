@@ -41,6 +41,7 @@ src/
   streamableHttp.ts             Streamable HTTP transport (MCP HTTP mode)
   governedAction.ts             AI Action Protection executor (CROSS-064): action digest, sealed-hash recompute, verify-at-boundary -> execute once -> effect -> ai_action_proof.v1, and the execution-boundary CircuitBreaker (can only stop, never authorize; no MCP tool resets it)
   openshell.ts                  NVIDIA OpenShell adapter contract: binds to the durable sandbox_id (names/workspace are labels only), refuses OpenShell Policy Advisor approvals as AtlaSent approvals, re-evaluates across an OpenShell policy-generation change, startup probe. Live probe: npm run test:openshell-acceptance. Guide: docs/OPENSHELL_AUTHORITY_ADAPTER.md
+  openshellRun.ts / openshellCli.ts  `atlasent-openshell run ... -- <cmd>`: evaluate -> HOLD wait -> verify -> execute once in one process; a signal/timeout after verify is E2 (local breaker + /v1-agent-circuit-trips). Sandbox context from ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE or OPENSHELL_SANDBOX_* env, which OpenShell must inject
   githubFileAdapter.ts          Reference execution adapter: one real GitHub contents write, effect re-read at commit and branch head
   aiActionTools.ts              atlasent_governed_file_change, registered ONLY when ATLASENT_AI_ACTION_GITHUB_{REPO,BRANCH,TOKEN} are all set. Guide: docs/AI_ACTION_PROTECTION.md
   index.ts                      CLI entry point; connects stdio transport
