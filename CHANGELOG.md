@@ -15,7 +15,17 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 Nothing yet.
 
-## [2.17.0] - 2026-10-05
+## [2.17.1] - 2026-10-05
+
+### Fixed
+
+- Packaging only: the repository URL in `package.json`, `server.json` and the
+  MCPB manifest now uses the GitHub organization's current casing
+  (`AtlaSent`). npm checks it against the build's provenance, so 2.17.0 was
+  refused at upload and never reached npm. 2.17.1 ships the same code as
+  2.17.0.
+
+## [2.17.0] - 2026-10-05 (not published to npm)
 
 ### Added
 
@@ -365,7 +375,8 @@ stable and will not change without a major version bump.
   call until you write a rule, and records metadata-only activity evidence.
   No account, no network, no dependencies.
 
-[Unreleased]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.17.0...HEAD
+[Unreleased]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.17.1...HEAD
+[2.17.1]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.17.0...v2.17.1
 [2.17.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.14.0...v2.15.0

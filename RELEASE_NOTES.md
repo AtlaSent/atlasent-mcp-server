@@ -1,6 +1,12 @@
 # Release Notes
 
-## v2.17.0 — 2026-10-05
+## v2.17.1 — 2026-10-05
+
+Same code as v2.17.0, which npm refused at upload because the repository URL
+in `package.json` still used the GitHub organization's old casing. The notes
+for v2.17.0 below describe what this release contains.
+
+## v2.17.0 — 2026-10-05 (not published to npm)
 
 ### NVIDIA OpenShell adapter (experimental)
 
