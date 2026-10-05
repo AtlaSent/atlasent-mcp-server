@@ -13,8 +13,45 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [2.17.0] - 2026-10-05
+
 ### Added
 
+- NVIDIA OpenShell adapter (experimental). A new `atlasent-openshell`
+  executable runs one command inside an OpenShell sandbox only after AtlaSent
+  authorizes it: `atlasent-openshell run --envelope <file|-> -- <command>`
+  evaluates, optionally waits on an approval hold, verifies the permit, then
+  runs the command exactly once. Authority binds to the sandbox's durable
+  `sandbox_id`; sandbox and workspace names are display labels only. An
+  OpenShell Policy Advisor approval never satisfies an AtlaSent hold, and a
+  change in OpenShell's policy generation means a fresh evaluation. A command
+  killed or timed out after its permit was spent trips the circuit breaker and
+  is reported to the runtime. Guide: `docs/OPENSHELL_AUTHORITY_ADAPTER.md`.
+  OpenShell 0.1.2 and 0.1.3-pre.1 to pre.3 are flagged as affected by an
+  upstream startup bug (NVIDIA/OpenShell#3994); no OpenShell release yet
+  contains the fix.
+- Verify now presents the workload a permit was evaluated for
+  (`workload: { kind, id }`). The runtime requires it for permits bound to an
+  OpenShell sandbox.
+- `atlasent_evidence_gap_report`, a read-only tool that reads your CI workflow
+  files and lists every deploy, publish, migration and infrastructure-apply
+  step with whether an AtlaSent gate stands in front of it (`bound`, `gated`,
+  `gated_upstream`, `weak` or `ungoverned`), plus the exact fix for each gap.
+  Runs offline in local mode.
+- MCP prompts: `gate-action`, `explain-decision` and `find-action-type` walk an
+  agent through lookup, evaluate, allow-only and verify. They are guidance, not
+  enforcement.
+- AI Action Protection (opt-in, CROSS-064): `atlasent_governed_file_change`
+  makes one GitHub contents write only on a permit verified at the boundary for
+  exactly that change, then re-reads the effect. A circuit breaker stops the
+  agent when an outcome is unknown or an effect cannot be established, and the
+  trip is recorded in the runtime. Registered only when
+  `ATLASENT_AI_ACTION_GITHUB_{REPO,BRANCH,TOKEN}` are all set. Guide:
+  `docs/AI_ACTION_PROTECTION.md`.
+- An MCPB bundle (`npm run bundle`) for Claude Desktop and Smithery stdio
+  installs. Blank `ATLASENT_*` values from form-filled hosts now count as unset.
 - Every call to the AtlaSent runtime now pins the edge-function region with an
   `x-region` header. The hosted runtime defaults to `us-west-1`, the region of
   its database. Supabase otherwise runs the function nearest the caller; on
@@ -47,6 +84,13 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ### Fixed
 
+- `atlasent_await_approval` could never claim an approved action. It polled
+  and claimed at `/v1/approvals/{id}`, which no deployed host serves (404).
+  It now uses the `v1-approvals` function under `/functions/v1`.
+- `evaluate`, `verify_permit` and `atlasent_evaluate` now check `action_type`
+  against the runtime's own pattern (lowercase dot-notation). The old pattern
+  let through `/`, uppercase and undotted values the runtime then rejected,
+  and `atlasent_evaluate` had no check at all.
 - `atlasent_evaluate_many` and `atlasent_evaluate_stream` now check each item's
   `action` against the runtime's action-type pattern (lowercase dot-notation,
   for example `production.deploy`), the same check `evaluate`,
@@ -321,7 +365,8 @@ stable and will not change without a major version bump.
   call until you write a rule, and records metadata-only activity evidence.
   No account, no network, no dependencies.
 
-[Unreleased]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.16.0...HEAD
+[Unreleased]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.17.0...HEAD
+[2.17.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.13.0...v2.14.0
