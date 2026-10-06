@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "atlasent-mcp-server",
   "display_name": "AtlaSent",
-  "version": "2.17.1",
+  "version": "2.17.2",
   "description": "AtlaSent for AI agents: with an API key, consequential actions wait for approval and get a signed record. With no key: an unsigned local demo.",
   "long_description": "Before an agent's tool call changes a real system (a production deploy, a data export, an access grant), the agent asks AtlaSent first. With an API key, risky actions wait for a person in your organization to approve them, and every decision gets a signed record, including who approved it when the decision relied on an approval. With no key the server runs a local demo: an in-process rules engine with unsigned permits that protects nothing. Also includes a read-only evidence-gap report that lists CI deploy steps with no approval gate in front of them. Source and docs: https://github.com/AtlaSent/atlasent-mcp-server",
   "author": {

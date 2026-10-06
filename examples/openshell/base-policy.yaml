@@ -1,7 +1,7 @@
 # Example OpenShell base policy for an agent whose consequential writes are
-# mediated by Atlasent. OpenShell should remain default-deny for direct write
-# destinations; only the Atlasent adapter gets authority API access through the
-# attached Atlasent provider profile.
+# mediated by AtlaSent. OpenShell should remain default-deny for direct write
+# destinations; only the AtlaSent adapter gets authority API access through the
+# attached AtlaSent provider profile.
 filesystem:
   read_only:
     - /usr

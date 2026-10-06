@@ -20,10 +20,10 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Atlasent/atlasent-mcp-server.git",
+    "url": "git+https://github.com/AtlaSent/atlasent-mcp-server.git",
     "directory": "packages/mcp-gate"
   },
-  "homepage": "https://github.com/Atlasent/atlasent-mcp-server/tree/main/packages/mcp-gate#readme",
-  "bugs": { "url": "https://github.com/Atlasent/atlasent-mcp-server/issues" },
+  "homepage": "https://github.com/AtlaSent/atlasent-mcp-server/tree/main/packages/mcp-gate#readme",
+  "bugs": { "url": "https://github.com/AtlaSent/atlasent-mcp-server/issues" },
   "publishConfig": { "access": "public" }
 }

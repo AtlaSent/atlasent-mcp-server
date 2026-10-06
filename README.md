@@ -5,7 +5,7 @@ MCP server that enforces authorize-before-execute for any MCP-compatible AI agen
 It is the developer entry point to AtlaSent **AI Action Protection**, which Enterprise teams adopt through a [design partner program](https://www.atlasent.io/ai-actions).
 
 [![npm version](https://img.shields.io/npm/v/@atlasent/mcp-server.svg)](https://www.npmjs.com/package/@atlasent/mcp-server)
-[![CI](https://github.com/Atlasent/atlasent-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/Atlasent/atlasent-mcp-server/actions/workflows/ci.yml)
+[![CI](https://github.com/AtlaSent/atlasent-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/AtlaSent/atlasent-mcp-server/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![Glama MCP server](https://glama.ai/mcp/servers/Atlasent/atlasent-mcp-server/badge)](https://glama.ai/mcp/servers/Atlasent/atlasent-mcp-server)
 
@@ -107,7 +107,7 @@ Local permits are **unsigned**, so local mode is for development, CI, and trying
 ### Run from source
 
 ```bash
-git clone https://github.com/Atlasent/atlasent-mcp-server.git
+git clone https://github.com/AtlaSent/atlasent-mcp-server.git
 cd atlasent-mcp-server
 npm install
 npm run build
@@ -130,7 +130,7 @@ deletes, `git push --force`, production deploys. With nobody to ask, they are re
 Everything else runs as normal. Local, no account.
 
 ```text
-/plugin marketplace add Atlasent/atlasent-mcp-server
+/plugin marketplace add AtlaSent/atlasent-mcp-server
 /plugin install atlasent-guard@atlasent
 ```
 
@@ -182,7 +182,7 @@ agent requests deploy_service
   → simulated deployment effect
 ```
 
-The internal outer gate uses the Canon-backed `agent.tool.invoke` Action (`CANON-000026` / `ACT-0029`) — the same public identifier documented throughout the AtlaSent ecosystem as the canonical generic AI-agent tool invocation. It previously used a legacy, uncatalogued identity, `model.agent.execute_tool`, which had no corresponding `action_classes` provisioning path in the runtime (no seed/migration anywhere creates a row with that slug) — so against a real, unmodified Atlasent org the outer gate could only ever return `NO_ACTION_CLASS` deny, regardless of the tool-specific inner gate's own decision. Migrating the outer gate onto `agent.tool.invoke` gives it the runtime's real "AI Agent Safeguard" provisioning path, which already exists for exactly this purpose. See Atlasent/atlasent-mcp-server#121 for the full investigation and decision record.
+The internal outer gate uses the Canon-backed `agent.tool.invoke` Action (`CANON-000026` / `ACT-0029`) — the same public identifier documented throughout the AtlaSent ecosystem as the canonical generic AI-agent tool invocation. It previously used a legacy, uncatalogued identity, `model.agent.execute_tool`, which had no corresponding `action_classes` provisioning path in the runtime (no seed/migration anywhere creates a row with that slug) — so against a real, unmodified Atlasent org the outer gate could only ever return `NO_ACTION_CLASS` deny, regardless of the tool-specific inner gate's own decision. Migrating the outer gate onto `agent.tool.invoke` gives it the runtime's real "AI Agent Safeguard" provisioning path, which already exists for exactly this purpose. See AtlaSent/atlasent-mcp-server#121 for the full investigation and decision record.
 
 If either Decision is non-allow **or either Permit fails Verification**, no deployment result is produced.
 
@@ -677,10 +677,10 @@ Prefer a ready-made environment? Open the repo in a [dev container](./.devcontai
 
 ## Community
 
-- **Questions and ideas:** [GitHub Discussions](https://github.com/Atlasent/atlasent-mcp-server/discussions)
-- **Bugs and small features:** [open an issue](https://github.com/Atlasent/atlasent-mcp-server/issues/new/choose)
-- **Bigger changes** (new tools, wire-shape or fail-closed behavior): start with an [RFC issue](https://github.com/Atlasent/atlasent-mcp-server/issues/new?template=rfc.md)
-- **Want to contribute?** Read [CONTRIBUTING.md](./CONTRIBUTING.md) and look for [`good first issue`](https://github.com/Atlasent/atlasent-mcp-server/labels/good%20first%20issue)
+- **Questions and ideas:** [GitHub Discussions](https://github.com/AtlaSent/atlasent-mcp-server/discussions)
+- **Bugs and small features:** [open an issue](https://github.com/AtlaSent/atlasent-mcp-server/issues/new/choose)
+- **Bigger changes** (new tools, wire-shape or fail-closed behavior): start with an [RFC issue](https://github.com/AtlaSent/atlasent-mcp-server/issues/new?template=rfc.md)
+- **Want to contribute?** Read [CONTRIBUTING.md](./CONTRIBUTING.md) and look for [`good first issue`](https://github.com/AtlaSent/atlasent-mcp-server/labels/good%20first%20issue)
 - **Security reports:** email security@atlasent.io. See [SECURITY.md](./SECURITY.md). Please don't open a public issue.
 
 Everyone taking part is expected to follow the [Code of Conduct](./CODE_OF_CONDUCT.md).
@@ -693,10 +693,10 @@ Security-sensitive integrations must place the actual side effect **after** the 
 
 ## Related public components
 
-- [`atlasent-sdk`](https://github.com/Atlasent/atlasent-sdk) — language SDKs
-- [`atlasent-action`](https://github.com/Atlasent/atlasent-action) — GitHub Actions integration
-- [`atlasent-verify`](https://github.com/Atlasent/atlasent-verify) — offline evidence verifier
-- [`atlasent-keys`](https://github.com/Atlasent/atlasent-keys) — public verification material
+- [`atlasent-sdk`](https://github.com/AtlaSent/atlasent-sdk) — language SDKs
+- [`atlasent-action`](https://github.com/AtlaSent/atlasent-action) — GitHub Actions integration
+- [`atlasent-verify`](https://github.com/AtlaSent/atlasent-verify) — offline evidence verifier
+- [`atlasent-keys`](https://github.com/AtlaSent/atlasent-keys) — public verification material
 
 ## License
 

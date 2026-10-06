@@ -481,8 +481,12 @@ pre-existing templates still match, each by name.
 ## MCP Registry publishing
 
 `server.json` (repo root) is the official MCP Registry manifest
-(`io.github.Atlasent/mcp-server`; the `io.github.<owner>` prefix must match the
-GitHub org, so it changed with the move to `Atlasent`). After every successful npm
+(`io.github.AtlaSent/mcp-server` since 2.17.2; the `io.github.<owner>` prefix must
+match the GitHub org's casing exactly, because the registry compares
+case-sensitively (modelcontextprotocol/registry#689). The old
+`io.github.Atlasent/mcp-server` entry is frozen at 2.16.0. `package.json`
+`mcpName` must equal it, which `distribution.test.ts` pins. npm provenance also
+compares `repository.url` case-sensitively: keep `github.com/AtlaSent/...`). After every successful npm
 publish, `publish-mcp-registry.yml` publishes it to
 registry.modelcontextprotocol.io via `mcp-publisher` with GitHub OIDC (no
 stored secret). **Release checklist addition: bump BOTH version fields in

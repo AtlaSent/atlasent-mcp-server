@@ -37,7 +37,7 @@ jobs:
     steps:
       - name: AtlaSent gate
         id: gate
-        uses: Atlasent/atlasent-action@v1
+        uses: AtlaSent/atlasent-action@v1
         with:
           action: production.deploy
       - name: Apply
@@ -89,7 +89,7 @@ describe("detectStep", () => {
     [{ run: "terraform plan" }, null],
     [{ run: "npm test" }, null],
     [{ run: "# npm publish" }, null],
-    [{ uses: "Atlasent/atlasent-action@v1" }, null],
+    [{ uses: "AtlaSent/atlasent-action@v1" }, null],
   ];
   for (const [step, want] of cases) {
     it(`${JSON.stringify(step)} -> ${want}`, () => {
@@ -145,7 +145,7 @@ describe("analyzeWorkflows", () => {
 
   it("marks a gate with continue-on-error as weak", () => {
     const r = analyzeWorkflows(
-      wf(BOUND.replace("        uses: Atlasent/atlasent-action@v1\n", "        uses: Atlasent/atlasent-action@v1\n        continue-on-error: true\n")),
+      wf(BOUND.replace("        uses: AtlaSent/atlasent-action@v1\n", "        uses: AtlaSent/atlasent-action@v1\n        continue-on-error: true\n")),
     );
     assert.equal(r.findings[0].status, "weak");
     assert.match(r.findings[0].reason, /continue-on-error/);
@@ -171,7 +171,7 @@ jobs:
   d:
     steps:
       - run: npm publish
-      - uses: Atlasent/atlasent-action@v1
+      - uses: AtlaSent/atlasent-action@v1
 `),
     );
     assert.equal(r.findings[0].status, "ungoverned");
@@ -214,7 +214,7 @@ jobs:
 jobs:
   gate:
     steps:
-      - uses: Atlasent/atlasent-action@v1
+      - uses: AtlaSent/atlasent-action@v1
   build:
     needs: gate
     steps:
@@ -239,7 +239,7 @@ jobs:
   gate:
     steps:
       - if: \${{ !inputs.skip_gate }}
-        uses: Atlasent/atlasent-action@v1
+        uses: AtlaSent/atlasent-action@v1
   ship:
     needs: gate
     steps:
@@ -299,7 +299,7 @@ jobs:
   d:
     steps:
       - id: gate
-        uses: Atlasent/atlasent-action@v1${gateExtra}
+        uses: AtlaSent/atlasent-action@v1${gateExtra}
       - if: ${stepIf}
         run: npm publish
 `;
@@ -348,7 +348,7 @@ jobs:
 jobs:
   gate:${gateJobExtra}
     steps:
-      - uses: Atlasent/atlasent-action@v1
+      - uses: AtlaSent/atlasent-action@v1
   ship:
     needs: gate${jobExtra}
     steps:
@@ -387,7 +387,7 @@ jobs:
     assert.equal(f.status, "ungoverned");
     assert.ok(f.fix, "a gap carries a fix");
     assert.equal(f.fix!.action_type, "package.release");
-    assert.match(f.fix!.gate_step!, /uses: Atlasent\/atlasent-action@v1/);
+    assert.match(f.fix!.gate_step!, /uses: AtlaSent\/atlasent-action@v1/);
     assert.equal(f.fix!.bind_if, "if: steps.atlasent_gate.outputs.verified == 'true'");
     const fixed = applyFix(src, f.line, f.fix!);
     const again = analyzeWorkflows(wf(fixed));
@@ -422,7 +422,7 @@ jobs:
     steps:
       - id: gate
         if: \${{ !inputs.skip_gate }}
-        uses: Atlasent/atlasent-action@v1
+        uses: AtlaSent/atlasent-action@v1
       - run: npm publish
 `;
     const f = analyzeWorkflows(wf(src)).findings[0];
@@ -446,7 +446,7 @@ jobs:
     assert.match(gap.next_step, /ATLASENT_API_KEY/);
     assert.equal(gap.setup!.sign_up_url, "https://console.atlasent.io/auth/sign-up?utm_source=evidence-gap&utm_medium=mcp");
     const clean = analyzeWorkflows(
-      wf(`jobs:\n  d:\n    steps:\n      - id: g\n        uses: Atlasent/atlasent-action@v1\n      - if: steps.g.outputs.verified == 'true'\n        run: npm publish\n`),
+      wf(`jobs:\n  d:\n    steps:\n      - id: g\n        uses: AtlaSent/atlasent-action@v1\n      - if: steps.g.outputs.verified == 'true'\n        run: npm publish\n`),
     );
     assert.equal(clean.setup, undefined);
     assert.doesNotMatch(clean.next_step, /sign-up/);
@@ -493,7 +493,7 @@ jobs:
   gate:
     if: github.event_name == 'push'
     steps:
-      - uses: Atlasent/atlasent-action@v1
+      - uses: AtlaSent/atlasent-action@v1
   ship:
     needs: gate
     steps:

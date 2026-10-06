@@ -1,12 +1,12 @@
-# Atlasent provider profile for NVIDIA OpenShell Providers v2.
+# AtlaSent provider profile for NVIDIA OpenShell Providers v2.
 # Import with: openshell provider profile import examples/openshell/atlasent-provider.yaml
 # Then create an instance and attach it to the sandbox.
 #
-# Atlasent remains the organizational authority service. OpenShell remains the
+# AtlaSent remains the organizational authority service. OpenShell remains the
 # sandbox/network/credential enforcement layer. This profile grants only the
-# Atlasent authority API surface to the Atlasent adapter binary.
+# AtlaSent authority API surface to the AtlaSent adapter binary.
 id: atlasent
-display_name: Atlasent Organizational Authority
+display_name: AtlaSent Organizational Authority
 category: security
 credentials:
   - name: api_key

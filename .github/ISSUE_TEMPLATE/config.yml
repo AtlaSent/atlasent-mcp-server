@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Question or idea
-    url: https://github.com/Atlasent/atlasent-mcp-server/discussions
+    url: https://github.com/AtlaSent/atlasent-mcp-server/discussions
     about: Ask a question, share how you're using the server, or float an idea before filing an issue.
   - name: Security vulnerability
-    url: https://github.com/Atlasent/atlasent-mcp-server/blob/main/SECURITY.md
+    url: https://github.com/AtlaSent/atlasent-mcp-server/blob/main/SECURITY.md
     about: Please report security issues privately to security@atlasent.io. Don't open a public issue.

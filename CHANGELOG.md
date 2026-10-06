@@ -15,6 +15,18 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 Nothing yet.
 
+## [2.17.2] - 2026-10-05
+
+### Changed
+
+- The official MCP Registry name is now `io.github.AtlaSent/mcp-server`
+  (`server.json` `name` and `package.json` `mcpName`), matching the GitHub
+  organization's casing. The registry only lets an organization publish under
+  its exact casing, so 2.17.1 was refused under the old
+  `io.github.Atlasent/mcp-server`; that entry stays at 2.16.0 and is no longer
+  updated. Repository links across the package use `AtlaSent`. Same code as
+  2.17.1.
+
 ## [2.17.1] - 2026-10-05
 
 ### Fixed
@@ -375,14 +387,15 @@ stable and will not change without a major version bump.
   call until you write a rule, and records metadata-only activity evidence.
   No account, no network, no dependencies.
 
-[Unreleased]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.17.1...HEAD
-[2.17.1]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.17.0...v2.17.1
-[2.17.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.16.0...v2.17.0
-[2.16.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.15.0...v2.16.0
-[2.15.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.14.0...v2.15.0
-[2.14.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.13.0...v2.14.0
-[2.13.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.12.2...v2.13.0
-[2.12.2]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.12.1...v2.12.2
-[2.12.1]: https://github.com/Atlasent/atlasent-mcp-server/compare/v2.11.0...v2.12.1
-[2.11.0]: https://github.com/Atlasent/atlasent-mcp-server/compare/v1.0.0...v2.11.0
-[1.0.0]: https://github.com/Atlasent/atlasent-mcp-server/releases/tag/v1.0.0
+[Unreleased]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.17.2...HEAD
+[2.17.2]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.17.1...v2.17.2
+[2.17.1]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.17.0...v2.17.1
+[2.17.0]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.16.0...v2.17.0
+[2.16.0]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.15.0...v2.16.0
+[2.15.0]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.14.0...v2.15.0
+[2.14.0]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.13.0...v2.14.0
+[2.13.0]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.12.2...v2.13.0
+[2.12.2]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.12.1...v2.12.2
+[2.12.1]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.11.0...v2.12.1
+[2.11.0]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v1.0.0...v2.11.0
+[1.0.0]: https://github.com/AtlaSent/atlasent-mcp-server/releases/tag/v1.0.0

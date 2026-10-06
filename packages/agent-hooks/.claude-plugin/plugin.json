@@ -6,8 +6,8 @@
     "name": "AtlaSent",
     "url": "https://www.atlasent.io"
   },
-  "homepage": "https://github.com/Atlasent/atlasent-mcp-server/tree/main/packages/agent-hooks#readme",
-  "repository": "https://github.com/Atlasent/atlasent-mcp-server",
+  "homepage": "https://github.com/AtlaSent/atlasent-mcp-server/tree/main/packages/agent-hooks#readme",
+  "repository": "https://github.com/AtlaSent/atlasent-mcp-server",
   "license": "Apache-2.0",
   "keywords": [
     "security",

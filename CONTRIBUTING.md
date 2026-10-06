@@ -9,7 +9,7 @@ Thanks for your interest! This repo publishes [`@atlasent/mcp-server`](https://w
 Requires Node.js 18+ (CI tests 18, 20, and 22).
 
 ```bash
-git clone https://github.com/Atlasent/atlasent-mcp-server.git
+git clone https://github.com/AtlaSent/atlasent-mcp-server.git
 cd atlasent-mcp-server
 npm install
 npm run build
@@ -73,7 +73,7 @@ These keep the project trustworthy as a security component. PRs that break them 
 
 ## Finding something to work on
 
-- Issues labeled [`good first issue`](https://github.com/Atlasent/atlasent-mcp-server/labels/good%20first%20issue) or [`help wanted`](https://github.com/Atlasent/atlasent-mcp-server/labels/help%20wanted).
+- Issues labeled [`good first issue`](https://github.com/AtlaSent/atlasent-mcp-server/labels/good%20first%20issue) or [`help wanted`](https://github.com/AtlaSent/atlasent-mcp-server/labels/help%20wanted).
 - Docs, examples, and host-setup guides are always welcome and need no background in AtlaSent internals.
 - For a larger change (a new tool, a new transport, or anything that touches authorization semantics), please open an **RFC** issue first so we can agree on the design before you write code.
 

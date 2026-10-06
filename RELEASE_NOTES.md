@@ -1,5 +1,12 @@
 # Release Notes
 
+## v2.17.2 — 2026-10-05
+
+New MCP Registry name: `io.github.AtlaSent/mcp-server`, matching the GitHub
+organization's casing. The registry accepts only the organization's exact
+casing, so the old `io.github.Atlasent/mcp-server` entry stays at 2.16.0. Point
+registry links at the new name. Same code as v2.17.1.
+
 ## v2.17.1 — 2026-10-05
 
 Same code as v2.17.0, which npm refused at upload because the repository URL
@@ -336,7 +343,7 @@ First stable release of the AtlaSent MCP server. Works with Claude Desktop, Curs
 ### Local demo (no credentials)
 
 ```bash
-git clone https://github.com/Atlasent/atlasent-mcp-server
+git clone https://github.com/AtlaSent/atlasent-mcp-server
 cd atlasent-mcp-server && npm install && npm run demo
 ```
 

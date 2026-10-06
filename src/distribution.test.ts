@@ -15,6 +15,19 @@ const pkg = json("package.json");
 const KNOWN_ENV = new Set<string>(OPTIONAL_ATLASENT_ENV);
 
 describe("distribution metadata", () => {
+  it("package.json mcpName equals the server.json registry name", () => {
+    // The MCP Registry rejects a publish whose npm package names a different
+    // server (it checks the published package.json's mcpName).
+    assert.equal(json("package.json").mcpName, json("server.json").name);
+  });
+
+  it("repository URLs use the GitHub org's exact casing (npm provenance compares case-sensitively)", () => {
+    for (const f of ["package.json", "packages/mcp-gate/package.json", "packages/agent-hooks/package.json"]) {
+      const url = String(json(f).repository?.url ?? "");
+      assert.match(url, /github\.com\/AtlaSent\//, `${f}: ${url}`);
+    }
+  });
+
   it("server.json, mcpb/manifest.json and package.json agree on version and license", () => {
     const srv = json("server.json");
     const mcpb = json("mcpb/manifest.json");
