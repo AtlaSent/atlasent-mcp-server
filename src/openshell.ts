@@ -439,23 +439,41 @@ export const OPENSHELL_KNOWN_AFFECTED: Readonly<Record<string, string>> = {
 
 /**
  * Releases confirmed (by commit ancestry, not by changelog) to contain the
- * #3994 fix, NVIDIA/OpenShell#4122 (ec49209). Still "unverified": containing the
- * fix is not the same as passing the live startup probe on it.
+ * #3994 fix, NVIDIA/OpenShell#4122 (ec49209). Containing the fix is not the
+ * same as passing the live startup probe on it; see OPENSHELL_PROBE_PASSED.
  */
 export const OPENSHELL_FIX_CONFIRMED_IN: Readonly<Record<string, string>> = {
-  "0.1.3-pre.4":
-    "Contains the NVIDIA/OpenShell#3994 fix (ec49209 is an ancestor of e7fdd6be, cut 2026-10-05). " +
-    "Production readiness still requires a recorded startup-probe pass on it.",
+  "0.1.3-pre.4": "Contains the NVIDIA/OpenShell#3994 fix (ec49209 is an ancestor of e7fdd6be, cut 2026-10-05).",
 };
 
-export function assessOpenShellVersion(
-  version: string,
-): { status: "known_affected"; reason: string } | { status: "unverified"; reason: string } {
+/**
+ * Releases with a RECORDED pass of the live startup probe
+ * (`npm run test:openshell-acceptance`), with the conditions it ran under. A
+ * pass is evidence for those conditions only: another compute driver or
+ * provider shape needs its own run. The same harness failed on 0.1.2 in the
+ * same setup, so the probe is shown to detect the defect, not only to pass.
+ */
+export const OPENSHELL_PROBE_PASSED: Readonly<Record<string, string>> = {
+  "0.1.3-pre.4":
+    "Startup probe passed 3/3 on 2026-10-06 (Docker compute driver, mTLS gateway, bearer provider credential " +
+    "injected into every request, no policy-generation change). Positive control: the same harness failed on " +
+    "0.1.2 in the same setup (request dropped at 8.3s; the supervisor logged provider_env_changed with an " +
+    "unchanged revision and a stale generation). Recorded in docs/OPENSHELL_AUTHORITY_ADAPTER.md.",
+};
+
+export type OpenShellAssessment =
+  | { status: "known_affected"; reason: string }
+  | { status: "probe_passed"; reason: string }
+  | { status: "unverified"; reason: string };
+
+export function assessOpenShellVersion(version: string): OpenShellAssessment {
   const v = version.trim().replace(/^v/, "");
   const affected = OPENSHELL_KNOWN_AFFECTED[v];
   if (affected) return { status: "known_affected", reason: affected };
+  const passed = OPENSHELL_PROBE_PASSED[v];
+  if (passed) return { status: "probe_passed", reason: passed };
   const fixed = OPENSHELL_FIX_CONFIRMED_IN[v];
-  if (fixed) return { status: "unverified", reason: fixed };
+  if (fixed) return { status: "unverified", reason: `${fixed} No recorded startup-probe pass on it.` };
   return {
     status: "unverified",
     reason: "Not a known-affected release. Production readiness still requires a recorded startup-probe pass.",

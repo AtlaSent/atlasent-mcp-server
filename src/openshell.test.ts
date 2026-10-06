@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import type { ActionContext, Decision, VerifyResult } from "./decision.js";
 import type { AwaitApprovalParams, AwaitApprovalResult } from "./engine.js";
@@ -7,6 +8,9 @@ import { authorize } from "./engine.js";
 import {
   OpenShellAuthorityAdapter,
   assessOpenShellVersion,
+  OPENSHELL_FIX_CONFIRMED_IN,
+  OPENSHELL_KNOWN_AFFECTED,
+  OPENSHELL_PROBE_PASSED,
   parseActionEnvelope,
   parseSandboxContext,
   policyGenerationChanged,
@@ -284,13 +288,21 @@ describe("workload binding reaches /v1-evaluate", () => {
 });
 
 describe("OpenShell version + startup policy-generation probe", () => {
-  it("flags 0.1.2 as known-affected and never calls any version ready", () => {
+  it("flags 0.1.2 as known-affected and credits only a recorded probe pass", () => {
     assert.equal(assessOpenShellVersion("v0.1.2").status, "known_affected");
     assert.equal(assessOpenShellVersion("0.1.3-pre.3").status, "known_affected");
-    assert.equal(assessOpenShellVersion("0.1.3").status, "unverified");
+    assert.equal(assessOpenShellVersion("0.1.3").status, "unverified", "a later version string is not a pass");
     const pre4 = assessOpenShellVersion("v0.1.3-pre.4");
-    assert.equal(pre4.status, "unverified", "containing the fix is not a probe pass");
-    assert.match(pre4.reason, /Contains the NVIDIA\/OpenShell#3994 fix/);
+    assert.equal(pre4.status, "probe_passed");
+    assert.match(pre4.reason, /passed 3\/3/);
+    assert.match(pre4.reason, /Positive control/, "a pass is recorded with its positive control");
+  });
+
+  it("every probe-passed version contains the fix and is not known-affected", () => {
+    for (const v of Object.keys(OPENSHELL_PROBE_PASSED)) {
+      assert.ok(OPENSHELL_FIX_CONFIRMED_IN[v], `${v} passed the probe but is not recorded as containing the fix`);
+      assert.equal(OPENSHELL_KNOWN_AFFECTED[v], undefined, `${v} is both probe-passed and known-affected`);
+    }
   });
 
   function fakeClock() {
@@ -331,5 +343,24 @@ describe("OpenShell version + startup policy-generation probe", () => {
     assert.equal(thrown.passed, false);
     const empty = await runStartupGenerationProbe({ send: async () => ({ ok: true }), duration_ms: 0, ...fakeClock() });
     assert.equal(empty.passed, false);
+  });
+});
+
+describe("examples/openshell/atlasent-provider.yaml", () => {
+  // OpenShell 0.1.3-pre.4's `openshell profile lint` rejected the first version
+  // of this profile on both points below. Checked here so CI catches a
+  // regression without an OpenShell install.
+  const text = readFileSync(new URL("../examples/openshell/atlasent-provider.yaml", import.meta.url), "utf8");
+
+  it("uses a category OpenShell accepts", () => {
+    const category = /^category:\s*(\S+)\s*$/m.exec(text)?.[1];
+    const allowed = ["other", "inference", "agent", "source_control", "messaging", "data", "knowledge"];
+    assert.ok(category && allowed.includes(category), `category ${category} is not one of ${allowed.join(", ")}`);
+  });
+
+  it("names the header for every bearer credential", () => {
+    const creds = text.split(/^\s*- name:/m).slice(1).filter((c) => /auth_style:\s*bearer/.test(c.split(/^endpoints:/m)[0]));
+    assert.ok(creds.length > 0, "expected a bearer credential");
+    for (const c of creds) assert.match(c.split(/^endpoints:/m)[0], /header_name:\s*authorization/);
   });
 });

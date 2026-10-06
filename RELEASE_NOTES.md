@@ -1,5 +1,16 @@
 # Release Notes
 
+## v2.17.4 — 2026-10-06
+
+- The live OpenShell startup test has now run against real installs. On
+  0.1.3-pre.4 it passed 3 of 3 runs, with the AtlaSent credential injected into
+  every request and no policy-generation change. On 0.1.2 it failed: a request
+  was dropped 8.3 s after startup, which is NVIDIA/OpenShell#3994. Both runs
+  used the Docker compute driver. Other drivers need their own run.
+  `atlasent-openshell check --version 0.1.3-pre.4` now reports `probe_passed`.
+- The example AtlaSent provider profile now passes `openshell profile lint` on
+  pre.4 (`category: other`, `header_name: authorization`).
+
 ## v2.17.3 — 2026-10-06
 
 - `atlasent-openshell check --version 0.1.3-pre.4` now says that release
