@@ -54,7 +54,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
       "nist_800_53"
     ],
     "controls": [
-      "EU AI Act Art. 18 — Technical Documentation",
+      "EU AI Act Art. 11 (Annex IV) — Technical Documentation",
       "NIST SP 800-53 Rev.5 SA-12 — Supply Chain Protection"
     ],
     "domain": "production",
@@ -90,7 +90,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     ],
     "assertions": [],
     "frameworks": [
-      "21cfr_part_11",
+      "cfr_part_11",
       "gdpr",
       "hipaa"
     ],
@@ -112,7 +112,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     ],
     "assertions": [],
     "frameworks": [
-      "21cfr_part_11",
+      "cfr_part_11",
       "gdpr",
       "hipaa"
     ],
@@ -228,7 +228,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     ],
     "assertions": [],
     "frameworks": [
-      "21cfr_part_11",
+      "cfr_part_11",
       "iso27001"
     ],
     "controls": [
@@ -252,14 +252,14 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
       "identity"
     ],
     "frameworks": [
-      "21cfr_part_11",
-      "eu_ai_act",
+      "cfr_part_11",
+      "eidas",
       "sox"
     ],
     "controls": [
       "21 CFR Part 11 §11.50 — Signature Manifestations",
-      "EU AI Act Art. 26 — Qualified Electronic Signatures",
-      "SOX §302 — CEO/CFO Certification"
+      "SOX §302 — CEO/CFO Certification",
+      "eIDAS Reg. (EU) 910/2014 Art. 3(9), Art. 26 — Signatory Is a Natural Person; Advanced Electronic Signatures"
     ],
     "domain": "identity",
     "pattern": "human-only"
@@ -378,7 +378,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
       "regulatory"
     ],
     "frameworks": [
-      "21cfr_part_11",
+      "cfr_part_11",
       "eu_ai_act",
       "hipaa",
       "sox"
@@ -631,7 +631,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
       "nist_800_53"
     ],
     "controls": [
-      "EU AI Act Art. 14 — Human Oversight",
+      "EU AI Act Art. 14(4)(d)-(e) — Human Oversight (partial)",
       "NIST SP 800-53 Rev.5 AC-3 — Access Enforcement"
     ],
     "domain": "agent",
@@ -1294,6 +1294,58 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
       "PCI DSS v4.0 Req. 7 — Restrict Access to System Components"
     ],
     "domain": "infrastructure",
+    "pattern": "approval-chain"
+  },
+  "sensitive_data.access": {
+    "requires": [
+      "state-snapshot",
+      "verified-actor"
+    ],
+    "produces": [
+      "audit-chain",
+      "permit"
+    ],
+    "assertions": [
+      "identity",
+      "sensitivity"
+    ],
+    "frameworks": [
+      "gdpr",
+      "hipaa",
+      "nist_800_53"
+    ],
+    "controls": [
+      "GDPR Art. 5(1)(b)-(c) — Purpose Limitation and Data Minimisation",
+      "HIPAA Security Rule §164.312(a)(1) — Access Control",
+      "NIST SP 800-53 Rev.5 AC-3 — Access Enforcement"
+    ],
+    "domain": "data",
+    "pattern": "role-only"
+  },
+  "submission.submit": {
+    "requires": [
+      "approval",
+      "verified-actor"
+    ],
+    "produces": [
+      "audit-chain",
+      "permit"
+    ],
+    "assertions": [
+      "approval",
+      "identity"
+    ],
+    "frameworks": [
+      "cfr_part_11",
+      "nist_800_53",
+      "sox"
+    ],
+    "controls": [
+      "21 CFR Part 11 §11.10(e) — Audit Trails for Electronic Records",
+      "NIST SP 800-53 AC-3 — Access Enforcement",
+      "SOX §404 — Internal Control over Financial Reporting (filing authorization)"
+    ],
+    "domain": "data",
     "pattern": "approval-chain"
   }
 };

@@ -126,7 +126,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
       },
       {
         "framework": "eu_ai_act",
-        "clause": "EU AI Act Art. 18 — Technical Documentation",
+        "clause": "EU AI Act Art. 11 (Annex IV) — Technical Documentation",
         "mapping": "For AI system components, release permits create the documented deployment authorization trail required for EU AI Act conformance assessments.\n",
         "evidence_source": "audit_chain",
         "status_query": "ai_artifact_release_documentation_pct"
@@ -236,7 +236,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
         "status_query": "phi_modification_gate_pct"
       },
       {
-        "framework": "21cfr_part_11",
+        "framework": "cfr_part_11",
         "clause": "21 CFR Part 11 §11.10(e) — Audit Trails",
         "mapping": "AtlaSent captures the reason-for-change and actor identity for every data modification, satisfying FDA electronic records audit trail requirements.\n",
         "evidence_source": "audit_chain",
@@ -286,7 +286,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
         "status_query": "phi_import_gate_pct"
       },
       {
-        "framework": "21cfr_part_11",
+        "framework": "cfr_part_11",
         "clause": "21 CFR Part 11 §11.10 — Controls for Closed Systems",
         "mapping": "AtlaSent ensures data imported into validated systems carries authorization evidence and a source hash binding the import to a specific dataset version.\n",
         "evidence_source": "audit_chain",
@@ -575,7 +575,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     },
     "regulatory_mappings": [
       {
-        "framework": "21cfr_part_11",
+        "framework": "cfr_part_11",
         "clause": "21 CFR Part 11 §11.10 — Controls for Closed Systems",
         "mapping": "AtlaSent captures the author identity, document hash, and authorization record for every content publication — satisfying FDA document control requirements for electronic records in validated systems.\n",
         "evidence_source": "audit_chain",
@@ -628,15 +628,15 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     },
     "regulatory_mappings": [
       {
-        "framework": "21cfr_part_11",
+        "framework": "cfr_part_11",
         "clause": "21 CFR Part 11 §11.50 — Signature Manifestations",
         "mapping": "AtlaSent captures the printed name, date/time, and meaning of each electronic signature in the permit chain — satisfying FDA requirements that signatures be bound to the record with legal meaning.\n",
         "evidence_source": "audit_chain",
         "status_query": "cfr11_esignature_meaning_pct"
       },
       {
-        "framework": "eu_ai_act",
-        "clause": "EU AI Act Art. 26 — Qualified Electronic Signatures",
+        "framework": "eidas",
+        "clause": "eIDAS Reg. (EU) 910/2014 Art. 3(9), Art. 26 — Signatory Is a Natural Person; Advanced Electronic Signatures",
         "mapping": "AtlaSent ensures AI systems cannot sign as qualified signatories under eIDAS — the identity assertion requires a human principal, not an AI actor ID.\n",
         "evidence_source": "permit_record",
         "status_query": "eidas_human_signature_pct"
@@ -953,7 +953,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
         "status_query": "sox_302_human_certification_pct"
       },
       {
-        "framework": "21cfr_part_11",
+        "framework": "cfr_part_11",
         "clause": "21 CFR Part 11 §11.50 — Electronic Signature Requirements for Certifications",
         "mapping": "AtlaSent captures the Qualified Person's MFA-verified signature, the meaning of the certification, and the regulatory basis — satisfying FDA requirements for electronic batch release certifications.\n",
         "evidence_source": "permit_record",
@@ -1575,8 +1575,8 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "regulatory_mappings": [
       {
         "framework": "eu_ai_act",
-        "clause": "EU AI Act Art. 14 — Human Oversight",
-        "mapping": "Every autonomous tool invocation is gated by a verifiable permit, giving operators a tamper-evident record of what an agent did and the authority under which it acted.\n",
+        "clause": "EU AI Act Art. 14(4)(d)-(e) — Human Oversight (partial)",
+        "mapping": "Partial, technical contribution only. A tool invocation cannot execute without a verified permit, so the runtime can refuse it (Art. 14(4)(d)) and the pre-call gate acts as the \"stop\" procedure for each discrete invocation (Art. 14(4)(e)). This action does not require human approval by default; routing specific invocations to a human decision needs a deployer-configured hold/escalate policy. It does not cover Art. 14(1)-(2) or 14(4)(a)-(c), and whether an agent is a high-risk system in scope of Art. 14 at all is the deployer's determination. The audit chain records what the agent did and the authority under which it acted.\n",
         "evidence_source": "audit_chain",
         "status_query": "agent_action_permit_coverage"
       },
@@ -1945,7 +1945,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000033",
     "slug": "infrastructure.change",
     "display_name": "Infrastructure Change",
-    "description": "Authorization gate for changing production infrastructure or its configuration — applying Terraform/Helm, altering gateway routing, changing network controls (WAF rules, security groups, ingress, DNS, load balancers), and changing monitoring/alerting configuration (alert routing and thresholds, silences/mutes, health checks, on-call escalation policies, dashboards and retention windows that feed incident response). Infrastructure changes carry broad blast radius: a routing or firewall change can expose or sever production traffic across all services, and a monitoring-configuration change can blind the organization to the consequences of that same failure. Human approval plus a state snapshot binding the planned change (plan hash) gate the action to a reviewed, identified change. Production network-control and monitoring-configuration changes are governed under this action as scenarios of infrastructure change, not as separate actions.\nMonitoring-configuration scope (governed scenario, not a separate action): a change that SUPPRESSES, DISABLES, or MATERIALLY WEAKENS a monitoring or alerting capability — muting or snoozing an alert, raising an alert threshold, disabling a health check, removing a service from a paging rotation or dashboard, or shortening a retention window that would hide the change later — is a \"cover your tracks\" risk pattern: it reduces the organization's ability to detect the consequences of the very change (or a related change) it accompanies. This scenario ALWAYS requires human approval, REGARDLESS of whether the organization has otherwise configured infrastructure.change to allow change-window-based or other lower-friction handling for routine infrastructure changes. No org-level relaxation of this action's friction may ever exempt a monitoring-weakening change, even one that would otherwise qualify as \"routine\" and route through a low-friction path. See the header comment above for the CAR schema's per-scenario-override limitation this note works around, and `policy_template.controls[human_approval].description` below for the same requirement stated as a control-level note.",
+    "description": "Authorization gate for changing production infrastructure or its configuration — applying Terraform/Helm, altering gateway routing, changing network controls (WAF rules, security groups, ingress, DNS, load balancers), and changing monitoring/alerting configuration (alert routing and thresholds, silences/mutes, health checks, on-call escalation policies, dashboards and retention windows that feed incident response). Infrastructure changes carry broad blast radius: a routing or firewall change can expose or sever production traffic across all services, and a monitoring-configuration change can blind the organization to the consequences of that same failure. Human approval plus a state snapshot binding the planned change (plan hash) gate the action to a reviewed, identified change. Production network-control and monitoring-configuration changes are governed under this action as scenarios of infrastructure change, not as separate actions.\nMonitoring-configuration scope (governed scenario, not a separate action): a change that SUPPRESSES, DISABLES, or MATERIALLY WEAKENS a monitoring or alerting capability — muting or snoozing an alert, raising an alert threshold, disabling a health check, removing a service from a paging rotation or dashboard, or shortening a retention window that would hide the change later — is a \"cover your tracks\" risk pattern: it reduces the organization's ability to detect the consequences of the very change (or a related change) it accompanies. This scenario ALWAYS requires human approval, REGARDLESS of whether the organization has otherwise configured infrastructure.change to allow change-window-based or other lower-friction handling for routine infrastructure changes. No org-level relaxation of this action's friction may ever exempt a monitoring-weakening change, even one that would otherwise qualify as \"routine\" and route through a low-friction path.",
     "family": "infrastructure.change",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2053,7 +2053,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000035",
     "slug": "secret.rotate",
     "display_name": "Secret Rotation",
-    "description": "Authorization gate for rotating a production credential or signing key — API keys, database passwords, service tokens, or signing material. Rotation is a privileged operation: a botched or malicious rotation can cause a widespread outage (every consumer of the old secret breaks) or, worse, hand an attacker fresh valid credentials. State snapshot binding captures the secret identity and key version so the permit records exactly which secret was rotated to which version.\nSCOPE (2026-08-25): this action governs rotating a secret's VALUE only — producing a new credential/key version for an existing secret. It does NOT cover changing a secret's ACCESS-CONTROL or GOVERNANCE configuration (who or what may read it, where it is stored, its rotation policy or schedule) — that is a materially broader, higher-authority access-control decision governed by secret.configuration.change (CANON-000054, ACT-0057), which requires human approval and a verified, MFA'd approver. A caller widening who can read a secret, or relocating/reconfiguring its storage or rotation policy, must call secret.configuration.change, not this action. trust_root.publish (CANON-000035; SPECIALIZATIONS.yaml) remains a value-rotation-shaped specialization of THIS action; secret.configuration.change is a distinct standalone canonical action, not a specialization of secret.rotate.",
+    "description": "Authorization gate for rotating a production credential or signing key — API keys, database passwords, service tokens, or signing material. Rotation is a privileged operation: a botched or malicious rotation can cause a widespread outage (every consumer of the old secret breaks) or, worse, hand an attacker fresh valid credentials. State snapshot binding captures the secret identity and key version so the permit records exactly which secret was rotated to which version.\nScope: this action governs rotating a secret's VALUE only — producing a new credential/key version for an existing secret. It does NOT cover changing a secret's ACCESS-CONTROL or GOVERNANCE configuration (who or what may read it, where it is stored, its rotation policy or schedule) — that is a materially broader, higher-authority access-control decision governed by secret.configuration.change (CANON-000054), which requires human approval and a verified, MFA'd approver. A caller widening who can read a secret, or relocating/reconfiguring its storage or rotation policy, must call secret.configuration.change, not this action. trust_root.publish (CANON-000035) remains a value-rotation-shaped specialization of THIS action; secret.configuration.change is a distinct standalone canonical action, not a specialization of secret.rotate.",
     "family": "privileged.operation",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2835,7 +2835,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000048",
     "slug": "trial.randomization.break",
     "display_name": "Trial Randomization Code Break",
-    "description": "Authorization gate for breaking a clinical trial's randomization code for a single subject — revealing that one subject's treatment assignment (distinct from trial.unblinding.execute, CANON-000018, which reveals assignments trial-wide). A code break is typically triggered by a safety event and must be attributable to a named, verified approver, bound to the trial and subject, with an explicit reason. Mints this record from the shape already enforced in production by the authoritative life-sciences seeder (seed_life_sciences_action_classes) since 2026-07-09 — this CAR documents deployed behavior, it does not change it.",
+    "description": "Authorization gate for breaking a clinical trial's randomization code for a single subject — revealing that one subject's treatment assignment (distinct from trial.unblinding.execute, CANON-000018, which reveals assignments trial-wide). A code break is typically triggered by a safety event and must be attributable to a named, verified approver, bound to the trial and subject, with an explicit reason.",
     "family": "clinical.trial",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2884,7 +2884,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000049",
     "slug": "reconciliation.certify",
     "display_name": "Reconciliation — Certify",
-    "description": "Authorization gate for certifying a period-end account reconciliation as complete and accurate — the officer certification step underlying SOX §302/§404. Allow requires the reviewer to have attested; runtime enforcement also requires a cryptographically resolvable, verified actor identity AND an issuer-scoped independent approver (the certifying approver cannot be the same identity as the requester) — a separation-of-duties gate added 2026-07-26 (migration 20260733000000) that the CAR schema does not yet have a field for (see the note above). Mints this record from the shape already enforced in production by the authoritative financial-services seeder (seed_financial_services_action_classes) since 2026-07-10 — this CAR documents deployed behavior, it does not change it.",
+    "description": "Authorization gate for certifying a period-end account reconciliation as complete and accurate — the officer certification step underlying SOX §302/§404. Allow requires the reviewer to have attested; runtime enforcement also requires a cryptographically resolvable, verified actor identity AND an issuer-scoped independent approver (the certifying approver cannot be the same identity as the requester) — a separation-of-duties gate.",
     "family": "finance.controllership",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2941,7 +2941,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000050",
     "slug": "journal_entry.approve",
     "display_name": "Journal Entry — Approve",
-    "description": "Authorization gate for approving a manual journal entry above threshold — the decision that authorizes the entry for posting, distinct from journal.post (CANON-000041), which commits an already-approved entry to the ledger. Allow requires both journal_entry_id and approver_id to be present; runtime enforcement also requires a cryptographically resolvable, verified actor identity AND an issuer-scoped independent approver distinct from the preparer — the same segregation-of-duties gate as reconciliation.certify (ACT-0052), added 2026-07-26 (migration 20260733000000). Mints this record from the shape already enforced in production by the authoritative financial-services seeder (seed_financial_services_action_classes) since 2026-07-10 — this CAR documents deployed behavior, it does not change it.",
+    "description": "Authorization gate for approving a manual journal entry above threshold — the decision that authorizes the entry for posting, distinct from journal.post (CANON-000041), which commits an already-approved entry to the ledger. Allow requires both journal_entry_id and approver_id to be present; runtime enforcement also requires a cryptographically resolvable, verified actor identity AND an issuer-scoped independent approver distinct from the preparer — the same segregation-of-duties gate as reconciliation.certify (CANON-000049).",
     "family": "finance.controllership",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2998,7 +2998,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000051",
     "slug": "variance_review.escalate",
     "display_name": "Variance Review — Escalate",
-    "description": "Authorization gate for escalating a budget/close variance review to a named reviewer — a lower-stakes review-routing action, not a dual-control certification like reconciliation.certify (CANON-000049) or journal_entry.approve (CANON-000050). Allow requires both variance_id and reason to be present; the runtime does not require MFA, a verified actor identity, or an independent approver for this class — a deliberately lighter gate than its two SOX-certification siblings, matching its lower blast radius. Mints this record from the shape already enforced in production by the authoritative financial-services seeder (seed_financial_services_action_classes) since 2026-07-10 — this CAR documents deployed behavior, it does not change it.",
+    "description": "Authorization gate for escalating a budget/close variance review to a named reviewer — a lower-stakes review-routing action, not a dual-control certification like reconciliation.certify (CANON-000049) or journal_entry.approve (CANON-000050). Allow requires both variance_id and reason to be present; the runtime does not require MFA, a verified actor identity, or an independent approver for this class — a deliberately lighter gate than its two SOX-certification siblings, matching its lower blast radius.",
     "family": "finance.controllership",
     "risk_posture": "standard",
     "ai_risk": "Medium",
@@ -3177,7 +3177,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000054",
     "slug": "secret.configuration.change",
     "display_name": "Secret Configuration Change",
-    "description": "Authorization gate for changing a secret's ACCESS-CONTROL or GOVERNANCE configuration — granting or narrowing WHO or WHAT may read a secret (an IAM policy, KMS key policy, or Vault/Secrets Manager access policy attached to it), moving or re-provisioning WHERE it is stored, or changing its rotation policy or schedule. This is distinct from secret.rotate (CANON-000035, ACT-0038), which governs rotating the secret's VALUE — a role-only, non- approved, machine-executable operation. Configuration changes are broader and higher-authority: widening who can read a live credential is a privilege-escalation-shaped decision (the same risk identity.privileged.grant governs for general entitlements), and relocating or degrading a secret's storage or rotation posture can silently weaken every control that depends on that secret staying rotated and access-scoped. Human approval, a verified and MFA'd approver, and a state snapshot binding the before/after configuration gate this action to a reviewed, identified change. secret.rotate's own scope is limited to VALUE rotation; see that CAR's description for the cross-reference this change adds.",
+    "description": "Authorization gate for changing a secret's ACCESS-CONTROL or GOVERNANCE configuration — granting or narrowing WHO or WHAT may read a secret (an IAM policy, KMS key policy, or Vault/Secrets Manager access policy attached to it), moving or re-provisioning WHERE it is stored, or changing its rotation policy or schedule. This is distinct from secret.rotate (CANON-000035), which governs rotating the secret's VALUE — a role-only, non-approved, machine-executable operation. Configuration changes are broader and higher-authority: widening who can read a live credential is a privilege-escalation-shaped decision (the same risk identity.privileged.grant governs for general entitlements), and relocating or degrading a secret's storage or rotation posture can silently weaken every control that depends on that secret staying rotated and access-scoped. Human approval, a verified and MFA'd approver, and a state snapshot binding the before/after configuration gate this action to a reviewed, identified change. secret.rotate's own scope is limited to VALUE rotation.",
     "family": "infrastructure.change",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -3234,6 +3234,138 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
       "fintech",
       "saas",
       "healthtech",
+      "enterprise",
+      "regulated-industries"
+    ]
+  },
+  {
+    "id": "ACT-0058",
+    "canon_id": "CANON-000055",
+    "slug": "sensitive_data.access",
+    "display_name": "Sensitive Data Access",
+    "description": "Authorization gate for a specific search, query, read, view, or unmasked reveal of personal, regulated, confidential, or otherwise sensitive data before any sensitive value is returned. The permit binds the declared purpose, data classification, target resource, requested fields, record or query scope, volume limit, initiating actor, and exact request-shape digest. This is not a standing entitlement: standing access to a data store remains identity.privileged.grant. It is also not data.export: permission to read never implies permission to transmit or release results to another destination. Routine least-privilege reads may be machine-executable under an active policy; direct identifiers, unusual volume, scope expansion, missing purpose, or unverified identity fail closed or route to separately configured human review.",
+    "family": "data.access",
+    "risk_posture": "high",
+    "ai_risk": "High",
+    "gate_flags": {
+      "requires_human_approval": false,
+      "requires_mfa": false,
+      "requires_verified_actor": true,
+      "requires_state_snapshot": true,
+      "required_assertion_classes": [
+        "identity",
+        "sensitivity"
+      ]
+    },
+    "authorization_pattern": {
+      "type": "role-only",
+      "machine_executable": true
+    },
+    "regulatory_mappings": [
+      {
+        "framework": "gdpr",
+        "clause": "GDPR Art. 5(1)(b)-(c) — Purpose Limitation and Data Minimisation",
+        "mapping": "The permit binds every sensitive-data request to an approved purpose, exact field projection, record or query scope, and maximum volume before values are returned.\n",
+        "evidence_source": "permit_record",
+        "status_query": "sensitive_data_access_purpose_scope_pct"
+      },
+      {
+        "framework": "hipaa",
+        "clause": "HIPAA Security Rule §164.312(a)(1) — Access Control",
+        "mapping": "A verified execution identity and minimum-necessary request envelope are evaluated before access to electronic protected health information can proceed.\n",
+        "evidence_source": "evaluation_record",
+        "status_query": "phi_access_authorization_pct"
+      },
+      {
+        "framework": "nist_800_53",
+        "clause": "NIST SP 800-53 Rev.5 AC-3 — Access Enforcement",
+        "mapping": "AtlaSent enforces the organization's access policy at the data-operation boundary and records the exact actor, purpose, target, request digest, and decision.\n",
+        "evidence_source": "audit_chain",
+        "status_query": "ac3_sensitive_data_access_pct"
+      }
+    ],
+    "evidence_requirements": {
+      "minimum_pattern": "EP-02",
+      "approval_artifact_required": false,
+      "state_snapshot_required": true,
+      "required_assertions": [
+        "identity",
+        "sensitivity"
+      ],
+      "notes": "The state snapshot is the digest of the proposed request envelope: purpose, classification, target, field projection, record/query predicate, volume cap, and masking mode. Evidence stores identifiers, hashes, classifications, counts, and decisions only; raw personal data must never be copied into authorization or audit records.\n"
+    },
+    "use_case": "Put a fail-closed authorization decision directly in front of every sensitive-data search, query, read, view, or reveal — for human, service, and AI callers — so a valid credential cannot silently become authority to use personal data for any purpose, field set, record set, or volume.",
+    "industries": [
+      "enterprise",
+      "saas",
+      "fintech",
+      "healthtech",
+      "life-sciences",
+      "regulated-industries"
+    ]
+  },
+  {
+    "id": "ACT-0059",
+    "canon_id": "CANON-000056",
+    "slug": "submission.submit",
+    "display_name": "External Submission",
+    "description": "Authorization gate for formally submitting an application or a regulatory, tax or legal filing to an outside authority on the organization's behalf — a grant, permit or licence application, a regulatory report, a tax return, a court or agency filing. A submission is a binding representation made in the organization's name: once the authority receives it, it cannot be recalled, only amended or withdrawn through the authority's own process, and it is attributed to the organization rather than to the person, workflow or AI agent that pressed submit. The permit is bound to the exact content, the recipient authority and the submitting entity; any change to any of them after authorization invalidates it. Applies identically whether the submission was prepared by a person, a script, a workflow or an AI agent — preparing the work confers no authority to commit the organization to it. AtlaSent does not prepare, review or file the submission and does not judge its content; it governs only whether this actor may submit this exact content, to this authority, for this entity, now.",
+    "family": "data.release",
+    "risk_posture": "high",
+    "ai_risk": "High",
+    "gate_flags": {
+      "requires_human_approval": true,
+      "requires_mfa": false,
+      "requires_verified_actor": true,
+      "requires_state_snapshot": false,
+      "required_assertion_classes": [
+        "identity",
+        "approval"
+      ]
+    },
+    "authorization_pattern": {
+      "type": "approval-chain",
+      "machine_executable": false,
+      "minimum_approvals": 1
+    },
+    "regulatory_mappings": [
+      {
+        "framework": "sox",
+        "clause": "SOX §404 — Internal Control over Financial Reporting (filing authorization)",
+        "mapping": "AtlaSent gates each external financial or tax filing on a verified designated filer and a human approval bound to the exact filed content, giving an execution-time record of who was authorized to commit the organization to that filing.\n",
+        "evidence_source": "audit_chain",
+        "status_query": "submission_designated_filer_pct"
+      },
+      {
+        "framework": "cfr_part_11",
+        "clause": "21 CFR Part 11 §11.10(e) — Audit Trails for Electronic Records",
+        "mapping": "Electronic submissions to FDA carry a permit bound to the exact submitted content hash and the submitting identity, recorded in the tamper-evident audit chain before transmission.\n",
+        "evidence_source": "permit_record",
+        "status_query": "regulatory_submission_permit_coverage"
+      },
+      {
+        "framework": "nist_800_53",
+        "clause": "NIST SP 800-53 AC-3 — Access Enforcement",
+        "mapping": "The authority to submit on the organization's behalf is enforced at the submission transition itself, not inferred from holding a portal credential.\n",
+        "evidence_source": "permit_record",
+        "status_query": "submission_access_enforcement_pct"
+      }
+    ],
+    "evidence_requirements": {
+      "minimum_pattern": "EP-02",
+      "approval_artifact_required": true,
+      "state_snapshot_required": false,
+      "required_assertions": [
+        "identity",
+        "approval"
+      ],
+      "notes": "The permit binds the content hash, the recipient authority and the submitting entity, so the record proves exactly what was authorized to be submitted, to whom, on whose behalf. The authority's submission receipt (confirmation number or acknowledgement) is execution/effect evidence recorded after the fact; it is kept separate from the authorization record and never substitutes for it. A content or recipient substitution after approval is a binding mutation, refused at verification by the generic exact-binding mechanism, not a new primitive.\n"
+    },
+    "use_case": "Gate applications and regulatory, tax and legal filings to outside authorities behind a verified designated filer and an exact content/recipient-bound permit — so software or an AI agent that prepares a submission can never commit the organization to it on its own authority.",
+    "industries": [
+      "fintech",
+      "healthtech",
+      "pharma",
       "enterprise",
       "regulated-industries"
     ]
