@@ -182,6 +182,12 @@ describe("sandbox context source", () => {
     assert.deepEqual(read(), { sandbox_id: "sbx_a", policy_generation: "7" });
   });
 
+  it("uses OpenShell's own OPENSHELL_SANDBOX_ID and never treats its OPENSHELL_SANDBOX marker as the name", () => {
+    // What a workload process inside an OpenShell sandbox actually sees.
+    const read = sandboxContextFrom({ OPENSHELL_SANDBOX_ID: "0f3c-sbx", OPENSHELL_SANDBOX: "1" }, () => "");
+    assert.deepEqual(read(), { sandbox_id: "0f3c-sbx" });
+  });
+
   it("re-reads the context file on every call, and an unreadable file yields no sandbox", () => {
     let content = JSON.stringify({ sandbox_id: "sbx_a", policy_generation: 1 });
     const read = sandboxContextFrom({ ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE: "/f", OPENSHELL_SANDBOX_ID: "ignored" }, () => content);

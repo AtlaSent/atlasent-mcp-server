@@ -246,6 +246,17 @@ export function sandboxContextFrom(
         return undefined; // parseSandboxContext refuses it: no sandbox_id
       }
     }
+    // OPENSHELL_SANDBOX_ID is OpenShell's own variable: its compute drivers set
+    // it on the supervisor, it is reserved against spec/template/exec
+    // overrides, and workload processes inherit it (it is not on the
+    // supervisor-only strip list). Checked against NVIDIA/OpenShell@71c3cd9:
+    // openshell-core sandbox_env.rs, openshell-sandbox process.rs.
+    //
+    // OPENSHELL_SANDBOX is deliberately NOT read: inside a workload OpenShell
+    // overwrites it with "1" (an "inside a sandbox" marker), so it is never the
+    // sandbox name there. OpenShell gives the workload no name, workspace or
+    // policy generation; the three variables below are optional values an
+    // operator may set, and are labels / change detection only.
     const ctx: Record<string, unknown> = {};
     if (env.OPENSHELL_SANDBOX_ID !== undefined) ctx.sandbox_id = env.OPENSHELL_SANDBOX_ID;
     if (env.OPENSHELL_SANDBOX_NAME !== undefined) ctx.sandbox_name = env.OPENSHELL_SANDBOX_NAME;

@@ -15,6 +15,20 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 Nothing yet.
 
+## [2.17.3] - 2026-10-06
+
+### Changed
+
+- OpenShell adapter: OpenShell 0.1.3-pre.4 is now reported as containing the
+  fix for its startup bug (NVIDIA/OpenShell#3994). It is still "unverified"
+  until the live startup test passes on it.
+- Documented where the sandbox ID comes from: OpenShell sets
+  `OPENSHELL_SANDBOX_ID` in the workload's environment, which is what
+  `atlasent-openshell` reads. `OPENSHELL_SANDBOX` is never read, because
+  OpenShell sets it to `"1"` inside a workload. The docs also state the
+  remaining limit: an agent can still set a different ID for a process it
+  starts.
+
 ## [2.17.2] - 2026-10-05
 
 ### Changed
@@ -387,7 +401,8 @@ stable and will not change without a major version bump.
   call until you write a rule, and records metadata-only activity evidence.
   No account, no network, no dependencies.
 
-[Unreleased]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.17.2...HEAD
+[Unreleased]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.17.3...HEAD
+[2.17.3]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.17.2...v2.17.3
 [2.17.2]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.17.1...v2.17.2
 [2.17.1]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.17.0...v2.17.1
 [2.17.0]: https://github.com/AtlaSent/atlasent-mcp-server/compare/v2.16.0...v2.17.0

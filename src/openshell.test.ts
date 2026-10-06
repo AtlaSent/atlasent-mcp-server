@@ -288,6 +288,9 @@ describe("OpenShell version + startup policy-generation probe", () => {
     assert.equal(assessOpenShellVersion("v0.1.2").status, "known_affected");
     assert.equal(assessOpenShellVersion("0.1.3-pre.3").status, "known_affected");
     assert.equal(assessOpenShellVersion("0.1.3").status, "unverified");
+    const pre4 = assessOpenShellVersion("v0.1.3-pre.4");
+    assert.equal(pre4.status, "unverified", "containing the fix is not a probe pass");
+    assert.match(pre4.reason, /Contains the NVIDIA\/OpenShell#3994 fix/);
   });
 
   function fakeClock() {

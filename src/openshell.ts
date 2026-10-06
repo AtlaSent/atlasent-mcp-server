@@ -437,12 +437,25 @@ export const OPENSHELL_KNOWN_AFFECTED: Readonly<Record<string, string>> = {
   "0.1.3-pre.3": ISSUE_3994,
 };
 
+/**
+ * Releases confirmed (by commit ancestry, not by changelog) to contain the
+ * #3994 fix, NVIDIA/OpenShell#4122 (ec49209). Still "unverified": containing the
+ * fix is not the same as passing the live startup probe on it.
+ */
+export const OPENSHELL_FIX_CONFIRMED_IN: Readonly<Record<string, string>> = {
+  "0.1.3-pre.4":
+    "Contains the NVIDIA/OpenShell#3994 fix (ec49209 is an ancestor of e7fdd6be, cut 2026-10-05). " +
+    "Production readiness still requires a recorded startup-probe pass on it.",
+};
+
 export function assessOpenShellVersion(
   version: string,
 ): { status: "known_affected"; reason: string } | { status: "unverified"; reason: string } {
   const v = version.trim().replace(/^v/, "");
   const affected = OPENSHELL_KNOWN_AFFECTED[v];
   if (affected) return { status: "known_affected", reason: affected };
+  const fixed = OPENSHELL_FIX_CONFIRMED_IN[v];
+  if (fixed) return { status: "unverified", reason: fixed };
   return {
     status: "unverified",
     reason: "Not a known-affected release. Production readiness still requires a recorded startup-probe pass.",
