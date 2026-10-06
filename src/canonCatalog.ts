@@ -126,7 +126,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
       },
       {
         "framework": "eu_ai_act",
-        "clause": "EU AI Act Art. 18 — Technical Documentation",
+        "clause": "EU AI Act Art. 11 (Annex IV) — Technical Documentation",
         "mapping": "For AI system components, release permits create the documented deployment authorization trail required for EU AI Act conformance assessments.\n",
         "evidence_source": "audit_chain",
         "status_query": "ai_artifact_release_documentation_pct"
@@ -635,8 +635,8 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
         "status_query": "cfr11_esignature_meaning_pct"
       },
       {
-        "framework": "eu_ai_act",
-        "clause": "EU AI Act Art. 26 — Qualified Electronic Signatures",
+        "framework": "eidas",
+        "clause": "eIDAS Reg. (EU) 910/2014 Art. 3(9), Art. 26 — Signatory Is a Natural Person; Advanced Electronic Signatures",
         "mapping": "AtlaSent ensures AI systems cannot sign as qualified signatories under eIDAS — the identity assertion requires a human principal, not an AI actor ID.\n",
         "evidence_source": "permit_record",
         "status_query": "eidas_human_signature_pct"
@@ -3234,6 +3234,138 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
       "fintech",
       "saas",
       "healthtech",
+      "enterprise",
+      "regulated-industries"
+    ]
+  },
+  {
+    "id": "ACT-0058",
+    "canon_id": "CANON-000055",
+    "slug": "sensitive_data.access",
+    "display_name": "Sensitive Data Access",
+    "description": "Authorization gate for a specific search, query, read, view, or unmasked reveal of personal, regulated, confidential, or otherwise sensitive data before any sensitive value is returned. The permit binds the declared purpose, data classification, target resource, requested fields, record or query scope, volume limit, initiating actor, and exact request-shape digest. This is not a standing entitlement: standing access to a data store remains identity.privileged.grant. It is also not data.export: permission to read never implies permission to transmit or release results to another destination. Routine least-privilege reads may be machine-executable under an active policy; direct identifiers, unusual volume, scope expansion, missing purpose, or unverified identity fail closed or route to separately configured human review.",
+    "family": "data.access",
+    "risk_posture": "high",
+    "ai_risk": "High",
+    "gate_flags": {
+      "requires_human_approval": false,
+      "requires_mfa": false,
+      "requires_verified_actor": true,
+      "requires_state_snapshot": true,
+      "required_assertion_classes": [
+        "identity",
+        "sensitivity"
+      ]
+    },
+    "authorization_pattern": {
+      "type": "role-only",
+      "machine_executable": true
+    },
+    "regulatory_mappings": [
+      {
+        "framework": "gdpr",
+        "clause": "GDPR Art. 5(1)(b)-(c) — Purpose Limitation and Data Minimisation",
+        "mapping": "The permit binds every sensitive-data request to an approved purpose, exact field projection, record or query scope, and maximum volume before values are returned.\n",
+        "evidence_source": "permit_record",
+        "status_query": "sensitive_data_access_purpose_scope_pct"
+      },
+      {
+        "framework": "hipaa",
+        "clause": "HIPAA Security Rule §164.312(a)(1) — Access Control",
+        "mapping": "A verified execution identity and minimum-necessary request envelope are evaluated before access to electronic protected health information can proceed.\n",
+        "evidence_source": "evaluation_record",
+        "status_query": "phi_access_authorization_pct"
+      },
+      {
+        "framework": "nist_800_53",
+        "clause": "NIST SP 800-53 Rev.5 AC-3 — Access Enforcement",
+        "mapping": "AtlaSent enforces the organization's access policy at the data-operation boundary and records the exact actor, purpose, target, request digest, and decision.\n",
+        "evidence_source": "audit_chain",
+        "status_query": "ac3_sensitive_data_access_pct"
+      }
+    ],
+    "evidence_requirements": {
+      "minimum_pattern": "EP-02",
+      "approval_artifact_required": false,
+      "state_snapshot_required": true,
+      "required_assertions": [
+        "identity",
+        "sensitivity"
+      ],
+      "notes": "The state snapshot is the digest of the proposed request envelope: purpose, classification, target, field projection, record/query predicate, volume cap, and masking mode. Evidence stores identifiers, hashes, classifications, counts, and decisions only; raw personal data must never be copied into authorization or audit records.\n"
+    },
+    "use_case": "Put a fail-closed authorization decision directly in front of every sensitive-data search, query, read, view, or reveal — for human, service, and AI callers — so a valid credential cannot silently become authority to use personal data for any purpose, field set, record set, or volume.",
+    "industries": [
+      "enterprise",
+      "saas",
+      "fintech",
+      "healthtech",
+      "life-sciences",
+      "regulated-industries"
+    ]
+  },
+  {
+    "id": "ACT-0059",
+    "canon_id": "CANON-000056",
+    "slug": "submission.submit",
+    "display_name": "External Submission",
+    "description": "Authorization gate for formally submitting an application or a regulatory, tax or legal filing to an outside authority on the organization's behalf — a grant, permit or licence application, a regulatory report, a tax return, a court or agency filing. A submission is a binding representation made in the organization's name: once the authority receives it, it cannot be recalled, only amended or withdrawn through the authority's own process, and it is attributed to the organization rather than to the person, workflow or AI agent that pressed submit. The permit is bound to the exact content, the recipient authority and the submitting entity; any change to any of them after authorization invalidates it. Applies identically whether the submission was prepared by a person, a script, a workflow or an AI agent — preparing the work confers no authority to commit the organization to it. AtlaSent does not prepare, review or file the submission and does not judge its content; it governs only whether this actor may submit this exact content, to this authority, for this entity, now.",
+    "family": "data.release",
+    "risk_posture": "high",
+    "ai_risk": "High",
+    "gate_flags": {
+      "requires_human_approval": true,
+      "requires_mfa": false,
+      "requires_verified_actor": true,
+      "requires_state_snapshot": false,
+      "required_assertion_classes": [
+        "identity",
+        "approval"
+      ]
+    },
+    "authorization_pattern": {
+      "type": "approval-chain",
+      "machine_executable": false,
+      "minimum_approvals": 1
+    },
+    "regulatory_mappings": [
+      {
+        "framework": "sox",
+        "clause": "SOX §404 — Internal Control over Financial Reporting (filing authorization)",
+        "mapping": "AtlaSent gates each external financial or tax filing on a verified designated filer and a human approval bound to the exact filed content, giving an execution-time record of who was authorized to commit the organization to that filing.\n",
+        "evidence_source": "audit_chain",
+        "status_query": "submission_designated_filer_pct"
+      },
+      {
+        "framework": "cfr_part_11",
+        "clause": "21 CFR Part 11 §11.10(e) — Audit Trails for Electronic Records",
+        "mapping": "Electronic submissions to FDA carry a permit bound to the exact submitted content hash and the submitting identity, recorded in the tamper-evident audit chain before transmission.\n",
+        "evidence_source": "permit_record",
+        "status_query": "regulatory_submission_permit_coverage"
+      },
+      {
+        "framework": "nist_800_53",
+        "clause": "NIST SP 800-53 AC-3 — Access Enforcement",
+        "mapping": "The authority to submit on the organization's behalf is enforced at the submission transition itself, not inferred from holding a portal credential.\n",
+        "evidence_source": "permit_record",
+        "status_query": "submission_access_enforcement_pct"
+      }
+    ],
+    "evidence_requirements": {
+      "minimum_pattern": "EP-02",
+      "approval_artifact_required": true,
+      "state_snapshot_required": false,
+      "required_assertions": [
+        "identity",
+        "approval"
+      ],
+      "notes": "The permit binds the content hash, the recipient authority and the submitting entity, so the record proves exactly what was authorized to be submitted, to whom, on whose behalf. The authority's submission receipt (confirmation number or acknowledgement) is execution/effect evidence recorded after the fact; it is kept separate from the authorization record and never substitutes for it. A content or recipient substitution after approval is a binding mutation, refused at verification by the generic exact-binding mechanism, not a new primitive.\n"
+    },
+    "use_case": "Gate applications and regulatory, tax and legal filings to outside authorities behind a verified designated filer and an exact content/recipient-bound permit — so software or an AI agent that prepares a submission can never commit the organization to it on its own authority.",
+    "industries": [
+      "fintech",
+      "healthtech",
+      "pharma",
       "enterprise",
       "regulated-industries"
     ]
