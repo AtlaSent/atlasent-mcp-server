@@ -33,6 +33,23 @@ jobs:
       - name: Build and validate the MCPB bundle
         if: matrix.node-version == 22
         run: node scripts/build-mcpb.mjs --out mcpb-out
+      # Every host (Claude Code, Claude Desktop, the MCP Registry, the README)
+      # starts this server as `npx -y @atlasent/mcp-server`. 2.17.0-2.17.4 broke
+      # that ("could not determine executable to run") and every unit test
+      # stayed green. Pack the real tarball and start it through npx the same
+      # way, then require an MCP initialize answer from this version.
+      - name: npx starts the packed server (how every MCP host launches it)
+        if: matrix.node-version == 22
+        run: |
+          set -euo pipefail
+          tgz="$(npm pack --pack-destination "$RUNNER_TEMP" | tail -1)"
+          version="$(node -p 'require("./package.json").version')"
+          cd "$RUNNER_TEMP"
+          out="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            | ATLASENT_MODE=local timeout 120 npx -y "file:$RUNNER_TEMP/$tgz" | head -c 4000 || true)"
+          echo "$out" | head -c 400; echo
+          echo "$out" | grep -q "\"serverInfo\":{\"name\":\"@atlasent/mcp-server\",\"version\":\"$version\"}" \
+            || { echo "::error::npx could not start the packed server"; exit 1; }
       - uses: actions/upload-artifact@v7
         if: matrix.node-version == 22
         with:
@@ -150,6 +167,25 @@ jobs:
   # The Dockerfile is what Glama (glama.ai/mcp/servers) builds to start the
   # server and introspect its tools. Keep it building and answering
   # tools/list with no credentials, so the listing never goes stale.
+  # OpenShell workload guard (CROSS-066 phase 1): a separate package with its
+  # own gRPC dependencies, not part of the published MCP server. The tests carry
+  # a negative control for every denial and a real gRPC round trip.
+  openshell-workload-guard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/openshell-workload-guard
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/openshell-workload-guard/package-lock.json
+      - run: npm ci
+      - name: Unit and gRPC tests
+        run: node --test test/*.node.mjs
+
   docker-smoke:
     runs-on: ubuntu-latest
     steps:

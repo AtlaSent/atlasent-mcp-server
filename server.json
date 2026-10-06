@@ -3,7 +3,7 @@
   "name": "io.github.AtlaSent/mcp-server",
   "title": "AtlaSent MCP Server",
   "description": "AtlaSent for AI agents: with an API key, actions wait for approval with signed proof. No key: demo.",
-  "version": "2.17.4",
+  "version": "2.17.5",
   "websiteUrl": "https://github.com/AtlaSent/atlasent-mcp-server",
   "repository": {
     "url": "https://github.com/AtlaSent/atlasent-mcp-server",
@@ -13,7 +13,7 @@
     {
       "registryType": "npm",
       "identifier": "@atlasent/mcp-server",
-      "version": "2.17.4",
+      "version": "2.17.5",
       "runtimeHint": "npx",
       "transport": { "type": "stdio" },
       "environmentVariables": [

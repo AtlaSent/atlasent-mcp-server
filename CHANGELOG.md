@@ -13,7 +13,31 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
-Nothing yet.
+## [2.17.5] - 2026-10-06
+
+### Fixed
+
+- `npx -y @atlasent/mcp-server` works again. 2.17.0 through 2.17.4 failed
+  with "could not determine executable to run", because the package gained a
+  second executable (`atlasent-openshell`) and npx could not choose. This
+  broke every npx-based install: Claude Code (`claude mcp add`), Claude
+  Desktop, the MCP Registry entry and the README examples. The package now has
+  a `mcp-server` executable, which is the one npx runs. A test fails if this
+  regresses.
+
+### Added
+
+- `packages/openshell-workload-guard`: OpenShell supervisor middleware that
+  stops an agent in one sandbox from claiming to be another (CROSS-066).
+  It is a separate package, not published, and not part of this server's npm
+  package.
+
+### Fixed
+
+- OpenShell guide: OpenShell's Docker driver does not put
+  `OPENSHELL_SANDBOX_ID` in the workload environment. On that driver,
+  `atlasent-openshell` needs `ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE`. The
+  guide previously said every workload inherits the variable.
 
 ## [2.17.4] - 2026-10-06
 

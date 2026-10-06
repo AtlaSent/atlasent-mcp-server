@@ -1,7 +1,11 @@
 # OpenShell workload identity the agent cannot set (design)
 
-Status: **PROPOSED, 2026-10-06.** Not implemented. Needs founder sign-off
-before any code, because phase 2 changes what `v1-verify-permit` trusts.
+Status: **BUILT, 2026-10-06. The founder decided to build both phases.**
+- Phase 1: `packages/openshell-workload-guard`. Live-tested on OpenShell
+  0.1.3-pre.4; see "Verification results".
+- Phase 2: atlasent-api#4032, migration `20261551000000`. Not yet applied to
+  any environment.
+- Decision record: atlasent-docs CROSS-066.
 
 ## Problem
 
@@ -109,7 +113,8 @@ through the guard." Phase 2 makes that a check.
 
 - The guard signs a short attestation on every allowed evaluate or verify,
   bound to the exact request:
-  `{v: 1, sandbox_id, request_id, body_sha256, iat, exp (≤ 60 s), aud: "atlasent-runtime"}`.
+  `{v: 1, aud: "atlasent-runtime", jti, sandbox_id, osh_request_id, method, path, body_sha256, iat, exp = iat + 60}`,
+  as a compact EdDSA JWS with `typ: atlasent-workload-attestation+jwt` and a `kid`.
   It is sent as one request header, `x-atlasent-workload-attestation`.
   Middleware may add headers but not credential ones, so this header is
   allowed.
@@ -117,8 +122,11 @@ through the guard." Phase 2 makes that a check.
   AtlaSent, and marks the API key `requires_workload_attestation`.
 - For such a key, `v1-evaluate` and `v1-verify-permit` require a valid
   attestation. The `sandbox_id` in it must equal the body's workload ID, the
-  `body_sha256` must equal the bytes received, and the `request_id` must not
-  have been used before (stored like the existing provenance reservation).
+  `body_sha256` must equal the bytes received, the `path` must name the
+  endpoint, and the `jti` must not have been used before
+  (`reserve_workload_attestation_v1`). As built, a fresh `jti` is the replay
+  key. OpenShell's request ID travels as `osh_request_id`, for correlation
+  only.
   A missing or invalid attestation denies.
 - Keys without the flag behave as today. The change is additive, so `/v1` is
   untouched.
@@ -152,12 +160,11 @@ leaves the guard host.
 - The policy-generation behaviour still applies: a generation change between
   evaluate and verify re-evaluates (adapter contract §3).
 
-## Open questions for sign-off
+## Open questions
 
-1. Phase 1 only, or phases 1 and 2? Phase 2 is a runtime change, with a new
-   key flag, a new header and a replay store, and it needs its own CROSS ADR.
-2. Where the guard lives: this repo (a Node gRPC service), or a separate
-   package. A Node service keeps it next to the adapter and its tests.
+1. *(Decided 2026-10-06: both phases. CROSS-066.)*
+2. *(Built in this repo as a Node gRPC service, `packages/openshell-workload-guard`.
+   Not published to npm.)*
 3. Whether `requires_workload_attestation` should later become required for
    every key used with `kind: "openshell_sandbox"`. That is stricter, but it
    breaks a deployment that runs the adapter without the guard.
@@ -178,3 +185,41 @@ targets:
 - Phase 2: the attestation is replayed, has the wrong body hash, is expired, or
   is signed by the wrong key. Each is denied by the runtime, with a positive
   control for each.
+
+## Verification results (2026-10-06)
+
+Run on OpenShell 0.1.3-pre.4 with the Docker driver and an mTLS gateway with
+`gateway_jwt`. The guard was registered over HTTPS and attached by policy to a
+local stub of the AtlaSent API.
+
+| Check | Result |
+|---|---|
+| Gateway negotiation | Protocol 1.0. The guard's audience was accepted (`openshell gateway info`) |
+| Forged `context.workload.id` | `403 middleware_denied / workload_mismatch`. The stub received nothing |
+| No workload | `403 middleware_denied / workload_missing` |
+| Honest request | Reached the stub with the real key substituted and the attestation attached. The signature verified, and `body_sha256` equalled the bytes the stub received |
+| Agent sets its own attestation header | Overwritten by the guard's |
+| Guard stopped | `middleware_failed`. The stub received nothing |
+| Node-signed attestation in the Deno runtime verifier | Verifies |
+
+Tests:
+
+- Guard: 18 unit and gRPC tests. Mutations were killed: removing the
+  sandbox-ID comparison fails 3 tests, and skipping the signature check fails
+  2.
+- Runtime verifier: 8 tests, with a refusal code for each defect.
+- `v1-evaluate`: 7 tests. Hard-wiring the flag to false fails the 6
+  flagged-key tests.
+- `v1-verify-permit`: 4 tests.
+
+Found along the way:
+
+- **Docker driver.** It does not put `OPENSHELL_SANDBOX_ID` in the workload's
+  environment, so `atlasent-openshell` needs an operator-supplied context file
+  there. The guard checks whatever ID is sent, so this is a usability gap, not
+  a hole.
+- **`--policy` replaces the whole policy.** A sandbox created with `--policy`
+  gets that policy instead of the default one. A middleware-only policy file
+  left the workload unable to start (`Permission denied`), so keep the
+  default `filesystem_policy` and `landlock` sections.
+
