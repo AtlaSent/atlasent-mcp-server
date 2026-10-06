@@ -236,7 +236,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
         "status_query": "phi_modification_gate_pct"
       },
       {
-        "framework": "21cfr_part_11",
+        "framework": "cfr_part_11",
         "clause": "21 CFR Part 11 §11.10(e) — Audit Trails",
         "mapping": "AtlaSent captures the reason-for-change and actor identity for every data modification, satisfying FDA electronic records audit trail requirements.\n",
         "evidence_source": "audit_chain",
@@ -286,7 +286,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
         "status_query": "phi_import_gate_pct"
       },
       {
-        "framework": "21cfr_part_11",
+        "framework": "cfr_part_11",
         "clause": "21 CFR Part 11 §11.10 — Controls for Closed Systems",
         "mapping": "AtlaSent ensures data imported into validated systems carries authorization evidence and a source hash binding the import to a specific dataset version.\n",
         "evidence_source": "audit_chain",
@@ -575,7 +575,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     },
     "regulatory_mappings": [
       {
-        "framework": "21cfr_part_11",
+        "framework": "cfr_part_11",
         "clause": "21 CFR Part 11 §11.10 — Controls for Closed Systems",
         "mapping": "AtlaSent captures the author identity, document hash, and authorization record for every content publication — satisfying FDA document control requirements for electronic records in validated systems.\n",
         "evidence_source": "audit_chain",
@@ -628,7 +628,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     },
     "regulatory_mappings": [
       {
-        "framework": "21cfr_part_11",
+        "framework": "cfr_part_11",
         "clause": "21 CFR Part 11 §11.50 — Signature Manifestations",
         "mapping": "AtlaSent captures the printed name, date/time, and meaning of each electronic signature in the permit chain — satisfying FDA requirements that signatures be bound to the record with legal meaning.\n",
         "evidence_source": "audit_chain",
@@ -953,7 +953,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
         "status_query": "sox_302_human_certification_pct"
       },
       {
-        "framework": "21cfr_part_11",
+        "framework": "cfr_part_11",
         "clause": "21 CFR Part 11 §11.50 — Electronic Signature Requirements for Certifications",
         "mapping": "AtlaSent captures the Qualified Person's MFA-verified signature, the meaning of the certification, and the regulatory basis — satisfying FDA requirements for electronic batch release certifications.\n",
         "evidence_source": "permit_record",
@@ -1575,8 +1575,8 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "regulatory_mappings": [
       {
         "framework": "eu_ai_act",
-        "clause": "EU AI Act Art. 14 — Human Oversight",
-        "mapping": "Every autonomous tool invocation is gated by a verifiable permit, giving operators a tamper-evident record of what an agent did and the authority under which it acted.\n",
+        "clause": "EU AI Act Art. 14(4)(d)-(e) — Human Oversight (partial)",
+        "mapping": "Partial, technical contribution only. A tool invocation cannot execute without a verified permit, so the runtime can refuse it (Art. 14(4)(d)) and the pre-call gate acts as the \"stop\" procedure for each discrete invocation (Art. 14(4)(e)). This action does not require human approval by default; routing specific invocations to a human decision needs a deployer-configured hold/escalate policy. It does not cover Art. 14(1)-(2) or 14(4)(a)-(c), and whether an agent is a high-risk system in scope of Art. 14 at all is the deployer's determination. The audit chain records what the agent did and the authority under which it acted.\n",
         "evidence_source": "audit_chain",
         "status_query": "agent_action_permit_coverage"
       },
@@ -1945,7 +1945,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000033",
     "slug": "infrastructure.change",
     "display_name": "Infrastructure Change",
-    "description": "Authorization gate for changing production infrastructure or its configuration — applying Terraform/Helm, altering gateway routing, changing network controls (WAF rules, security groups, ingress, DNS, load balancers), and changing monitoring/alerting configuration (alert routing and thresholds, silences/mutes, health checks, on-call escalation policies, dashboards and retention windows that feed incident response). Infrastructure changes carry broad blast radius: a routing or firewall change can expose or sever production traffic across all services, and a monitoring-configuration change can blind the organization to the consequences of that same failure. Human approval plus a state snapshot binding the planned change (plan hash) gate the action to a reviewed, identified change. Production network-control and monitoring-configuration changes are governed under this action as scenarios of infrastructure change, not as separate actions.\nMonitoring-configuration scope (governed scenario, not a separate action): a change that SUPPRESSES, DISABLES, or MATERIALLY WEAKENS a monitoring or alerting capability — muting or snoozing an alert, raising an alert threshold, disabling a health check, removing a service from a paging rotation or dashboard, or shortening a retention window that would hide the change later — is a \"cover your tracks\" risk pattern: it reduces the organization's ability to detect the consequences of the very change (or a related change) it accompanies. This scenario ALWAYS requires human approval, REGARDLESS of whether the organization has otherwise configured infrastructure.change to allow change-window-based or other lower-friction handling for routine infrastructure changes. No org-level relaxation of this action's friction may ever exempt a monitoring-weakening change, even one that would otherwise qualify as \"routine\" and route through a low-friction path. See the header comment above for the CAR schema's per-scenario-override limitation this note works around, and `policy_template.controls[human_approval].description` below for the same requirement stated as a control-level note.",
+    "description": "Authorization gate for changing production infrastructure or its configuration — applying Terraform/Helm, altering gateway routing, changing network controls (WAF rules, security groups, ingress, DNS, load balancers), and changing monitoring/alerting configuration (alert routing and thresholds, silences/mutes, health checks, on-call escalation policies, dashboards and retention windows that feed incident response). Infrastructure changes carry broad blast radius: a routing or firewall change can expose or sever production traffic across all services, and a monitoring-configuration change can blind the organization to the consequences of that same failure. Human approval plus a state snapshot binding the planned change (plan hash) gate the action to a reviewed, identified change. Production network-control and monitoring-configuration changes are governed under this action as scenarios of infrastructure change, not as separate actions.\nMonitoring-configuration scope (governed scenario, not a separate action): a change that SUPPRESSES, DISABLES, or MATERIALLY WEAKENS a monitoring or alerting capability — muting or snoozing an alert, raising an alert threshold, disabling a health check, removing a service from a paging rotation or dashboard, or shortening a retention window that would hide the change later — is a \"cover your tracks\" risk pattern: it reduces the organization's ability to detect the consequences of the very change (or a related change) it accompanies. This scenario ALWAYS requires human approval, REGARDLESS of whether the organization has otherwise configured infrastructure.change to allow change-window-based or other lower-friction handling for routine infrastructure changes. No org-level relaxation of this action's friction may ever exempt a monitoring-weakening change, even one that would otherwise qualify as \"routine\" and route through a low-friction path.",
     "family": "infrastructure.change",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2053,7 +2053,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000035",
     "slug": "secret.rotate",
     "display_name": "Secret Rotation",
-    "description": "Authorization gate for rotating a production credential or signing key — API keys, database passwords, service tokens, or signing material. Rotation is a privileged operation: a botched or malicious rotation can cause a widespread outage (every consumer of the old secret breaks) or, worse, hand an attacker fresh valid credentials. State snapshot binding captures the secret identity and key version so the permit records exactly which secret was rotated to which version.\nSCOPE (2026-08-25): this action governs rotating a secret's VALUE only — producing a new credential/key version for an existing secret. It does NOT cover changing a secret's ACCESS-CONTROL or GOVERNANCE configuration (who or what may read it, where it is stored, its rotation policy or schedule) — that is a materially broader, higher-authority access-control decision governed by secret.configuration.change (CANON-000054, ACT-0057), which requires human approval and a verified, MFA'd approver. A caller widening who can read a secret, or relocating/reconfiguring its storage or rotation policy, must call secret.configuration.change, not this action. trust_root.publish (CANON-000035; SPECIALIZATIONS.yaml) remains a value-rotation-shaped specialization of THIS action; secret.configuration.change is a distinct standalone canonical action, not a specialization of secret.rotate.",
+    "description": "Authorization gate for rotating a production credential or signing key — API keys, database passwords, service tokens, or signing material. Rotation is a privileged operation: a botched or malicious rotation can cause a widespread outage (every consumer of the old secret breaks) or, worse, hand an attacker fresh valid credentials. State snapshot binding captures the secret identity and key version so the permit records exactly which secret was rotated to which version.\nScope: this action governs rotating a secret's VALUE only — producing a new credential/key version for an existing secret. It does NOT cover changing a secret's ACCESS-CONTROL or GOVERNANCE configuration (who or what may read it, where it is stored, its rotation policy or schedule) — that is a materially broader, higher-authority access-control decision governed by secret.configuration.change (CANON-000054), which requires human approval and a verified, MFA'd approver. A caller widening who can read a secret, or relocating/reconfiguring its storage or rotation policy, must call secret.configuration.change, not this action. trust_root.publish (CANON-000035) remains a value-rotation-shaped specialization of THIS action; secret.configuration.change is a distinct standalone canonical action, not a specialization of secret.rotate.",
     "family": "privileged.operation",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2835,7 +2835,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000048",
     "slug": "trial.randomization.break",
     "display_name": "Trial Randomization Code Break",
-    "description": "Authorization gate for breaking a clinical trial's randomization code for a single subject — revealing that one subject's treatment assignment (distinct from trial.unblinding.execute, CANON-000018, which reveals assignments trial-wide). A code break is typically triggered by a safety event and must be attributable to a named, verified approver, bound to the trial and subject, with an explicit reason. Mints this record from the shape already enforced in production by the authoritative life-sciences seeder (seed_life_sciences_action_classes) since 2026-07-09 — this CAR documents deployed behavior, it does not change it.",
+    "description": "Authorization gate for breaking a clinical trial's randomization code for a single subject — revealing that one subject's treatment assignment (distinct from trial.unblinding.execute, CANON-000018, which reveals assignments trial-wide). A code break is typically triggered by a safety event and must be attributable to a named, verified approver, bound to the trial and subject, with an explicit reason.",
     "family": "clinical.trial",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2884,7 +2884,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000049",
     "slug": "reconciliation.certify",
     "display_name": "Reconciliation — Certify",
-    "description": "Authorization gate for certifying a period-end account reconciliation as complete and accurate — the officer certification step underlying SOX §302/§404. Allow requires the reviewer to have attested; runtime enforcement also requires a cryptographically resolvable, verified actor identity AND an issuer-scoped independent approver (the certifying approver cannot be the same identity as the requester) — a separation-of-duties gate added 2026-07-26 (migration 20260733000000) that the CAR schema does not yet have a field for (see the note above). Mints this record from the shape already enforced in production by the authoritative financial-services seeder (seed_financial_services_action_classes) since 2026-07-10 — this CAR documents deployed behavior, it does not change it.",
+    "description": "Authorization gate for certifying a period-end account reconciliation as complete and accurate — the officer certification step underlying SOX §302/§404. Allow requires the reviewer to have attested; runtime enforcement also requires a cryptographically resolvable, verified actor identity AND an issuer-scoped independent approver (the certifying approver cannot be the same identity as the requester) — a separation-of-duties gate.",
     "family": "finance.controllership",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2941,7 +2941,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000050",
     "slug": "journal_entry.approve",
     "display_name": "Journal Entry — Approve",
-    "description": "Authorization gate for approving a manual journal entry above threshold — the decision that authorizes the entry for posting, distinct from journal.post (CANON-000041), which commits an already-approved entry to the ledger. Allow requires both journal_entry_id and approver_id to be present; runtime enforcement also requires a cryptographically resolvable, verified actor identity AND an issuer-scoped independent approver distinct from the preparer — the same segregation-of-duties gate as reconciliation.certify (ACT-0052), added 2026-07-26 (migration 20260733000000). Mints this record from the shape already enforced in production by the authoritative financial-services seeder (seed_financial_services_action_classes) since 2026-07-10 — this CAR documents deployed behavior, it does not change it.",
+    "description": "Authorization gate for approving a manual journal entry above threshold — the decision that authorizes the entry for posting, distinct from journal.post (CANON-000041), which commits an already-approved entry to the ledger. Allow requires both journal_entry_id and approver_id to be present; runtime enforcement also requires a cryptographically resolvable, verified actor identity AND an issuer-scoped independent approver distinct from the preparer — the same segregation-of-duties gate as reconciliation.certify (CANON-000049).",
     "family": "finance.controllership",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2998,7 +2998,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000051",
     "slug": "variance_review.escalate",
     "display_name": "Variance Review — Escalate",
-    "description": "Authorization gate for escalating a budget/close variance review to a named reviewer — a lower-stakes review-routing action, not a dual-control certification like reconciliation.certify (CANON-000049) or journal_entry.approve (CANON-000050). Allow requires both variance_id and reason to be present; the runtime does not require MFA, a verified actor identity, or an independent approver for this class — a deliberately lighter gate than its two SOX-certification siblings, matching its lower blast radius. Mints this record from the shape already enforced in production by the authoritative financial-services seeder (seed_financial_services_action_classes) since 2026-07-10 — this CAR documents deployed behavior, it does not change it.",
+    "description": "Authorization gate for escalating a budget/close variance review to a named reviewer — a lower-stakes review-routing action, not a dual-control certification like reconciliation.certify (CANON-000049) or journal_entry.approve (CANON-000050). Allow requires both variance_id and reason to be present; the runtime does not require MFA, a verified actor identity, or an independent approver for this class — a deliberately lighter gate than its two SOX-certification siblings, matching its lower blast radius.",
     "family": "finance.controllership",
     "risk_posture": "standard",
     "ai_risk": "Medium",
@@ -3177,7 +3177,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000054",
     "slug": "secret.configuration.change",
     "display_name": "Secret Configuration Change",
-    "description": "Authorization gate for changing a secret's ACCESS-CONTROL or GOVERNANCE configuration — granting or narrowing WHO or WHAT may read a secret (an IAM policy, KMS key policy, or Vault/Secrets Manager access policy attached to it), moving or re-provisioning WHERE it is stored, or changing its rotation policy or schedule. This is distinct from secret.rotate (CANON-000035, ACT-0038), which governs rotating the secret's VALUE — a role-only, non- approved, machine-executable operation. Configuration changes are broader and higher-authority: widening who can read a live credential is a privilege-escalation-shaped decision (the same risk identity.privileged.grant governs for general entitlements), and relocating or degrading a secret's storage or rotation posture can silently weaken every control that depends on that secret staying rotated and access-scoped. Human approval, a verified and MFA'd approver, and a state snapshot binding the before/after configuration gate this action to a reviewed, identified change. secret.rotate's own scope is limited to VALUE rotation; see that CAR's description for the cross-reference this change adds.",
+    "description": "Authorization gate for changing a secret's ACCESS-CONTROL or GOVERNANCE configuration — granting or narrowing WHO or WHAT may read a secret (an IAM policy, KMS key policy, or Vault/Secrets Manager access policy attached to it), moving or re-provisioning WHERE it is stored, or changing its rotation policy or schedule. This is distinct from secret.rotate (CANON-000035), which governs rotating the secret's VALUE — a role-only, non-approved, machine-executable operation. Configuration changes are broader and higher-authority: widening who can read a live credential is a privilege-escalation-shaped decision (the same risk identity.privileged.grant governs for general entitlements), and relocating or degrading a secret's storage or rotation posture can silently weaken every control that depends on that secret staying rotated and access-scoped. Human approval, a verified and MFA'd approver, and a state snapshot binding the before/after configuration gate this action to a reviewed, identified change. secret.rotate's own scope is limited to VALUE rotation.",
     "family": "infrastructure.change",
     "risk_posture": "high",
     "ai_risk": "High",

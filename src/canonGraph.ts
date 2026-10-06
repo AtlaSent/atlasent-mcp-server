@@ -90,7 +90,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     ],
     "assertions": [],
     "frameworks": [
-      "21cfr_part_11",
+      "cfr_part_11",
       "gdpr",
       "hipaa"
     ],
@@ -112,7 +112,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     ],
     "assertions": [],
     "frameworks": [
-      "21cfr_part_11",
+      "cfr_part_11",
       "gdpr",
       "hipaa"
     ],
@@ -228,7 +228,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     ],
     "assertions": [],
     "frameworks": [
-      "21cfr_part_11",
+      "cfr_part_11",
       "iso27001"
     ],
     "controls": [
@@ -252,7 +252,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
       "identity"
     ],
     "frameworks": [
-      "21cfr_part_11",
+      "cfr_part_11",
       "eidas",
       "sox"
     ],
@@ -378,7 +378,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
       "regulatory"
     ],
     "frameworks": [
-      "21cfr_part_11",
+      "cfr_part_11",
       "eu_ai_act",
       "hipaa",
       "sox"
@@ -631,7 +631,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
       "nist_800_53"
     ],
     "controls": [
-      "EU AI Act Art. 14 — Human Oversight",
+      "EU AI Act Art. 14(4)(d)-(e) — Human Oversight (partial)",
       "NIST SP 800-53 Rev.5 AC-3 — Access Enforcement"
     ],
     "domain": "agent",
