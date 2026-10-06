@@ -214,11 +214,76 @@ assessment.
 binary calls. That includes the approval GET poll the HOLD wait needs, which
 the first version of the profile was missing.
 
+### Re-running against the real API (staging)
+
+The 2026-10-06 run used a plain-HTTP stub. This run covers what the stub did
+not: TLS through OpenShell's proxy to the real AtlaSent host, and credential
+injection that the runtime itself accepts. It needs a machine whose sandboxes
+can reach the AtlaSent staging host, and a **staging** test key with
+`evaluate:write`.
+
+1. Copy `examples/openshell/atlasent-provider.yaml` and change the endpoint
+   `host` to the staging host from your `ATLASENT_BASE_URL` (port 443). Give
+   it a new `id`, such as `atlasent-staging`. Lint and import it, then create
+   the provider from the key:
+
+   ```
+   openshell profile lint -f atlasent-staging.yaml
+   openshell profile import -f atlasent-staging.yaml
+   ATLASENT_API_KEY=ask_test_... openshell provider create \
+     --name atlasent-staging --type atlasent-staging --credential ATLASENT_API_KEY
+   ```
+
+2. Save two scripts and run the probe. Success means the request
+   reached the runtime and the runtime accepted the injected key. Any answer
+   other than 401 counts, because this tests transport and injection, not the
+   decision. A 401 means the key was not injected. Replace
+   `<staging-host>` with the host from step 1.
+
+   `start.sh`:
+
+   ```sh
+   openshell sandbox delete acc >/dev/null 2>&1
+   openshell sandbox create --name acc --from curlimages/curl:latest \
+     --provider atlasent-staging --no-auto-providers --no-tty --detach -- sleep 600 >/dev/null
+   until openshell sandbox exec --name acc -- true >/dev/null 2>&1; do sleep 0.5; done
+   ```
+
+   `probe.sh`:
+
+   ```sh
+   code=$(openshell sandbox exec --name acc -- sh -c '
+     curl -sS -o /dev/null -w "%{http_code}" -X POST \
+       -H "authorization: Bearer $ATLASENT_API_KEY" -H "content-type: application/json" \
+       -d "{\"action_type\":\"agent.tool.invoke\",\"actor_id\":\"openshell-probe\",\"context\":{}}" \
+       https://<staging-host>/functions/v1/v1-evaluate')
+   echo "http=$code"
+   # 401 = key not injected; 000 = connection dropped or refused.
+   [ "$code" != "401" ] && [ "$code" != "000" ] && [ -n "$code" ]
+   ```
+
+   ```
+   OPENSHELL_VERSION=0.1.3-pre.4 \
+   OPENSHELL_ACCEPTANCE_START_CMD="sh start.sh" \
+   OPENSHELL_ACCEPTANCE_PROBE_CMD="sh probe.sh" \
+   npm run test:openshell-acceptance
+   ```
+
+3. Record the result (version, driver, number of passing runs) in "Recorded
+   run" above, and in `OPENSHELL_PROBE_PASSED` in `src/openshell.ts` if it
+   widens what that entry claims.
+
 ## Remaining
 
-- Startup-probe runs on the drivers and endpoints the 2026-10-06 run did not
-  cover (see "Recorded run" above).
-- An identity for the executable that the agent cannot set (see "Remaining
-  limit" above).
+- The staging run above, and startup-probe runs on other compute drivers
+  (Kubernetes, Podman, VM).
+- An identity for the executable that the agent cannot set. Proposed design:
+  [`OPENSHELL_WORKLOAD_IDENTITY_DESIGN.md`](OPENSHELL_WORKLOAD_IDENTITY_DESIGN.md)
+  (AtlaSent middleware that checks the gateway-signed sandbox ID before
+  OpenShell injects the key, plus an optional runtime-verified attestation).
+  It needs sign-off before any code.
+- OpenShell 0.1.3 stable. As of 2026-10-06 the newest tag is
+  `v0.1.3-pre.4`. When stable ships, re-run the probe on it and add the
+  result.
 
 Do not fork OpenShell or duplicate its policy engine.
