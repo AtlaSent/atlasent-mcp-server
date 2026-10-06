@@ -1,5 +1,14 @@
 # Release Notes
 
+## v2.17.3 — 2026-10-06
+
+- `atlasent-openshell check --version 0.1.3-pre.4` now says that release
+  contains OpenShell's startup fix. It stays "unverified" until the live startup
+  test passes.
+- The OpenShell guide now explains where the sandbox ID comes from
+  (`OPENSHELL_SANDBOX_ID`, set by OpenShell) and what it does and does not
+  prove.
+
 ## v2.17.2 — 2026-10-05
 
 New MCP Registry name: `io.github.AtlaSent/mcp-server`, matching the GitHub

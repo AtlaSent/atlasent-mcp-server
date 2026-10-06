@@ -67,13 +67,34 @@ as the display name.
   same `kind` + `id`. That is required-if-bound: presenting nothing is a
   `PERMIT_BINDING_MISMATCH`. `verifyRemote` sends `{ kind, id }`, never the
   labels.
-- **Trust:** the binding is only as strong as its source. `atlasent-openshell`
-  reads the sandbox context from `ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE` (JSON,
-  re-read before evaluate and again before verify) or from `OPENSHELL_SANDBOX_ID`,
-  `OPENSHELL_SANDBOX_NAME`, `OPENSHELL_WORKSPACE` and `OPENSHELL_POLICY_GENERATION`.
-  These are this adapter's own names, not OpenShell-defined ones. They must be
-  injected by OpenShell (supervisor or provider), never set by the agent. A
-  process that can rewrite them can claim another sandbox's identity.
+- **Where the ID comes from.** OpenShell itself puts the sandbox ID in the
+  workload's environment as `OPENSHELL_SANDBOX_ID` (checked against
+  NVIDIA/OpenShell@71c3cd9):
+  - its compute drivers (Kubernetes, Podman, VM) set it on the supervisor;
+  - it is reserved, so a sandbox spec, template or exec request cannot
+    override it;
+  - workload processes inherit it, because it is not on the supervisor-only
+    strip list.
+
+  `atlasent-openshell` reads exactly that variable, or a JSON file named by
+  `ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE` (re-read before evaluate and again
+  before verify).
+- **What OpenShell does not give the workload.** `OPENSHELL_SANDBOX` is
+  overwritten with `"1"` inside a workload as an "inside a sandbox" marker, so
+  it is never the name there and the adapter never reads it. OpenShell provides
+  no sandbox name, workspace or policy generation to the workload.
+  `OPENSHELL_SANDBOX_NAME`, `OPENSHELL_WORKSPACE` and
+  `OPENSHELL_POLICY_GENERATION` are optional values an operator may set. They
+  are display labels and change detection only, never authority.
+- **Remaining limit.** OpenShell protects the variable from the sandbox's
+  configuration, not from the agent. A process inside the sandbox can launch
+  `atlasent-openshell` with a different `OPENSHELL_SANDBOX_ID` in its
+  environment, and the runtime's check (atlasent-api#4010) cannot tell. The
+  binding stops one sandbox's permit from being redeemed by a different
+  well-behaved process; it is not proof against an agent that lies to its own
+  child. Closing that needs an identity the agent cannot set, such as a value
+  OpenShell's supervisor attests or the middleware path, where OpenShell
+  supplies `sandbox_id` per request.
 
 ### 2. OpenShell approvals never satisfy an AtlaSent HOLD
 
@@ -102,11 +123,11 @@ from the local snapshot rather than the server value. As a result, the first
 settings poll (about 10s after startup) reports a spurious change, advances the
 policy generation and drops in-flight requests ("Remote end closed connection
 without response"). The fix is NVIDIA/OpenShell#4122 (`ec49209`, merged
-2026-10-02). **As of 2026-10-05 no release contains it.** The latest stable
-release is v0.1.2. The newest prerelease, v0.1.3-pre.3 (`6e865df3`), was cut
-about seven hours before the fix. `assessOpenShellVersion` marks 0.1.2 and
-0.1.3-pre.1 through pre.3 `known_affected`, and every other version
-`unverified`. A version string never makes the path production-ready. Only a
+2026-10-02). v0.1.3-pre.4 (`e7fdd6be`, 2026-10-05) is the first release that
+contains it, confirmed by commit ancestry. The latest stable release is still
+v0.1.2. `assessOpenShellVersion` marks 0.1.2 and 0.1.3-pre.1 through pre.3
+`known_affected`, says pre.4 contains the fix, and calls every version
+`unverified` until a probe passes. A version string never makes the path production-ready. Only a
 recorded pass of the live probe does:
 
 ```
@@ -159,13 +180,11 @@ the first version of the profile was missing.
 ## Remaining
 
 - First recorded live startup-probe pass on a release that contains `ec49209`.
-  None exists yet. An attempt from an AtlaSent cloud session on 2026-10-05
+  v0.1.3-pre.4 is the first such release. An attempt from an AtlaSent cloud session on 2026-10-05
   could not reach OpenShell's release binaries or its ghcr.io image blobs
   (`pkg-containers.githubusercontent.com` is denied by that environment's
   egress policy), so the probe has still never run against a real install.
-- Confirm where OpenShell exposes `sandbox_id` and the policy generation to a
-  process inside the sandbox, so the context is injected rather than
-  self-reported. Middleware receives `sandbox_id` per request. A binary inside
-  the sandbox has no documented equivalent yet.
+- An identity for the executable that the agent cannot set (see "Remaining
+  limit" above).
 
 Do not fork OpenShell or duplicate its policy engine.
