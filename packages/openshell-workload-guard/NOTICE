@@ -1,0 +1,7 @@
+@atlasent/openshell-workload-guard
+Copyright (c) 2026 AtlaSent IP Holdings LLC
+
+This package includes proto/supervisor_middleware.proto and proto/extension.proto,
+copied unmodified from NVIDIA OpenShell (https://github.com/NVIDIA/OpenShell),
+Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES, licensed under the
+Apache License, Version 2.0.

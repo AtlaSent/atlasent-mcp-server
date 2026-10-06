@@ -67,18 +67,21 @@ as the display name.
   same `kind` + `id`. That is required-if-bound: presenting nothing is a
   `PERMIT_BINDING_MISMATCH`. `verifyRemote` sends `{ kind, id }`, never the
   labels.
-- **Where the ID comes from.** OpenShell itself puts the sandbox ID in the
-  workload's environment as `OPENSHELL_SANDBOX_ID` (checked against
-  NVIDIA/OpenShell@71c3cd9):
-  - its compute drivers (Kubernetes, Podman, VM) set it on the supervisor;
-  - it is reserved, so a sandbox spec, template or exec request cannot
-    override it;
-  - workload processes inherit it, because it is not on the supervisor-only
-    strip list.
+- **Where the ID comes from.** OpenShell's Kubernetes, Podman and VM compute
+  drivers set `OPENSHELL_SANDBOX_ID` on the supervisor. It is reserved, so a
+  sandbox spec, template or exec request cannot override it (checked against
+  NVIDIA/OpenShell@71c3cd9).
 
-  `atlasent-openshell` reads exactly that variable, or a JSON file named by
+  **Corrected 2026-10-06: the Docker driver does not give it to the workload.**
+  Earlier text here said workload processes always inherit it. A live check on
+  0.1.3-pre.4 (Docker driver) found only `OPENSHELL_SANDBOX=1` in the
+  workload's environment, both in the initial command and under
+  `sandbox exec`. Inheritance on the other drivers has not been checked live.
+
+  `atlasent-openshell` reads `OPENSHELL_SANDBOX_ID`, or a JSON file named by
   `ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE` (re-read before evaluate and again
-  before verify).
+  before verify). When neither is present it refuses, never guessing. On the
+  Docker driver an operator has to supply the context file.
 - **What OpenShell does not give the workload.** `OPENSHELL_SANDBOX` is
   overwritten with `"1"` inside a workload as an "inside a sandbox" marker, so
   it is never the name there and the adapter never reads it. OpenShell provides
@@ -86,15 +89,18 @@ as the display name.
   `OPENSHELL_SANDBOX_NAME`, `OPENSHELL_WORKSPACE` and
   `OPENSHELL_POLICY_GENERATION` are optional values an operator may set. They
   are display labels and change detection only, never authority.
-- **Remaining limit.** OpenShell protects the variable from the sandbox's
-  configuration, not from the agent. A process inside the sandbox can launch
-  `atlasent-openshell` with a different `OPENSHELL_SANDBOX_ID` in its
-  environment, and the runtime's check (atlasent-api#4010) cannot tell. The
-  binding stops one sandbox's permit from being redeemed by a different
-  well-behaved process; it is not proof against an agent that lies to its own
-  child. Closing that needs an identity the agent cannot set, such as a value
-  OpenShell's supervisor attests or the middleware path, where OpenShell
-  supplies `sandbox_id` per request.
+- **The agent can still lie to its own child process. The workload guard closes that.**
+  A process inside the sandbox can launch `atlasent-openshell` with a
+  different sandbox ID, and on its own the runtime's check
+  (atlasent-api#4010) cannot tell. The workload guard
+  (`packages/openshell-workload-guard`, CROSS-066) closes this. It runs as
+  OpenShell supervisor middleware, outside the agent's control, before the
+  AtlaSent key is injected. It reads the sandbox from OpenShell's
+  gateway-signed token and denies any evaluate or verify naming another
+  sandbox. For keys flagged `requires_workload_attestation`, the runtime also
+  requires the guard's signed attestation (atlasent-api#4032). Without the
+  guard, the binding only stops a permit moving between well-behaved
+  processes.
 
 ### 2. OpenShell approvals never satisfy an AtlaSent HOLD
 
@@ -277,11 +283,12 @@ can reach the AtlaSent staging host, and a **staging** test key with
 
 - The staging run above, and startup-probe runs on other compute drivers
   (Kubernetes, Podman, VM).
-- An identity for the executable that the agent cannot set. Proposed design:
-  [`OPENSHELL_WORKLOAD_IDENTITY_DESIGN.md`](OPENSHELL_WORKLOAD_IDENTITY_DESIGN.md)
-  (AtlaSent middleware that checks the gateway-signed sandbox ID before
-  OpenShell injects the key, plus an optional runtime-verified attestation).
-  It needs sign-off before any code.
+- Deploying the workload guard
+  ([`OPENSHELL_WORKLOAD_IDENTITY_DESIGN.md`](OPENSHELL_WORKLOAD_IDENTITY_DESIGN.md),
+  `packages/openshell-workload-guard`). Phase 1 was live-tested on 0.1.3-pre.4.
+  Phase 2 (atlasent-api#4032) is not applied to any environment yet.
+- A sandbox ID for the workload on the Docker driver, where OpenShell does not
+  provide one. One option is for the guard to fill in an absent workload.
 - OpenShell 0.1.3 stable. As of 2026-10-06 the newest tag is
   `v0.1.3-pre.4`. When stable ships, re-run the probe on it and add the
   result.

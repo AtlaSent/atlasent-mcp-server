@@ -1,0 +1,26 @@
+{
+  "name": "@atlasent/openshell-workload-guard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenShell supervisor middleware that denies AtlaSent evaluate/verify requests naming a sandbox other than the one OpenShell's gateway signed for, and signs a per-request workload attestation for the AtlaSent runtime.",
+  "bin": {
+    "atlasent-workload-guard": "cli.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.node.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AtlaSent/atlasent-mcp-server.git",
+    "directory": "packages/openshell-workload-guard"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "1.14.5",
+    "@grpc/proto-loader": "0.8.1"
+  }
+}
