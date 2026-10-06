@@ -1,11 +1,12 @@
 {
   "name": "@atlasent/mcp-server",
-  "version": "2.17.4",
+  "version": "2.17.5",
   "description": "AtlaSent MCP server: with an API key, an AI agent's consequential actions wait for organizational approval and get signed proof your auditor can check. Without a key it runs an offline, unsigned demo.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "mcp-server": "./dist/index.js",
     "atlasent-mcp": "./dist/index.js",
     "atlasent-openshell": "./dist/openshellCli.js"
   },

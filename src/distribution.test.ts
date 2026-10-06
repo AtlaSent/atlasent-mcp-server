@@ -21,6 +21,20 @@ describe("distribution metadata", () => {
     assert.equal(json("package.json").mcpName, json("server.json").name);
   });
 
+  it("`npx -y @atlasent/mcp-server` resolves to the MCP server", () => {
+    // npx runs the only bin when there is one. With several, it runs the one
+    // named after the unscoped package name and otherwise fails with "could
+    // not determine executable to run". 2.17.0 added atlasent-openshell and
+    // broke every npx install (Claude Code, Claude Desktop, the MCP Registry,
+    // the README) until 2.17.5.
+    const bins = pkg.bin as Record<string, string>;
+    const unscoped = String(pkg.name).replace(/^@[^/]+\//, "");
+    const entries = Object.keys(bins);
+    const resolved = entries.length === 1 ? bins[entries[0]] : bins[unscoped];
+    assert.ok(resolved, `npx cannot choose among bins ${entries.join(", ")}: add one named "${unscoped}"`);
+    assert.equal(resolved.replace(/^\.\//, ""), "dist/index.js");
+  });
+
   it("repository URLs use the GitHub org's exact casing (npm provenance compares case-sensitively)", () => {
     for (const f of ["package.json", "packages/mcp-gate/package.json", "packages/agent-hooks/package.json"]) {
       const url = String(json(f).repository?.url ?? "");

@@ -1,5 +1,13 @@
 # Release Notes
 
+## v2.17.5 — 2026-10-06
+
+- **Fix: `npx -y @atlasent/mcp-server` failed on 2.17.0 through 2.17.4** with
+  "could not determine executable to run". Claude Code, Claude Desktop and any
+  other host that starts the server with npx could not connect. Upgrade, or
+  pin `@atlasent/mcp-server@2.16.0` until this version is out. No
+  configuration changes are needed.
+
 ## v2.17.4 — 2026-10-06
 
 - The live OpenShell startup test has now run against real installs. On
