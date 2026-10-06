@@ -7,12 +7,13 @@
 # AtlaSent authority API surface to the AtlaSent adapter binary.
 id: atlasent
 display_name: AtlaSent Organizational Authority
-category: security
+category: other
 credentials:
   - name: api_key
     env_vars: [ATLASENT_API_KEY]
     required: true
     auth_style: bearer
+    header_name: authorization
 endpoints:
   - host: api.atlasent.io
     port: 443

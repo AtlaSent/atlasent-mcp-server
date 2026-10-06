@@ -15,6 +15,23 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 Nothing yet.
 
+## [2.17.4] - 2026-10-06
+
+### Fixed
+
+- `examples/openshell/atlasent-provider.yaml` now passes `openshell profile
+  lint` on OpenShell 0.1.3-pre.4. It used `category: security`, which OpenShell
+  does not accept, and its bearer credential did not name its header. A unit
+  test now checks both.
+
+### Changed
+
+- OpenShell adapter: the live startup test passed on OpenShell 0.1.3-pre.4
+  (3 of 3 runs), and the same test failed on 0.1.2, which has the startup bug.
+  `atlasent-openshell check --version 0.1.3-pre.4` now reports `probe_passed`.
+  0.1.2 and 0.1.3-pre.1 to pre.3 are still `known_affected`, and any other
+  version is still `unverified`.
+
 ## [2.17.3] - 2026-10-06
 
 ### Changed

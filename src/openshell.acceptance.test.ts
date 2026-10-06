@@ -33,7 +33,8 @@ const version = process.env.OPENSHELL_VERSION;
 const skip = !probeCmd || !version ? "set OPENSHELL_VERSION and OPENSHELL_ACCEPTANCE_PROBE_CMD to run" : false;
 
 function classify(text: string): "dropped" | "denied" | "error" {
-  if (/closed connection|connection reset|ECONNRESET|EPIPE/i.test(text)) return "dropped";
+  // curl (52) "Empty reply from server" is how 0.1.2's stale-generation drop surfaces.
+  if (/closed connection|connection reset|ECONNRESET|EPIPE|empty reply from server|curl: \(52\)/i.test(text)) return "dropped";
   if (/policy|denied|403/i.test(text)) return "denied";
   return "error";
 }

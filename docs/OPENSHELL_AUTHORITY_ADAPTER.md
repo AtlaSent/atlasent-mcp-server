@@ -126,9 +126,9 @@ without response"). The fix is NVIDIA/OpenShell#4122 (`ec49209`, merged
 2026-10-02). v0.1.3-pre.4 (`e7fdd6be`, 2026-10-05) is the first release that
 contains it, confirmed by commit ancestry. The latest stable release is still
 v0.1.2. `assessOpenShellVersion` marks 0.1.2 and 0.1.3-pre.1 through pre.3
-`known_affected`, says pre.4 contains the fix, and calls every version
-`unverified` until a probe passes. A version string never makes the path production-ready. Only a
-recorded pass of the live probe does:
+`known_affected`. It marks pre.4 `probe_passed`, because of the recorded pass
+below. Every other version is `unverified`. A version string never makes the
+path production-ready. Only a recorded pass of the live probe does:
 
 ```
 OPENSHELL_VERSION=<x.y.z> \
@@ -139,9 +139,46 @@ npm run test:openshell-acceptance
 
 The probe sends a request every 500 ms for the first 20 s after start. It
 fails on any dropped, denied or errored request. On a known-affected version it
-fails even when every request passes. **It has not yet been run against a real
-OpenShell install.** The unit suite proves only the probe logic, including a
-positive control that reproduces the 0.1.2 failure pattern.
+fails even when every request passes.
+
+### Recorded run, 2026-10-06
+
+Setup, the same for both versions:
+
+- Gateway image `ghcr.io/nvidia/openshell/gateway:<version>` in mTLS mode,
+  with the Docker compute driver and the matching supervisor binary.
+- Sandbox from `curlimages/curl:latest`, with a provider built from a test
+  profile shaped like `examples/openshell/atlasent-provider.yaml`: a bearer
+  credential with `header_name: authorization`, and a REST endpoint
+  `host.openshell.internal:18080` that allows `POST
+  /functions/v1/v1-evaluate`.
+- That endpoint was a local stub that holds each request for 2 s and logs
+  whether the real credential replaced the sandbox's placeholder.
+- The probe command was `openshell sandbox exec` running `curl --fail` with
+  `Authorization: Bearer $ATLASENT_API_KEY`.
+
+| OpenShell | Result |
+|---|---|
+| 0.1.2 (positive control) | **Failed.** A request at 8.3 s got `curl: (52) Empty reply from server`. The supervisor logged `provider_env_changed:true` with an unchanged revision, then `policy generation is stale [captured_generation:1 current_generation:2]` for each in-flight request. A separate 50-request shell probe lost 4 requests the same way. |
+| 0.1.3-pre.4 | **Passed 3 of 3 runs.** Every request was answered (8 per run). The stub saw the real credential on every request. The supervisor logged no provider-env change and no stale generation. A separate 50-request shell probe got 50 of 50. |
+
+What the run does not cover:
+
+- other compute drivers (Kubernetes, Podman, VM);
+- the real AtlaSent API over TLS, as opposed to the plain-HTTP stub;
+- OpenShell releases after pre.4.
+
+Re-run the probe for each of these before relying on it.
+
+Two things the run surfaced:
+
+- The first version of the example profile failed `openshell profile lint` on
+  pre.4 (`category: security` is not accepted; a bearer credential needs
+  `header_name`). Both are fixed and checked in the unit suite.
+- The workload has to send the placeholder itself. OpenShell replaces
+  `Bearer <placeholder>` with the real key; it does not add the header. A
+  probe that sends no `Authorization` header passes without exercising
+  credential injection, which is the path #3994 sits on.
 
 ## `atlasent-openshell` executable
 
@@ -179,11 +216,8 @@ the first version of the profile was missing.
 
 ## Remaining
 
-- First recorded live startup-probe pass on a release that contains `ec49209`.
-  v0.1.3-pre.4 is the first such release. An attempt from an AtlaSent cloud session on 2026-10-05
-  could not reach OpenShell's release binaries or its ghcr.io image blobs
-  (`pkg-containers.githubusercontent.com` is denied by that environment's
-  egress policy), so the probe has still never run against a real install.
+- Startup-probe runs on the drivers and endpoints the 2026-10-06 run did not
+  cover (see "Recorded run" above).
 - An identity for the executable that the agent cannot set (see "Remaining
   limit" above).
 
