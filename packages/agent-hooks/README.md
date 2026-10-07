@@ -123,7 +123,7 @@ Be clear-eyed about this; a guard that overclaims is worse than none.
 This plugin answers *"did someone at the keyboard say yes?"* After an incident, the
 question is *"who in the organization authorized this, and can you prove it?"*
 
-[AtlaSent](https://www.atlasent.io) answers that one. The same destructive actions go to
+[AtlaSent](https://www.atlasent.io/?utm_source=agent-hooks&utm_medium=readme) answers that one. The same destructive actions go to
 your organization's policy at execution time: a named approver, a single-use permit bound
 to that exact action, and a signed record of the decision. For agents, use [`@atlasent/mcp-server`](../../README.md) or
 [`@atlasent/mcp-gate`](../mcp-gate); for pipelines, the

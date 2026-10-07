@@ -160,7 +160,7 @@ upstreams that create detached descendants require an external supervisor/sandbo
 ## Free / paid boundary and remaining delivery
 
 Free local edition (part of the free AtlaSent Community plan; plans at
-https://www.atlasent.io/pricing): tool visibility through MCP listing, explicit rules, blocking,
+https://www.atlasent.io/pricing?utm_source=mcp-gate&utm_medium=readme): tool visibility through MCP listing, explicit rules, blocking,
 metadata evidence, offline viewer and versioned contributed policy packs.
 Planned paid organizational management: enrolled gates, centrally owned policy,
 independent approvals, retained evidence, alerts and fleet health. No pricing or billing
