@@ -992,7 +992,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000018",
     "slug": "trial.unblinding.execute",
     "display_name": "Clinical Trial Unblinding",
-    "description": "Authorization gate for clinical trial unblinding — the irreversible act of revealing randomized treatment assignments to investigators, sponsors, and/or analysts. Unblinding compromises the statistical integrity of ongoing blinded trials and constitutes a regulated consequential transition requiring maximum controls: dual authorization, MFA, a verified human actor, and cryptographic proof of regulatory scope, actor identity, and explicit approval assertion. No AI system or automated process may execute unblinding. Regulatory basis: ICH E6(R2) §4.8.2, 21 CFR Part 11 §11.50/§11.300, EU Annex 11 §7.1.",
+    "description": "Authorization gate for clinical trial unblinding — the irreversible act of revealing randomized treatment assignments to investigators, sponsors, and/or analysts. Unblinding compromises the statistical integrity of ongoing blinded trials and constitutes a regulated consequential transition requiring maximum controls: dual authorization, MFA, a verified human actor, and cryptographic proof of regulatory scope, actor identity, and explicit approval assertion. No AI system or automated process may execute unblinding. Regulatory basis: ICH E6(R3) Annex 1 §2.11 and §3.16.1(g), 21 CFR Part 11 §11.50/§11.300, EU Annex 11 §9. Dual authorization is this action's own control; ICH E6 does not require two approvers.",
     "family": "clinical.trial",
     "risk_posture": "critical",
     "ai_risk": "Extreme",
@@ -1015,8 +1015,8 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "regulatory_mappings": [
       {
         "framework": "ich_e6_gcp",
-        "clause": "ICH E6(R2) §4.8.2 — Breaking the Blind",
-        "mapping": "Dual authorization by the sponsor unblinding officer and an independent data monitor is captured as two verified approval artifacts bound into the unblinding permit.\n",
+        "clause": "ICH E6(R3) Annex 1 §2.11 — Randomisation Procedures and Unblinding; §3.16.1(g) — Unblinding Records",
+        "mapping": "ICH E6(R3) allows the code to be broken only in accordance with the protocol (Annex 1 §2.11) and requires the sponsor to record who was unblinded, when and why (§3.16.1(g)). Each unblinding is bound to its verified authorizers, captured as approval artifacts in the permit. Requiring two authorizers is this action's own control, not an ICH requirement.\n",
         "evidence_source": "audit_chain",
         "status_query": "clinical_unblinding_dual_auth_pct"
       },
@@ -1036,14 +1036,14 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
       },
       {
         "framework": "eu_annex_11",
-        "clause": "EU Annex 11 §7.1 — Audit Trail",
+        "clause": "EU Annex 11 §9 — Audit Trails",
         "mapping": "Every unblinding decision writes an immutable append-only entry to the audit chain (clinical_unblinding_events), hash-linked and Ed25519-signed.\n",
         "evidence_source": "audit_chain",
         "status_query": "unblinding_audit_trail_coverage_pct"
       },
       {
         "framework": "gxp_general",
-        "clause": "ICH E9 §6 — Trial Conduct Issues / Blinding",
+        "clause": "ICH E9 §2.3.1 — Blinding",
         "mapping": "The state snapshot captures a dataset-integrity hash at the moment of authorization, binding the permit to the trial data state via cdo_hash.\n",
         "evidence_source": "permit_record",
         "status_query": "unblinding_state_snapshot_pct"
@@ -1074,7 +1074,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000019",
     "slug": "trial.blinding.setup",
     "display_name": "Clinical Trial Blind Establishment",
-    "description": "Authorization gate for establishing the blind in a clinical trial — the act of sealing randomization codes, binding treatment assignments to subject IDs, and activating the blinded-data enforcement state in trial management systems (RTSM/IVRS). Blinding setup is the prerequisite that makes trial.unblinding.execute irreversible once executed; errors at setup time (wrong randomization list, incorrect stratum assignments) propagate through the entire trial. Only sponsor-designated blinding authority roles may authorize blind establishment. Requires a verified identity, supervisor review of the randomization specification, a cryptographic snapshot of the randomization list hash, and a complete audit trail per 21 CFR Part 11 §11.10(a) and EU Annex 11 §7.1. Machine callers may not execute blinding setup without explicit organizational override.",
+    "description": "Authorization gate for establishing the blind in a clinical trial — the act of sealing randomization codes, binding treatment assignments to subject IDs, and activating the blinded-data enforcement state in trial management systems (RTSM/IVRS). Blinding setup is the prerequisite that makes trial.unblinding.execute irreversible once executed; errors at setup time (wrong randomization list, incorrect stratum assignments) propagate through the entire trial. Only sponsor-designated blinding authority roles may authorize blind establishment. Requires a verified identity, supervisor review of the randomization specification, a cryptographic snapshot of the randomization list hash, and a complete audit trail per 21 CFR Part 11 §11.10(a) and EU Annex 11 §9. Machine callers may not execute blinding setup without explicit organizational override.",
     "family": "clinical.trial",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -1095,8 +1095,8 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "regulatory_mappings": [
       {
         "framework": "ich_e6_gcp",
-        "clause": "ICH E6(R2) §5.13 — Record Access and Traceability for Blinding",
-        "mapping": "The sealed list of treatment codes and the establishment of the blind are documented with the identity of the blinding authority and the date, bound into the permit.\n",
+        "clause": "ICH E6(R3) Annex 1 §3.15.2(d) — Sponsor Blinding Processes",
+        "mapping": "ICH E6(R3) Annex 1 §3.15.2(d) requires the sponsor to implement a process to blind and to prevent and detect inappropriate unblinding. The sealed list of treatment codes and the establishment of the blind are documented with the identity of the blinding authority and the date, bound into the permit.\n",
         "evidence_source": "audit_chain",
         "status_query": "blinding_setup_authority_documented_pct"
       },
@@ -1116,14 +1116,14 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
       },
       {
         "framework": "eu_annex_11",
-        "clause": "EU Annex 11 §7.1 — Audit Trail",
+        "clause": "EU Annex 11 §9 — Audit Trails",
         "mapping": "An immutable append-only audit entry records who established the blind, when, and against which randomization specification.\n",
         "evidence_source": "audit_chain",
         "status_query": "blinding_setup_audit_trail_pct"
       },
       {
         "framework": "ich_e9",
-        "clause": "ICH E9 §3.2 — Methods of Randomization / Blinding",
+        "clause": "ICH E9 §2.3.1 — Blinding; §2.3.2 — Randomisation",
         "mapping": "The randomization list and blinding method are documented and sealed before the trial starts; the state snapshot captures the randomization specification hash at setup time.\n",
         "evidence_source": "permit_record",
         "status_query": "blinding_setup_state_snapshot_pct"
@@ -1151,7 +1151,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000020",
     "slug": "trial.unblinding.emergency",
     "display_name": "Emergency Clinical Trial Unblinding",
-    "description": "Authorization gate for emergency single-patient unblinding in a clinical trial — the act of breaking the blind for a specific subject when knowledge of their treatment assignment is required for immediate medical decision-making (e.g., a Serious Adverse Event requiring the treating physician to know whether the patient received drug or placebo). Emergency unblinding is per-subject, not a full trial unblinding, and must be performed by the principal investigator or site physician responsible for the subject's safety. REQUESTER-AUTHORIZED: the act is authorized directly by the verified treating physician (the requester) — no approval artifact, approver, or quorum — with requester-bound MFA, a documented medical-necessity attestation, and an immediate audit record. The blind is broken for one subject only — other subjects remain blinded and the trial may continue. Regulatory basis: ICH E6(R2) §4.8.2–3, ICH E9 §6.5, 21 CFR Part 11 §11.300, EU Annex 11 §14.",
+    "description": "Authorization gate for emergency single-patient unblinding in a clinical trial — the act of breaking the blind for a specific subject when knowledge of their treatment assignment is required for immediate medical decision-making (e.g., a Serious Adverse Event requiring the treating physician to know whether the patient received drug or placebo). Emergency unblinding is per-subject, not a full trial unblinding, and must be performed by the principal investigator or site physician responsible for the subject's safety. REQUESTER-AUTHORIZED: the act is authorized directly by the verified treating physician (the requester) — no approval artifact, approver, or quorum — with requester-bound MFA, a documented medical-necessity attestation, and an immediate audit record. The blind is broken for one subject only — other subjects remain blinded and the trial may continue. Regulatory basis: ICH E6(R3) Annex 1 §2.11 and §3.15.2(d)(ii), ICH E9 §2.3.1, 21 CFR Part 11 §11.300, EU Annex 11 §9.",
     "family": "clinical.trial",
     "risk_posture": "critical",
     "ai_risk": "Extreme",
@@ -1173,15 +1173,15 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "regulatory_mappings": [
       {
         "framework": "ich_e6_gcp",
-        "clause": "ICH E6(R2) §4.8.2–3 — Breaking the Blind / SAE Reporting",
-        "mapping": "Emergency single-subject unblinding is authorized only by the principal investigator or treating physician, with the medical emergency, physician identity, and immediate SAE reporting captured in the signed evaluation.\n",
+        "clause": "ICH E6(R3) Annex 1 §2.11 — Emergency Unblinding; §3.15.2(d)(ii) — Rapid Emergency Identification; §2.7.2 — Safety Reporting",
+        "mapping": "ICH E6(R3) requires the investigator to be able to unblind in an emergency without undue delay and hindrance (Annex 1 §2.11), through a mechanism that protects other participants' assignments (§3.15.2(d)(ii)), and to report SAEs to the sponsor immediately (§2.7.2(b)). Emergency single-subject unblinding is authorized by the verified principal investigator or treating physician, with the medical emergency, physician identity, and SAE reference captured in the signed evaluation.\n",
         "evidence_source": "audit_chain",
         "status_query": "emergency_unblinding_pi_authorized_pct"
       },
       {
         "framework": "ich_e9",
-        "clause": "ICH E9 §6.5 — Unblinding at Interim Analysis / Emergency Unblinding Procedures",
-        "mapping": "The emergency-unblinding decision is limited to the affected subject and the audit record supports immediate reporting to the sponsor and data monitoring committee.\n",
+        "clause": "ICH E9 §2.3.1 — Breaking the Blind for a Single Subject",
+        "mapping": "ICH E9 §2.3.1 allows the blind to be broken for a single subject only when the subject's physician deems it essential for care, and requires every break to be reported and explained. The decision is limited to the affected subject and the audit record supports that report.\n",
         "evidence_source": "audit_chain",
         "status_query": "emergency_unblinding_single_subject_pct"
       },
@@ -1201,7 +1201,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
       },
       {
         "framework": "eu_annex_11",
-        "clause": "EU Annex 11 §14 — Audit Trails for Emergency Events",
+        "clause": "EU Annex 11 §9 — Audit Trails",
         "mapping": "The emergency unblinding is captured in the immutable audit trail with actor identity, subject ID, medical justification, timestamp, and SAE reference number.\n",
         "evidence_source": "audit_chain",
         "status_query": "emergency_unblinding_audit_trail_pct"
@@ -2233,7 +2233,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "regulatory_mappings": [
       {
         "framework": "ich_e6_gcp",
-        "clause": "ICH E6(R2) §4.5 — Compliance with Protocol / §3.3 (IRB/IEC)",
+        "clause": "ICH E6(R3) Annex 1 §2.5 — Compliance with Protocol; §1.4.7 — IRB/IEC Approval of Protocol Changes",
         "mapping": "A protocol amendment requires documented IRB/EC approval before implementation. AtlaSent binds the amendment permit to the approval and the amended version — the authorized, attributable record GCP requires that the change was sanctioned before it took effect.\n",
         "evidence_source": "audit_chain",
         "status_query": "protocol_amendment_approval_pct"
@@ -2502,7 +2502,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000043",
     "slug": "trial.biomarker.reclassify",
     "display_name": "Biomarker Result Reclassification Approval",
-    "description": "Authorization gate for approving and releasing a corrected or reinterpreted biomarker result in a genomics-enabled clinical trial — a previously reported genomic or biomarker call being revised (e.g. a variant reclassified from VUS to pathogenic, a corrected HER2/EGFR status, or a re-adjudicated companion-diagnostic result). AtlaSent protects the AUTHORIZATION of the consequential change; it does not perform the scientific interpretation — the scientific basis comes from the laboratory method, the classification criteria, the protocol's context of use, and the designated authority. The gate requires authorized reviewers, supporting source evidence, a stated reason for change, the applicable study and laboratory criteria, and a traceable record of the prior and revised classification. A reported result is trial data of record; revising it can change a subject's eligibility, arm assignment, or safety profile, so it cannot be a silent overwrite. It must be attributable to a cryptographically verified qualified reviewer (a self-asserted actor_id from a LIS/LIMS is not sufficient), and no automated pipeline may reclassify a reported result on its own. Regulatory basis: 21 CFR Part 11 §11.10(b)/(e) (change-record and audit trail — not the scientific validity of the reclassification), ICH E6(R2) §5.5.3, ALCOA+, ICH E9 §5.",
+    "description": "Authorization gate for approving and releasing a corrected or reinterpreted biomarker result in a genomics-enabled clinical trial — a previously reported genomic or biomarker call being revised (e.g. a variant reclassified from VUS to pathogenic, a corrected HER2/EGFR status, or a re-adjudicated companion-diagnostic result). AtlaSent protects the AUTHORIZATION of the consequential change; it does not perform the scientific interpretation — the scientific basis comes from the laboratory method, the classification criteria, the protocol's context of use, and the designated authority. The gate requires authorized reviewers, supporting source evidence, a stated reason for change, the applicable study and laboratory criteria, and a traceable record of the prior and revised classification. A reported result is trial data of record; revising it can change a subject's eligibility, arm assignment, or safety profile, so it cannot be a silent overwrite. It must be attributable to a cryptographically verified qualified reviewer (a self-asserted actor_id from a LIS/LIMS is not sufficient), and no automated pipeline may reclassify a reported result on its own. Regulatory basis: 21 CFR Part 11 §11.10(b)/(e) (change-record and audit trail — not the scientific validity of the reclassification), ICH E6(R3) Annex 1 §4.2.2 and §4.2.4, ALCOA+, ICH E9 §5.",
     "family": "clinical.trial",
     "risk_posture": "high",
     "ai_risk": "High",
@@ -2538,14 +2538,14 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
       },
       {
         "framework": "ich_e6_gcp",
-        "clause": "ICH E6(R2) §5.5.3 — Electronic Data Handling / Audit Trail",
+        "clause": "ICH E6(R3) Annex 1 §4.2.2 — Audit Trails; §4.2.4 — Data Corrections",
         "mapping": "Every reclassification writes an immutable, attributable audit-chain entry naming the qualified reviewer, the trial, the assay, and the prior and new call.\n",
         "evidence_source": "audit_chain",
         "status_query": "biomarker_reclassification_audit_pct"
       },
       {
         "framework": "gxp_general",
-        "clause": "ICH E9 §5 — Data Handling / Integrity of Trial Results",
+        "clause": "ICH E9 §5 — Data Analysis Considerations",
         "mapping": "Reclassification requires a verified human reviewer and an approval artifact, so a genomic call that changes a subject's eligibility or analysis set is never altered by an automated process without attributable human authorization.\n",
         "evidence_source": "evaluation_record",
         "status_query": "biomarker_reclassification_human_pct"
@@ -2575,7 +2575,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "canon_id": "CANON-000044",
     "slug": "trial.biomarker.eligibility.override",
     "display_name": "Biomarker Eligibility Override",
-    "description": "Authorization gate for overriding biomarker-defined eligibility in a genomics-enabled clinical trial — enrolling or retaining a subject whose genomic or biomarker result does not meet the protocol's inclusion/exclusion criteria (e.g. enrolling an EGFR-negative subject into an EGFR-targeted arm, or waiving a companion-diagnostic cutoff). This is a protocol deviation, not a routine screening decision: it changes who receives an investigational product and can affect subject safety and the analysis population. An override requires a documented medical rationale, a cryptographically verified qualified authorizer (medical monitor or principal investigator — a self-asserted actor_id is not sufficient), and an approval; it may not be granted by an automated screening system. Regulatory basis: ICH E6(R2) §4.5 / §4.3, 21 CFR 312.66, ICH E9 §5.2.",
+    "description": "Authorization gate for overriding biomarker-defined eligibility in a genomics-enabled clinical trial — enrolling or retaining a subject whose genomic or biomarker result does not meet the protocol's inclusion/exclusion criteria (e.g. enrolling an EGFR-negative subject into an EGFR-targeted arm, or waiving a companion-diagnostic cutoff). This is a protocol deviation, not a routine screening decision: it changes who receives an investigational product and can affect subject safety and the analysis population. An override requires a documented medical rationale, a cryptographically verified qualified authorizer (medical monitor or principal investigator — a self-asserted actor_id is not sufficient), and an approval; it may not be granted by an automated screening system. Regulatory basis: ICH E6(R3) Annex 1 §2.5 / §2.7.1, 21 CFR 312.66, ICH E9 §5.2.",
     "family": "clinical.trial",
     "risk_posture": "critical",
     "ai_risk": "High",
@@ -2597,8 +2597,8 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "regulatory_mappings": [
       {
         "framework": "ich_e6_gcp",
-        "clause": "ICH E6(R2) §4.5.3–4 — Compliance with Protocol / Deviations",
-        "mapping": "A deviation from protocol-defined eligibility requires documented medical authorization. AtlaSent binds the override permit to the authorizer's verified identity and rationale — the attributable, pre-hoc record GCP requires for a deviation.\n",
+        "clause": "ICH E6(R3) Annex 1 §2.5.3–2.5.4 — Protocol Deviations",
+        "mapping": "ICH E6(R3) Annex 1 §2.5.3 requires the investigator to document every protocol deviation and explain important ones. AtlaSent binds the override permit to the authorizer's verified identity and rationale — the attributable, pre-hoc record GCP requires for a deviation.\n",
         "evidence_source": "audit_chain",
         "status_query": "eligibility_override_authorized_pct"
       },
@@ -2853,7 +2853,7 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
     "regulatory_mappings": [
       {
         "framework": "ich_e6_gcp",
-        "clause": "ICH E6(R2) §4.8 — Breaking the Blind (subject-level)",
+        "clause": "ICH E6(R3) Annex 1 §2.11 — Randomisation Procedures and Unblinding (subject-level)",
         "mapping": "A single-subject code break, triggered by a safety event, is captured as a verified human approval artifact bound to the trial and subject, with an explicit reason for the break.\n",
         "evidence_source": "audit_chain",
         "status_query": "gxp_randomization_break_approval_pct"

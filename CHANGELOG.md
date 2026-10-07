@@ -13,7 +13,7 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
-## [2.17.5] - 2026-10-06
+## [2.17.5] - 2026-10-07
 
 ### Fixed
 
@@ -38,6 +38,15 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
   `OPENSHELL_SANDBOX_ID` in the workload environment. On that driver,
   `atlasent-openshell` needs `ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE`. The
   guide previously said every workload inherits the variable.
+
+### Changed
+
+- The Canon snapshot behind `atlasent_lookup_action` is re-synced from the
+  atlasent Canon. Clinical-trial actions now cite ICH E6(R3) (Annex 1 §2.11
+  for unblinding) instead of ICH E6(R2) §4.8.2, which is about informed
+  consent. They also state that two approvers for unblinding is AtlaSent's
+  control, not an ICH requirement, and emergency unblinding is
+  requester-authorized.
 
 ## [2.17.4] - 2026-10-06
 

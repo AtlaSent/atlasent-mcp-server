@@ -417,9 +417,9 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     "controls": [
       "21 CFR Part 11 §11.300 — Controls for Identification Codes",
       "21 CFR Part 11 §11.50 — Signature Manifestations",
-      "EU Annex 11 §7.1 — Audit Trail",
-      "ICH E6(R2) §4.8.2 — Breaking the Blind",
-      "ICH E9 §6 — Trial Conduct Issues / Blinding"
+      "EU Annex 11 §9 — Audit Trails",
+      "ICH E6(R3) Annex 1 §2.11 — Randomisation Procedures and Unblinding; §3.16.1(g) — Unblinding Records",
+      "ICH E9 §2.3.1 — Blinding"
     ],
     "domain": "clinical",
     "pattern": "human-only"
@@ -445,9 +445,9 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     "controls": [
       "21 CFR Part 11 §11.10(a) — System Validation / Accurate and Complete Records",
       "21 CFR Part 11 §11.10(e) — Audit Trails for Blinded Data",
-      "EU Annex 11 §7.1 — Audit Trail",
-      "ICH E6(R2) §5.13 — Record Access and Traceability for Blinding",
-      "ICH E9 §3.2 — Methods of Randomization / Blinding"
+      "EU Annex 11 §9 — Audit Trails",
+      "ICH E6(R3) Annex 1 §3.15.2(d) — Sponsor Blinding Processes",
+      "ICH E9 §2.3.1 — Blinding; §2.3.2 — Randomisation"
     ],
     "domain": "clinical",
     "pattern": "approval-chain"
@@ -474,9 +474,9 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     "controls": [
       "21 CFR Part 11 §11.300 — Controls for Identification Codes",
       "21 CFR Part 11 §11.50(a)(2) — Signature Manifestations / Approval Meaning",
-      "EU Annex 11 §14 — Audit Trails for Emergency Events",
-      "ICH E6(R2) §4.8.2–3 — Breaking the Blind / SAE Reporting",
-      "ICH E9 §6.5 — Unblinding at Interim Analysis / Emergency Unblinding Procedures"
+      "EU Annex 11 §9 — Audit Trails",
+      "ICH E6(R3) Annex 1 §2.11 — Emergency Unblinding; §3.15.2(d)(ii) — Rapid Emergency Identification; §2.7.2 — Safety Reporting",
+      "ICH E9 §2.3.1 — Breaking the Blind for a Single Subject"
     ],
     "domain": "clinical",
     "pattern": "human-only"
@@ -898,7 +898,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     "controls": [
       "21 CFR 312.30 — IND Protocol Amendments",
       "EU Annex 11 §1 (Risk Management) / Clinical Trials Regulation substantial modifications",
-      "ICH E6(R2) §4.5 — Compliance with Protocol / §3.3 (IRB/IEC)"
+      "ICH E6(R3) Annex 1 §2.5 — Compliance with Protocol; §1.4.7 — IRB/IEC Approval of Protocol Changes"
     ],
     "domain": "clinical",
     "pattern": "approval-chain"
@@ -1017,8 +1017,8 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     "controls": [
       "21 CFR Part 11 §11.10(b) — Accurate and Complete Copies",
       "21 CFR Part 11 §11.10(e) — Reason for Change",
-      "ICH E6(R2) §5.5.3 — Electronic Data Handling / Audit Trail",
-      "ICH E9 §5 — Data Handling / Integrity of Trial Results"
+      "ICH E6(R3) Annex 1 §4.2.2 — Audit Trails; §4.2.4 — Data Corrections",
+      "ICH E9 §5 — Data Analysis Considerations"
     ],
     "domain": "clinical",
     "pattern": "approval-chain"
@@ -1043,7 +1043,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     ],
     "controls": [
       "21 CFR 312.66 — Assurance of IRB Review / Investigator Obligations",
-      "ICH E6(R2) §4.5.3–4 — Compliance with Protocol / Deviations",
+      "ICH E6(R3) Annex 1 §2.5.3–2.5.4 — Protocol Deviations",
       "ICH E9 §5.2 — Analysis Sets / Protocol Deviations"
     ],
     "domain": "clinical",
@@ -1140,7 +1140,7 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     ],
     "controls": [
       "21 CFR Part 11 §11.300 — Controls for Identification Codes",
-      "ICH E6(R2) §4.8 — Breaking the Blind (subject-level)"
+      "ICH E6(R3) Annex 1 §2.11 — Randomisation Procedures and Unblinding; §3.16.1(g) — Unblinding Records"
     ],
     "domain": "clinical",
     "pattern": "human-only"

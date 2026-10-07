@@ -1,12 +1,17 @@
 # Release Notes
 
-## v2.17.5 — 2026-10-06
+## v2.17.5 — 2026-10-07
 
 - **Fix: `npx -y @atlasent/mcp-server` failed on 2.17.0 through 2.17.4** with
   "could not determine executable to run". Claude Code, Claude Desktop and any
   other host that starts the server with npx could not connect. Upgrade, or
   pin `@atlasent/mcp-server@2.16.0` until this version is out. No
   configuration changes are needed.
+- **Canon citations corrected.** `atlasent_lookup_action` answers from a Canon
+  snapshot re-synced on 2026-10-07. Clinical-trial actions cite ICH E6(R3)
+  Annex 1 §2.11 for unblinding. The old snapshot cited ICH E6(R2) §4.8.2,
+  which is about informed consent, and described two approvers as an ICH
+  requirement; it is AtlaSent's control.
 
 ## v2.17.4 — 2026-10-06
 
