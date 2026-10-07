@@ -2,7 +2,7 @@
 
 MCP server that enforces authorize-before-execute for any MCP-compatible AI agent.
 
-It is the developer entry point to AtlaSent **AI Action Protection**, which Enterprise teams adopt through a [design partner program](https://www.atlasent.io/ai-actions).
+It is the developer entry point to AtlaSent **AI Action Protection**, which Enterprise teams adopt through a [design partner program](https://www.atlasent.io/ai-actions?utm_source=mcp&utm_medium=readme).
 
 [![npm version](https://img.shields.io/npm/v/@atlasent/mcp-server.svg)](https://www.npmjs.com/package/@atlasent/mcp-server)
 [![CI](https://github.com/AtlaSent/atlasent-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/AtlaSent/atlasent-mcp-server/actions/workflows/ci.yml)
@@ -19,7 +19,7 @@ This MCP server brings it to AI agents (Claude, Cursor, Windsurf, any MCP host).
 
 Try it in 60 seconds with no account: `npx -y @atlasent/mcp-server` (local mode, a demo that protects nothing).
 
-**Local blocking is free.** To actually block on your own machine without an account, use [MCP Gate](./packages/mcp-gate) or the [Claude Code agent guard](./packages/agent-hooks). Both are part of the free Community plan. Hosted decisions, shared policies and approvals for a team are on the [AtlaSent plans](https://www.atlasent.io/pricing).
+**Local blocking is free.** To actually block on your own machine without an account, use [MCP Gate](./packages/mcp-gate) or the [Claude Code agent guard](./packages/agent-hooks). Both are part of the free Community plan. Hosted decisions, shared policies and approvals for a team are on the [AtlaSent plans](https://www.atlasent.io/pricing?utm_source=mcp&utm_medium=readme).
 
 ### For engineers
 

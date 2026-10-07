@@ -2,7 +2,7 @@
   "name": "atlasent",
   "owner": {
     "name": "AtlaSent",
-    "url": "https://www.atlasent.io"
+    "url": "https://www.atlasent.io/?utm_source=claude-plugins&utm_medium=listing"
   },
   "description": "AtlaSent plugins for Claude Code: destructive and shipping actions wait for a person.",
   "plugins": [

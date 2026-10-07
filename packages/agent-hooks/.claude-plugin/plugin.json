@@ -4,7 +4,7 @@
   "description": "Stops AI coding agents from destroying production: dropping databases, deleting volumes, force-pushing, terraform destroy and unreviewed deploys wait for a person. Local, no account. Requires Node.js 18 or later.",
   "author": {
     "name": "AtlaSent",
-    "url": "https://www.atlasent.io"
+    "url": "https://www.atlasent.io/?utm_source=claude-plugins&utm_medium=listing"
   },
   "homepage": "https://github.com/AtlaSent/atlasent-mcp-server/tree/main/packages/agent-hooks#readme",
   "repository": "https://github.com/AtlaSent/atlasent-mcp-server",
