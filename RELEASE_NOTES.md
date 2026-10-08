@@ -1,6 +1,22 @@
 # Release Notes
 
-## v2.17.5 — 2026-10-07
+## v2.18.0 — 2026-10-08
+
+- **New: `atlasent_exposure_review`, the free Authorization Exposure Review.**
+  It scans the workflow files you give it and returns a review a person can
+  read: what was scanned and what it cannot see, every step that can change a
+  real system with no gate that can stop it, the fix for each, and what is
+  already gated. It runs offline, needs no API key and makes no network call.
+  If you ask for help, the review links to an optional request for an
+  independent implementation advisor; nothing is shared without your consent.
+- **Includes the 2.17.5 fixes, which never reached npm.** Above all,
+  `npx -y @atlasent/mcp-server` works again: 2.17.0 through 2.17.4 failed with
+  "could not determine executable to run", so Claude Code, Claude Desktop and
+  any host that starts the server with npx could not connect. Upgrade to 2.18.0.
+  No configuration changes are needed. The corrected Canon citations from
+  2.17.5 are also included.
+
+## v2.17.5 — 2026-10-07 (not published; shipped in 2.18.0)
 
 - **Fix: `npx -y @atlasent/mcp-server` failed on 2.17.0 through 2.17.4** with
   "could not determine executable to run". Claude Code, Claude Desktop and any
