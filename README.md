@@ -358,6 +358,19 @@ Every gap (`ungoverned` or `weak`) carries a `fix`: the `atlasent-action` step t
 
 Works in local mode: no API key, no network, nothing executed. `gate_actions` names your own gate wrappers (a composite action, say); they are reported as custom gates whose internals were not inspected. The report always lists what it cannot see (repository settings, deploys outside CI, the inside of `./deploy.sh`), and a file it cannot parse is listed in `parse_errors`, never skipped. A clean report is not proof that nothing is ungoverned.
 
+### `atlasent_exposure_review`
+
+The free Authorization Exposure Review. It runs the same offline analysis as `atlasent_evidence_gap_report` and returns it as a review a person can read: what was scanned and what it cannot see, every step that can change a real system without a gate that can stop it, the exact fix for each, and what is already gated.
+
+```text
+Input:  { workflows: [{ path, content }], gate_actions? }
+Output: { review: "exposure_review.v1", markdown, summary, help?, sign_up_url? }
+```
+
+Show `markdown` as is. It says plainly that it covers only the files passed in and is not an assessment of your organization's authorization posture. When there are gaps, or nothing was recognized, `help` has two optional links to a request page: one for an independent implementation advisor to explain the findings, one for help rolling the gates out. Your details are shared with an advisor only if you ask for that and consent on that page, and AtlaSent takes no fee from the advisor's work.
+
+No API key, no network, nothing executed.
+
 ### `atlasent_integrity_audit`
 
 Read-only audit of the organization's Authority graph for internal inconsistency. Hosted mode only; the organization is derived server-side from the API key.

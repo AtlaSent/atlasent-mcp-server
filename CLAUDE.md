@@ -36,6 +36,7 @@ src/
   v2Client.ts                   HTTP clients for Wave A endpoints; FeatureNotEnabledError on 404
   complianceTools.ts            SCIM, SIEM config, evidence export MCP tools
   vqpTools.ts                   VQP snapshot generation, verification, drift event tools
+  exposureReview.ts             atlasent_exposure_review: the free Authorization Exposure Review (founder decision 2026-10-07). Renders analyzeWorkflows() as readable Markdown with a scope statement (these files only, not an org assessment), fixes, and optional consent-gated help links to console /help/implementation. Offline like evidenceGap.ts. Tests in exposureReview.test.ts pin the scope wording, the consent and fee wording, no help offer on a fully gated repo, and no network call
   hostEnv.ts                    dropEmptyAtlasentEnv(): blank ATLASENT_* values from form-filled hosts (MCPB/Smithery) count as unset, so a blank base URL cannot bypass the hosted default
   evidenceGap.ts                atlasent_evidence_gap_report: offline scan of CI workflow YAML for deploy/publish/migrate/apply steps with no (or a skippable) AtlaSent gate. Own block-YAML subset parser (no new dep); unparseable files go to parse_errors, never dropped. Tests in evidenceGap.test.ts carry mutants (continue-on-error, conditional gate, gate-after-step, evaluate-only, commented-out command) that must each change the status
   streamableHttp.ts             Streamable HTTP transport (MCP HTTP mode)

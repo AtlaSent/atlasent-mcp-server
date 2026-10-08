@@ -13,6 +13,13 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+### Added
+
+- `atlasent_exposure_review`, the free Authorization Exposure Review: the
+  evidence-gap analysis written as a readable review, with the fix for each
+  gap, what it cannot see, and optional links to request help from an
+  independent implementation advisor. Offline: no API key, no network call.
+
 ## [2.17.5] - 2026-10-07
 
 ### Fixed
