@@ -13,6 +13,11 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-10-08
+
+2.17.5 was never published to npm, so this is the first release to carry its
+fixes, including the `npx` repair listed under 2.17.5 below.
+
 ### Added
 
 - `atlasent_exposure_review`, the free Authorization Exposure Review: the
@@ -20,7 +25,7 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
   gap, what it cannot see, and optional links to request help from an
   independent implementation advisor. Offline: no API key, no network call.
 
-## [2.17.5] - 2026-10-07
+## [2.17.5] - 2026-10-07 (not published; shipped in 2.18.0)
 
 ### Fixed
 
