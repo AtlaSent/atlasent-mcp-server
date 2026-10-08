@@ -49,6 +49,7 @@ import { registerV2Tools } from "./v2Tools.js";
 import { registerComplianceTools } from "./complianceTools.js";
 import { registerVqpTools } from "./vqpTools.js";
 import { registerEvidenceGapTool } from "./evidenceGap.js";
+import { registerExposureReviewTool } from "./exposureReview.js";
 import { registerPrompts } from "./prompts.js";
 import { aiActionConfigFromEnv, registerAiActionTools } from "./aiActionTools.js";
 import { CANON_ACT_CATALOG, type ActSpecEntry } from "./canonCatalog.js";
@@ -2123,6 +2124,9 @@ export function createServer(): McpServer {
   // front of them. Offline and read-only; works without an API key.
   // -------------------------------------------------------------------------
   registerEvidenceGapTool(server, rateLimitOk);
+  // The free Authorization Exposure Review: the same offline analysis, rendered
+  // for a person, with optional help links (founder decision 2026-10-07).
+  registerExposureReviewTool(server, rateLimitOk);
 
   // AI Action Protection reference tool (atlasent-docs CROSS-064). Registered
   // only when an operator names the one repository it may change: installing
