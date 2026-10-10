@@ -332,6 +332,10 @@ describe("transport identity (NVIDIA/OpenShell#4397)", () => {
     assert.throws(() => loadConfig(base), /destination\.host is required/);
     assert.throws(() => loadConfig({ ...base, destination: { host: "api.atlasent.io", port: 70000 } }), /TCP port/);
     assert.deepEqual(loadConfig({ ...base, destination: { host: "api.atlasent.io" } }).destination, DEST);
+    // fill_absent_workload is opt-in and must be a real boolean.
+    assert.equal(loadConfig({ ...base, destination: DEST }).fillAbsentWorkload, false);
+    assert.equal(loadConfig({ ...base, destination: DEST, fill_absent_workload: true }).fillAbsentWorkload, true);
+    assert.throws(() => loadConfig({ ...base, destination: DEST, fill_absent_workload: "true" }), /true or false/);
   });
 });
 
@@ -427,5 +431,110 @@ describe("decision log (read by the live #4397 transport probe)", () => {
         ["deny", "http", "api.atlasent.io", 443],
       ],
     );
+  });
+});
+
+// Opt-in fill of an ABSENT workload (Docker driver: the workload cannot learn
+// its own sandbox ID). A present workload is never rewritten.
+describe("fill_absent_workload (opt-in)", () => {
+  const claims = { sandbox_id: SBX };
+  const verifyTarget = { ...HTTPS, method: "POST", path: "/functions/v1/v1-verify-permit" };
+  const fill = (target, text) =>
+    checkRequest({ destination: DEST, claims, context: ctx, target, body: Buffer.from(text), fillAbsentWorkload: true });
+  const W = { kind: "openshell_sandbox", id: SBX };
+
+  it("off by default: an absent workload still denies", () => {
+    denies(() => checkRequest({ destination: DEST, claims, context: ctx, target: evalTarget, body: Buffer.from('{"action_type":"x","context":{}}') }), "workload_missing");
+  });
+
+  it("fills evaluate's context.workload, whether context is empty, populated or absent", () => {
+    for (const [text, expectContext] of [
+      ['{"action_type":"x","context":{}}', { workload: W }],
+      ['{"action_type":"x","context":{"a":1}}', { workload: W, a: 1 }],
+      ['{"action_type":"x"}', { workload: W }],
+      ['  {\n "context" : { } , "action_type":"x"}', { workload: W }],
+    ]) {
+      const r = fill(evalTarget, text);
+      assert.equal(r.filled, true, text);
+      assert.deepEqual(parseStrictJson(r.body.toString("utf8")).context, expectContext, text);
+    }
+  });
+
+  it("fills verify-permit's top-level workload", () => {
+    const r = fill(verifyTarget, '{"permit_token":"pt"}');
+    assert.deepEqual(JSON.parse(r.body.toString("utf8")), { workload: W, permit_token: "pt" });
+    assert.deepEqual(JSON.parse(fill(verifyTarget, "{}").body.toString("utf8")), { workload: W });
+  });
+
+  it("splices into the original bytes: big numbers, escapes and key order survive", () => {
+    const text = '{"amount":12345678901234567890,"note":"a\\u00e9\\"context\\":{}","context":{"z":1.10}}';
+    const out = fill(evalTarget, text).body.toString("utf8");
+    assert.equal(out, '{"amount":12345678901234567890,"note":"a\\u00e9\\"context\\":{}","context":{"workload":{"kind":"openshell_sandbox","id":"sbx-0b9a6f1e"},"z":1.10}}');
+  });
+
+  it("a context key inside a nested value is not mistaken for the top-level one", () => {
+    const out = fill(evalTarget, '{"meta":{"context":{}},"action_type":"x"}').body.toString("utf8");
+    const parsed = JSON.parse(out);
+    assert.deepEqual(parsed.context, { workload: W });
+    assert.deepEqual(parsed.meta, { context: {} }, "the nested object is untouched");
+  });
+
+  it("never rewrites a present workload: forged, null, wrong kind or non-object still deny", () => {
+    denies(() => fill(evalTarget, JSON.stringify({ context: { workload: { kind: "openshell_sandbox", id: "sbx-victim" } } })), "workload_mismatch");
+    denies(() => fill(evalTarget, JSON.stringify({ context: { workload: null } })), "workload_missing");
+    denies(() => fill(evalTarget, JSON.stringify({ context: { workload: { kind: "k8s_pod", id: SBX } } })), "workload_mismatch");
+    denies(() => fill(verifyTarget, JSON.stringify({ workload: "sbx-0b9a6f1e" })), "workload_missing");
+  });
+
+  it("denies when there is no object to put it in", () => {
+    denies(() => fill(evalTarget, '{"context":"str"}'), "workload_missing");
+    denies(() => fill(evalTarget, '{"context":null}'), "workload_missing");
+    denies(() => fill(evalTarget, '{"context":[]}'), "workload_missing");
+  });
+
+  it("transport and destination checks still run first", () => {
+    denies(() => fill({ ...evalTarget, scheme: "http" }, '{"context":{}}'), "transport_not_secure");
+    denies(() => fill(evalTarget, '{"context":{},"context":{}}'), "body_duplicate_key");
+  });
+
+  it("over gRPC: replaces the body and the attestation signs the replacement", () => {
+    const h = createHandlers({ audience: AUD, destination: DEST, fillAbsentWorkload: true, gateway: { issuer: ISSUER, keys }, attestation: { signingKey: att.privateKey, kid: "guard-1" }, now: () => NOW });
+    const md = new grpc.Metadata();
+    md.set("authorization", `Bearer ${token()}`);
+    let out;
+    const write = process.stderr.write;
+    process.stderr.write = () => true;
+    try {
+      h.EvaluateHttpRequest(
+        { request: { phase: "SUPERVISOR_MIDDLEWARE_PHASE_PRE_CREDENTIALS", context: ctx, target: evalTarget, body: Buffer.from('{"action_type":"x","context":{}}') }, metadata: md },
+        (_e, r) => (out = r),
+      );
+    } finally {
+      process.stderr.write = write;
+    }
+    assert.equal(out.decision, "DECISION_ALLOW");
+    assert.equal(out.has_body, true);
+    assert.deepEqual(JSON.parse(out.body.toString("utf8")).context.workload, W);
+    const payload = JSON.parse(Buffer.from(out.header_mutations[0].write.value.split(".")[1], "base64url"));
+    assert.equal(payload.body_sha256, createHash("sha256").update(out.body).digest("hex"));
+  });
+
+  it("over gRPC with fill off: no body replacement on an honest request", () => {
+    const h = createHandlers({ audience: AUD, destination: DEST, gateway: { issuer: ISSUER, keys }, now: () => NOW });
+    const md = new grpc.Metadata();
+    md.set("authorization", `Bearer ${token()}`);
+    let out;
+    const write = process.stderr.write;
+    process.stderr.write = () => true;
+    try {
+      h.EvaluateHttpRequest(
+        { request: { phase: "SUPERVISOR_MIDDLEWARE_PHASE_PRE_CREDENTIALS", context: ctx, target: evalTarget, body: evaluateBody(W) }, metadata: md },
+        (_e, r) => (out = r),
+      );
+    } finally {
+      process.stderr.write = write;
+    }
+    assert.equal(out.decision, "DECISION_ALLOW");
+    assert.equal(out.has_body, undefined);
   });
 });

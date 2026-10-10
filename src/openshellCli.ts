@@ -14,7 +14,7 @@
 
 import { readFileSync } from "node:fs";
 
-import { assessOpenShellVersion, OpenShellAuthorityAdapter } from "./openshell.js";
+import { assessOpenShellVersion, OpenShellAuthorityAdapter, type WorkloadBindingMode } from "./openshell.js";
 import { CircuitBreaker } from "./governedAction.js";
 import { getMode, recordCircuitTrip } from "./engine.js";
 import { dropEmptyAtlasentEnv } from "./hostEnv.js";
@@ -69,6 +69,18 @@ export function checkAtlasentTransport(env: NodeJS.ProcessEnv): string | undefin
   return `ATLASENT_BASE_URL must be https (got ${url.protocol}//${url.host}); refusing to send the AtlaSent key over it.`;
 }
 
+/**
+ * ATLASENT_OPENSHELL_WORKLOAD_BINDING: unset or "adapter" (default), or
+ * "guard". Any other value is refused rather than read as the default, so a
+ * typo cannot quietly change who binds the sandbox identity.
+ */
+export function workloadBindingModeFrom(env: NodeJS.ProcessEnv): WorkloadBindingMode | { error: string } {
+  const v = env.ATLASENT_OPENSHELL_WORKLOAD_BINDING;
+  if (v === undefined || v === "" || v === "adapter") return "adapter";
+  if (v === "guard") return "guard";
+  return { error: `ATLASENT_OPENSHELL_WORKLOAD_BINDING must be "adapter" or "guard" (got ${JSON.stringify(v)})` };
+}
+
 /** Same rule as engine.getMode(), read from the env main() was given. */
 function remoteModeIn(env: NodeJS.ProcessEnv): boolean {
   const explicit = env.ATLASENT_MODE?.toLowerCase();
@@ -92,12 +104,18 @@ export async function main(args: string[], env: NodeJS.ProcessEnv = process.env)
     return EXIT.USAGE;
   }
   dropEmptyAtlasentEnv(env);
+  const bindingMode = workloadBindingModeFrom(env);
+  if (typeof bindingMode === "object") {
+    emit({ outcome: "USAGE", reasons: [bindingMode.error] });
+    return EXIT.USAGE;
+  }
 
   if (parsed.command === "check") {
-    const sandbox = parseSandboxContext(sandboxContextFrom(env, (p) => readFileSync(p, "utf8"))());
+    const sandbox = parseSandboxContext(sandboxContextFrom(env, (p) => readFileSync(p, "utf8"))(), { mode: bindingMode });
     const version = parsed.flags.version ?? env.OPENSHELL_VERSION;
     emit({
       mode: getMode(),
+      workload_binding: bindingMode,
       sandbox: sandbox.ok ? sandbox.sandbox : { error: sandbox.reason },
       openshell_version: version ?? null,
       openshell_assessment: version ? assessOpenShellVersion(version) : null,
@@ -138,7 +156,7 @@ export async function main(args: string[], env: NodeJS.ProcessEnv = process.env)
     const breaker = parsed.flags["breaker-state"] ? new CircuitBreaker({ stateFile: parsed.flags["breaker-state"] }) : undefined;
     const result = await runGoverned(
       {
-        adapter: new OpenShellAuthorityAdapter(),
+        adapter: new OpenShellAuthorityAdapter({ workloadBinding: bindingMode }),
         sandbox: sandboxContextFrom(env, (p) => readFileSync(p, "utf8")),
         reportTrip: recordCircuitTrip,
         ...(breaker && { breaker }),

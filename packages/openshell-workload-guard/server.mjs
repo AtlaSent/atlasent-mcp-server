@@ -120,13 +120,18 @@ export function createHandlers(cfg) {
           audience: cfg.audience,
           now: now(),
         });
-        const { route, sandbox_id } = checkRequest({
+        const checked = checkRequest({
           claims,
           context: req.context,
           target: req.target,
           body: req.body,
           destination: cfg.destination,
+          fillAbsentWorkload: cfg.fillAbsentWorkload === true,
         });
+        const { route, sandbox_id } = checked;
+        // When the guard filled the workload in, the replacement bytes are what
+        // goes upstream, so they are also what the attestation signs.
+        const outBody = checked.body ?? req.body;;
         const header_mutations = [];
         if (route.workload && cfg.attestation) {
           const value = signAttestation({
@@ -136,13 +141,15 @@ export function createHandlers(cfg) {
             requestId: req.context?.request_id,
             method: String(req.target.method).toUpperCase(),
             path: req.target.path,
-            body: req.body,
+            body: outBody,
             now: now(),
           });
           header_mutations.push({ write: { name: ATTESTATION_HEADER, value, on_existing: "EXISTING_HEADER_ACTION_OVERWRITE" } });
         }
-        logLine({ ...base, decision: "allow", attested: header_mutations.length > 0 });
-        cb(null, { decision: "DECISION_ALLOW", reason: "", header_mutations });
+        logLine({ ...base, decision: "allow", attested: header_mutations.length > 0, workload_filled: checked.filled === true });
+        const result = { decision: "DECISION_ALLOW", reason: "", header_mutations };
+        if (checked.filled) Object.assign(result, { body: checked.body, has_body: true });
+        cb(null, result);
       } catch (err) {
         const code = err instanceof GuardDenial ? err.code : "guard_error";
         logLine({ ...base, decision: "deny", reason_code: code, detail: err.message });
@@ -166,12 +173,16 @@ export function loadConfig(raw) {
   if (typeof raw.destination?.host !== "string" || raw.destination.host.trim() === "") {
     throw new Error("config.destination.host is required (the AtlaSent API host the key is injected for)");
   }
+  if (raw.fill_absent_workload !== undefined && typeof raw.fill_absent_workload !== "boolean") {
+    throw new Error("config.fill_absent_workload must be true or false");
+  }
   if (raw.destination.port !== undefined && !(Number.isInteger(raw.destination.port) && raw.destination.port > 0 && raw.destination.port < 65536)) {
     throw new Error("config.destination.port must be a TCP port");
   }
   const cfg = {
     listen: raw.listen,
     destination: { host: raw.destination.host, port: raw.destination.port ?? 443 },
+    fillAbsentWorkload: raw.fill_absent_workload === true,
     audience: raw.audience,
     gateway: { issuer: raw.gateway.issuer, keys: loadJwks(JSON.parse(readFileSync(raw.gateway.jwks_path, "utf8"))) },
     tls: undefined,

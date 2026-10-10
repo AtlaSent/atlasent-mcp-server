@@ -81,7 +81,28 @@ as the display name.
   `atlasent-openshell` reads `OPENSHELL_SANDBOX_ID`, or a JSON file named by
   `ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE` (re-read before evaluate and again
   before verify). When neither is present it refuses, never guessing. On the
-  Docker driver an operator has to supply the context file.
+  Docker driver an operator has to supply the context file, or use
+  guard-bound mode (below).
+- **Guard-bound mode (opt-in, added 2026-10-10; not yet run live).** With
+  `ATLASENT_OPENSHELL_WORKLOAD_BINDING=guard`, a context with no `sandbox_id`
+  is accepted. The adapter then sends evaluate and verify with **no**
+  `context.workload` (never a label, never a placeholder). The AtlaSent
+  workload guard, registered with `fill_absent_workload: true`, adds the
+  gateway-verified sandbox ID to each request. This amends the rule above:
+  in this mode the adapter does not know the ID, so the guard and the runtime
+  bind the permit to the sandbox, not the adapter. What still holds:
+  - a real `sandbox_id`, if one is present, is used and checked as usual;
+  - a permit evaluated guard-bound does not verify under a real ID, or the
+    other way round;
+  - a malformed ID, a missing or unreadable context, and a policy-generation
+    change are refused exactly as in the default mode;
+  - an unknown mode value is a usage error, never read as the default.
+
+  **Enable it only when** the guard is registered for the AtlaSent endpoints
+  with `fill_absent_workload: true` **and** the API key requires workload
+  attestation (atlasent-api#4032). Without the guard, the request reaches the
+  runtime with no workload, and the permit is bound to no sandbox. Without the
+  attestation requirement, nothing on the runtime side proves the guard ran.
 - **What OpenShell does not give the workload.** `OPENSHELL_SANDBOX` is
   overwritten with `"1"` inside a workload as an "inside a sandbox" marker, so
   it is never the name there and the adapter never reads it. OpenShell provides
@@ -371,8 +392,12 @@ those mutations, not coverage.
   ([`OPENSHELL_WORKLOAD_IDENTITY_DESIGN.md`](OPENSHELL_WORKLOAD_IDENTITY_DESIGN.md),
   `packages/openshell-workload-guard`). Phase 1 was live-tested on 0.1.3-pre.4.
   Phase 2 (atlasent-api#4032) is not applied to any environment yet.
-- A sandbox ID for the workload on the Docker driver, where OpenShell does not
-  provide one. One option is for the guard to fill in an absent workload.
+- Run guard-bound mode live on the Docker driver: no `sandbox_id` in the
+  workload, guard with `fill_absent_workload: true`, key with
+  `requires_workload_attestation`. Check that the stub receives the filled
+  body, that the attestation's `body_sha256` matches those bytes, that
+  OpenShell fixes `Content-Length` after the body changes, and that a forged
+  workload still gets `workload_mismatch`.
 - OpenShell 0.1.3 stable. As of 2026-10-06 the newest tag is
   `v0.1.3-pre.4`. When stable ships, re-run the probe on it and add the
   result.

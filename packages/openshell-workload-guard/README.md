@@ -60,6 +60,14 @@ published to npm. Run it from this folder (`npm ci`).
    }
    ```
 
+   `"fill_absent_workload": true` is optional and off by default. Use it on
+   OpenShell's Docker driver, where the workload cannot learn its own sandbox
+   ID. When an evaluate or verify body has no workload, the guard adds the
+   verified one, returns the new body, and signs the attestation over it. A
+   workload that is present is never rewritten, and a wrong one still denies.
+   Pair it with `ATLASENT_OPENSHELL_WORKLOAD_BINDING=guard` on the adapter and
+   a key that requires workload attestation.
+
    `destination` is required. The guard denies any request whose reported
    scheme is not `https`, or whose host or port is not this one: the key is
    injected after the guard allows, so it must only ever go here. A scheme,

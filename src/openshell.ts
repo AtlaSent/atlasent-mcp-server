@@ -59,6 +59,26 @@ const CONTROL_OR_SPACE = /[\s\u0000-\u001f\u007f]/;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/g;
 
+/**
+ * Stands in for the sandbox ID in guard-bound mode, where the workload cannot
+ * learn its own ID and the AtlaSent workload guard adds the verified one to
+ * each request instead. It contains a space, which parseSandboxContext rejects
+ * in a real sandbox_id, so it can never equal one.
+ */
+export const GUARD_BOUND_SANDBOX_ID = "openshell guard-bound";
+
+/**
+ * Who puts the sandbox identity on the wire.
+ *  - "adapter" (default): the adapter sends the sandbox_id it was given and
+ *    refuses without one.
+ *  - "guard": a request with no sandbox_id is sent with NO workload, and the
+ *    AtlaSent workload guard (`fill_absent_workload: true`) adds the
+ *    gateway-verified one. Only safe when that guard is registered for the
+ *    AtlaSent endpoints and the API key requires workload attestation
+ *    (atlasent-api#4032); otherwise the permit is not bound to any sandbox.
+ */
+export type WorkloadBindingMode = "adapter" | "guard";
+
 export type SandboxParse =
   | { ok: true; sandbox: Required<Pick<OpenShellSandboxContext, "sandbox_id">> & OpenShellSandboxContext }
   | { ok: false; reason: string };
@@ -69,12 +89,15 @@ export type SandboxParse =
  * `workspace`. Labels are trimmed, stripped of control characters and capped,
  * and dropped when empty.
  */
-export function parseSandboxContext(raw: unknown): SandboxParse {
+export function parseSandboxContext(raw: unknown, opts: { mode?: WorkloadBindingMode } = {}): SandboxParse {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return { ok: false, reason: "OpenShell sandbox context missing: refusing to evaluate without a sandbox_id." };
   }
   const r = raw as Record<string, unknown>;
   const id = r.sandbox_id;
+  if (opts.mode === "guard" && (id === undefined || (typeof id === "string" && id.trim() === ""))) {
+    return { ok: true, sandbox: withLabels(r, { sandbox_id: GUARD_BOUND_SANDBOX_ID }) };
+  }
   if (typeof id !== "string" || id.trim() === "") {
     return {
       ok: false,
@@ -85,7 +108,13 @@ export function parseSandboxContext(raw: unknown): SandboxParse {
   if (id !== id.trim() || CONTROL_OR_SPACE.test(id) || id.length > MAX_ID_LENGTH) {
     return { ok: false, reason: "OpenShell sandbox_id malformed (whitespace, control characters or over 256 chars)." };
   }
-  const out: OpenShellSandboxContext & { sandbox_id: string } = { sandbox_id: id };
+  return { ok: true, sandbox: withLabels(r, { sandbox_id: id }) };
+}
+
+function withLabels(
+  r: Record<string, unknown>,
+  out: OpenShellSandboxContext & { sandbox_id: string },
+): OpenShellSandboxContext & { sandbox_id: string } {
   // OpenShell's middleware RequestContext (proto/supervisor_middleware.proto)
   // calls the display name `sandbox`; `sandbox_name` is accepted too.
   const name = cleanLabel(r.sandbox) ?? cleanLabel(r.sandbox_name);
@@ -96,7 +125,7 @@ export function parseSandboxContext(raw: unknown): SandboxParse {
   if ((typeof gen === "string" && gen.trim() !== "") || (typeof gen === "number" && Number.isFinite(gen))) {
     out.policy_generation = gen;
   }
-  return { ok: true, sandbox: out };
+  return out;
 }
 
 function cleanLabel(value: unknown): string | undefined {
@@ -105,8 +134,12 @@ function cleanLabel(value: unknown): string | undefined {
   return s === "" ? undefined : s;
 }
 
-/** The workload binding sent to /v1-evaluate. Labels are nested, never the id. */
-export function workloadBinding(sandbox: OpenShellSandboxContext): WorkloadBinding {
+/**
+ * The workload binding sent to /v1-evaluate. Labels are nested, never the id.
+ * Undefined in guard-bound mode: the guard adds the verified workload.
+ */
+export function workloadBinding(sandbox: OpenShellSandboxContext): WorkloadBinding | undefined {
+  if (sandbox.sandbox_id === GUARD_BOUND_SANDBOX_ID) return undefined;
   const binding: WorkloadBinding = { kind: "openshell_sandbox", id: sandbox.sandbox_id };
   const labels: NonNullable<WorkloadBinding["labels"]> = {};
   if (sandbox.sandbox_name !== undefined) labels.sandbox_name = sandbox.sandbox_name;
@@ -202,8 +235,9 @@ export function toActionContext(envelope: CanonicalActionEnvelope, sandbox: Open
     action_type: envelope.action_type,
     actor_id: envelope.actor_id,
     environment: envelope.environment,
-    workload: workloadBinding(sandbox),
   };
+  const workload = workloadBinding(sandbox);
+  if (workload !== undefined) ctx.workload = workload;
   if (envelope.target_id !== undefined) ctx.target_id = envelope.target_id;
   if (envelope.target_system !== undefined) ctx.target_system = envelope.target_system;
   if (envelope.payload_hash !== undefined) ctx.payload_hash = envelope.payload_hash;
@@ -246,6 +280,8 @@ export interface OpenShellAdapterDeps {
   authorize?: (ctx: ActionContext) => Promise<Decision>;
   verify?: (token: string, ctx: ActionContext) => Promise<VerifyResult>;
   awaitApproval?: (params: AwaitApprovalParams) => Promise<AwaitApprovalResult>;
+  /** Default "adapter". See WorkloadBindingMode. */
+  workloadBinding?: WorkloadBindingMode;
 }
 
 /**
@@ -265,6 +301,7 @@ export class OpenShellAuthorityAdapter {
   private readonly authorizeFn: NonNullable<OpenShellAdapterDeps["authorize"]>;
   private readonly verifyFn: NonNullable<OpenShellAdapterDeps["verify"]>;
   private readonly awaitApprovalFn: NonNullable<OpenShellAdapterDeps["awaitApproval"]>;
+  private readonly mode: WorkloadBindingMode;
   private readonly holds = new Map<string, Issued>();
   private readonly permits = new Map<string, Issued>();
 
@@ -272,11 +309,12 @@ export class OpenShellAuthorityAdapter {
     this.authorizeFn = deps.authorize ?? engineAuthorize;
     this.verifyFn = deps.verify ?? engineVerify;
     this.awaitApprovalFn = deps.awaitApproval ?? engineAwaitApproval;
+    this.mode = deps.workloadBinding ?? "adapter";
   }
 
   /** Evaluate one consequential action from one sandbox. */
   async evaluate(rawEnvelope: unknown, rawSandbox: unknown): Promise<AdapterResult> {
-    const sb = parseSandboxContext(rawSandbox);
+    const sb = parseSandboxContext(rawSandbox, { mode: this.mode });
     if (!sb.ok) return { outcome: "DENY", reasons: [sb.reason] };
     const env = parseActionEnvelope(rawEnvelope);
     if (!env.ok) return { outcome: "DENY", reasons: [env.reason] };
@@ -329,7 +367,7 @@ export class OpenShellAuthorityAdapter {
     rawSandbox: unknown,
     opts: { max_wait_ms: number; poll_interval_ms?: number },
   ): Promise<AdapterResult> {
-    const sb = parseSandboxContext(rawSandbox);
+    const sb = parseSandboxContext(rawSandbox, { mode: this.mode });
     if (!sb.ok) return { outcome: "DENY", reasons: [sb.reason] };
     const held = this.holds.get(approvalRequestId);
     if (!held) {
@@ -371,7 +409,7 @@ export class OpenShellAuthorityAdapter {
     rawSandbox: unknown,
     opts: { payload_hash?: string } = {},
   ): Promise<{ execute: true; verify: VerifyResult } | { execute: false; reasons: string[]; reevaluate?: true }> {
-    const sb = parseSandboxContext(rawSandbox);
+    const sb = parseSandboxContext(rawSandbox, { mode: this.mode });
     if (!sb.ok) return { execute: false, reasons: [sb.reason] };
     const env = parseActionEnvelope(rawEnvelope);
     if (!env.ok) return { execute: false, reasons: [env.reason] };
