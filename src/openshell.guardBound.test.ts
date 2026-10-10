@@ -10,8 +10,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import type { ActionContext, Decision } from "./decision.js";
+import { authorize } from "./engine.js";
 import {
   GUARD_BOUND_SANDBOX_ID,
+  GUARD_BOUND_UNATTESTED,
   OpenShellAuthorityAdapter,
   parseSandboxContext,
   toActionContext,
@@ -22,7 +24,10 @@ import { main, workloadBindingModeFrom } from "./openshellCli.js";
 
 const ENVELOPE = { action_type: "data.export", actor_id: "agent:42", environment: "production", target_id: "warehouse" };
 
-function adapter(mode: "adapter" | "guard", decision: Decision = { decision: "allow", permit_token: "pt_1" }) {
+// What the runtime returns when the guard's attestation verified.
+const ATTESTED_ALLOW: Decision = { decision: "allow", permit_token: "pt_1", workload_attested: true };
+
+function adapter(mode: "adapter" | "guard", decision: Decision = ATTESTED_ALLOW) {
   const evaluated: ActionContext[] = [];
   const verified: ActionContext[] = [];
   const a = new OpenShellAuthorityAdapter({
@@ -147,5 +152,93 @@ describe("ATLASENT_OPENSHELL_WORKLOAD_BINDING", () => {
       process.stderr.write = realWrite;
     }
     assert.ok(lines.some((l) => l.includes('"workload_binding":"guard"')));
+  });
+});
+
+describe("guard-bound mode requires the runtime to report workload_attested", () => {
+  it("an allow without workload_attested is refused, and its permit is never usable", async () => {
+    const { a, verified } = adapter("guard", { decision: "allow", permit_token: "pt_unbound" });
+    const r = await a.evaluate(ENVELOPE, {});
+    assert.equal(r.outcome, "DENY");
+    assert.deepEqual((r as { reasons: string[] }).reasons, [GUARD_BOUND_UNATTESTED]);
+    const v = await a.verifyBeforeExecute("pt_unbound", ENVELOPE, {});
+    assert.equal(v.execute, false, "the unattested permit was never recorded");
+    assert.equal(verified.length, 0);
+  });
+
+  it("a hold without workload_attested is refused instead of waited on", async () => {
+    let waited = 0;
+    const a = new OpenShellAuthorityAdapter({
+      workloadBinding: "guard",
+      authorize: async () => ({ decision: "hold", reasons: ["approval"], approval_request_id: "apr_1" }),
+      awaitApproval: async () => {
+        waited++;
+        return { outcome: "approved", permit_token: "pt", approval_request_id: "apr_1" };
+      },
+    });
+    const r = await a.evaluate(ENVELOPE, {});
+    assert.equal(r.outcome, "DENY");
+    const resolved = await a.resolveHold("apr_1", {}, { max_wait_ms: 1000 });
+    assert.equal(resolved.outcome, "DENY", "no HOLD was recorded to resolve");
+    assert.equal(waited, 0);
+  });
+
+  it("an attested hold is held as usual", async () => {
+    const a = new OpenShellAuthorityAdapter({
+      workloadBinding: "guard",
+      authorize: async () => ({ decision: "hold", reasons: ["approval"], approval_request_id: "apr_1", workload_attested: true }),
+    });
+    assert.equal((await a.evaluate(ENVELOPE, {})).outcome, "HOLD");
+  });
+
+  it("the requirement applies only when guard-bound: a real sandbox_id needs no attestation", async () => {
+    const { a } = adapter("guard", { decision: "allow", permit_token: "pt_1" });
+    assert.equal((await a.evaluate(ENVELOPE, { sandbox_id: "sbx_1" })).outcome, "PERMIT");
+    const { a: plain } = adapter("adapter", { decision: "allow", permit_token: "pt_2" });
+    assert.equal((await plain.evaluate(ENVELOPE, { sandbox_id: "sbx_1" })).outcome, "PERMIT", "default mode is unchanged");
+  });
+
+  it("a deny passes through as a deny", async () => {
+    const { a } = adapter("guard", { decision: "deny", reasons: ["no"] });
+    const r = await a.evaluate(ENVELOPE, {});
+    assert.equal(r.outcome, "DENY");
+    assert.deepEqual((r as { reasons: string[] }).reasons, ["no"]);
+  });
+});
+
+describe("engine: workload_attested is carried only when the runtime says exactly true", () => {
+  const env = { ATLASENT_MODE: "remote", ATLASENT_API_KEY: "ask_test_x", ATLASENT_BASE_URL: "https://rt.example/functions/v1" };
+  async function evaluateWith(reply: Record<string, unknown>): Promise<Decision> {
+    const saved = { ...process.env };
+    const realFetch = globalThis.fetch;
+    Object.assign(process.env, env);
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const path = new URL(String(url)).pathname;
+      const body = path.endsWith("/v1-evaluate") ? reply : { error: "not_found" };
+      return new Response(JSON.stringify(body), { status: path.endsWith("/v1-evaluate") ? 200 : 404 });
+    }) as typeof fetch;
+    try {
+      return await authorize({ action_type: "data.export", actor_id: "agent:42", environment: "production" });
+    } finally {
+      globalThis.fetch = realFetch;
+      process.env = saved;
+    }
+  }
+
+  it("true is carried on allow and on hold", async () => {
+    const allow = await evaluateWith({ decision: "allow", permit_token: "pt", workload_attested: true });
+    assert.equal(allow.decision, "allow");
+    assert.equal((allow as { workload_attested?: true }).workload_attested, true);
+    const hold = await evaluateWith({ decision: "hold", approval_request_id: "apr", workload_attested: true });
+    assert.equal((hold as { workload_attested?: true }).workload_attested, true);
+  });
+
+  it("anything other than literal true is not an attestation", async () => {
+    for (const v of ["true", 1, {}, null, false]) {
+      const d = await evaluateWith({ decision: "allow", permit_token: "pt", workload_attested: v });
+      assert.equal("workload_attested" in d, false, JSON.stringify(v));
+    }
+    const absent = await evaluateWith({ decision: "allow", permit_token: "pt" });
+    assert.equal("workload_attested" in absent, false);
   });
 });

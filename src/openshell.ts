@@ -79,6 +79,11 @@ export const GUARD_BOUND_SANDBOX_ID = "openshell guard-bound";
  */
 export type WorkloadBindingMode = "adapter" | "guard";
 
+export const GUARD_BOUND_UNATTESTED =
+  "Guard-bound mode: the runtime did not report workload_attested, so this decision is not bound to any " +
+  "sandbox. Register the AtlaSent workload guard with fill_absent_workload and use a key that requires " +
+  "workload attestation, or supply the sandbox_id.";
+
 export type SandboxParse =
   | { ok: true; sandbox: Required<Pick<OpenShellSandboxContext, "sandbox_id">> & OpenShellSandboxContext }
   | { ok: false; reason: string };
@@ -335,6 +340,20 @@ export class OpenShellAuthorityAdapter {
       policy_generation: sandbox.policy_generation,
       envelope,
     };
+    // Guard-bound mode: the adapter sent no workload and cannot see the
+    // sandbox ID, so the only proof the permit is bound to this sandbox is the
+    // runtime reporting that the guard's attestation verified. Without it the
+    // guard did not run (or the key does not require attestation) and the
+    // permit is bound to no sandbox: refuse it rather than trust the setup.
+    if (
+      sandbox.sandbox_id === GUARD_BOUND_SANDBOX_ID &&
+      (decision.decision === "allow" || decision.decision === "hold") &&
+      decision.workload_attested !== true
+    ) {
+      const out: AdapterResult = { outcome: "DENY", reasons: [GUARD_BOUND_UNATTESTED] };
+      if (decision.audit_id !== undefined) out.audit_id = decision.audit_id;
+      return out;
+    }
     if (decision.decision === "allow") {
       this.permits.set(decision.permit_token, issued);
       const out: AdapterResult = { outcome: "PERMIT", permit_token: decision.permit_token, display };

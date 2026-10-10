@@ -98,11 +98,21 @@ as the display name.
     change are refused exactly as in the default mode;
   - an unknown mode value is a usage error, never read as the default.
 
-  **Enable it only when** the guard is registered for the AtlaSent endpoints
-  with `fill_absent_workload: true` **and** the API key requires workload
-  attestation (atlasent-api#4032). Without the guard, the request reaches the
-  runtime with no workload, and the permit is bound to no sandbox. Without the
-  attestation requirement, nothing on the runtime side proves the guard ran.
+  **It needs** the guard registered for the AtlaSent endpoints with
+  `fill_absent_workload: true`, **and** an API key that requires workload
+  attestation (atlasent-api#4032). The adapter enforces this. In guard-bound
+  mode it accepts an allow or a hold only when the runtime's evaluate response
+  carries `workload_attested: true`. The runtime sends that only when the
+  guard's attestation verified against the exact bytes it received. A missing
+  field means the guard did not run or the key does not require attestation,
+  and in either case the permit would be bound to no sandbox. So the adapter
+  denies, and it records no permit and no HOLD. A real `sandbox_id` and the
+  default mode do not need the field. Local mode never attests, so guard-bound
+  mode always denies there. The runtime field is additive and was added in
+  atlasent-api (`v1-evaluate`, branch
+  `claude/openshell-security-regressions-nl26aa`). Until that change is
+  deployed, guard-bound mode denies everything, which is the fail-closed
+  default.
 - **What OpenShell does not give the workload.** `OPENSHELL_SANDBOX` is
   overwritten with `"1"` inside a workload as an "inside a sandbox" marker, so
   it is never the name there and the adapter never reads it. OpenShell provides
