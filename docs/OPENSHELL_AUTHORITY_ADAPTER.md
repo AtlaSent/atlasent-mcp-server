@@ -404,7 +404,7 @@ gates close:
 1. the live-kit runs below pass;
 2. the affected keys are counted, from `report` mode's logs and from a one-off
    query for keys that have ever sent an OpenShell request (dormant keys);
-3. every OpenShell org has a registered guard key.
+3. every deployed guard's own signing key is registered (one per guard host).
 
 What it means here:
 
