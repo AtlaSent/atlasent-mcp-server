@@ -288,11 +288,15 @@ changing qualification status: qualification of v0.1.3 continues.
 
 **NVIDIA/OpenShell#4359, streaming middleware: not adopted.** The revised
 interface (`EvaluateHttpRequestSession` / `EvaluateHttpResponseSession`,
-selected by a required capability) had three findings in security review: a
-request could complete before the final middleware verdict, a response could
-be delivered after revocation, and request metadata could be incomplete
-between stages. Fixes and regression tests are submitted; end-to-end
-qualification and maintainer approval are outstanding. A DENY or HOLD is
+selected by listing `openshell.supervisor-middleware.http-session` in
+`required_capabilities`) had three blocking findings in review of head
+`7f09efe`: a response, and a request upload, could complete before the
+terminal verdict (fixed `c2684e8`); responses could be written after policy
+revocation (fixed `0a492e2`, generation checked before every write); and
+body-stage `Begin` events lacked preflight header mutations (fixed
+`a491a29`). The follow-up review cleared them but was static only. As of
+2026-10-10 the E2E jobs still need a maintainer re-run and the PR has no
+approving review. Checked against the PR page on 2026-10-10. A DENY or HOLD is
 worthless if the bytes already reached the destination, so AtlaSent pins the
 same three properties at its own boundary, in
 `src/openshell.securityRegressions.test.ts`:
@@ -313,8 +317,15 @@ streaming session (`packages/openshell-workload-guard/test/guard.node.mjs`).
 Keep any streaming adapter experimental until NVIDIA completes release
 qualification.
 
-**NVIDIA/OpenShell#4397, request transport identity.** Plaintext HTTP through
-a CONNECT tunnel can be reported to middleware as `https`. The guard now
+The same PR marks the v1 hook RPCs deprecated, with removal planned for
+OpenShell 0.2.0. The guard is built on v1 `EvaluateHttpRequest`, so it will
+stop working on 0.2.0 unless it is ported to the session interface first.
+
+**NVIDIA/OpenShell#4397, request transport identity.** Plaintext HTTP in a
+tunnel reaches middleware as `https`, and plaintext WebSocket as `wss`: the
+scheme was hardcoded rather than derived from the transport (issue #4253).
+The PR (commit `335066c`, opened 2026-10-10) is unreviewed and has not run on
+NVIDIA CI. The guard now
 requires a pinned `destination` (host, port default 443) and denies a reported
 `http`, `ws` or `wss`, any other scheme, a host or port other than the pinned
 one, and any scheme, host or port OpenShell left empty. `atlasent-openshell
@@ -346,5 +357,8 @@ those mutations, not coverage.
   carries the #4397 fix, and record it in `OPENSHELL_FIX_CONFIRMED_IN` style
   before dropping that advisory. Do not adopt #4359's streaming interface
   until NVIDIA ships it qualified.
+- Port the workload guard to `EvaluateHttpRequestSession` once #4359 ships
+  qualified, and before any OpenShell 0.2.0 deployment: 0.2.0 plans to remove
+  the v1 RPC the guard uses. Re-run regression suites A–C on the port.
 
 Do not fork OpenShell or duplicate its policy engine.

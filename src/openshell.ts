@@ -479,8 +479,9 @@ export const OPENSHELL_OPEN_ADVISORIES: readonly OpenShellAdvisory[] = [
   {
     id: "NVIDIA/OpenShell#4397",
     summary:
-      "Plaintext HTTP sent through a CONNECT tunnel can be reported to supervisor middleware as https. " +
-      "Opened 2026-10-10; the proposed fix derives the scheme from the actual transport.",
+      "Plaintext HTTP in a tunnel is reported to supervisor middleware as https (and plaintext WebSocket as " +
+      "wss): the scheme is hardcoded, not derived from the transport (issue NVIDIA/OpenShell#4253). PR opened " +
+      "2026-10-10 (commit 335066c), not yet reviewed or run on NVIDIA CI.",
     atlasent_posture:
       "The workload guard denies any request not reported as https to the pinned AtlaSent host and port, and " +
       "any request whose scheme, host or port OpenShell left empty. It cannot detect a mislabelled https, so a " +
@@ -490,14 +491,18 @@ export const OPENSHELL_OPEN_ADVISORIES: readonly OpenShellAdvisory[] = [
   {
     id: "NVIDIA/OpenShell#4359",
     summary:
-      "Next-generation streaming middleware (EvaluateHttpRequestSession / EvaluateHttpResponseSession, selected " +
-      "by a required capability). Security review found a request could complete before the final verdict, a " +
-      "response could be delivered after revocation, and request metadata could be incomplete between stages. " +
-      "Fixes submitted; end-to-end qualification and maintainer approval outstanding as of 2026-10-10.",
+      "Next-generation middleware hooks EvaluateHttpRequestSession / EvaluateHttpResponseSession, selected by " +
+      "listing openshell.supervisor-middleware.http-session in required_capabilities. Review of head 7f09efe " +
+      "found: a response (and request upload) could complete before the terminal verdict (fixed c2684e8); " +
+      "responses could be written after policy revocation (fixed 0a492e2, generation checked before every " +
+      "write); body-stage Begin events lacked preflight header mutations (fixed a491a29). The follow-up review " +
+      "was static only. E2E re-run and maintainer approval outstanding as of 2026-10-10. The PR also deprecates " +
+      "the v1 hook RPCs, with removal planned for OpenShell 0.2.0.",
     atlasent_posture:
       "Not adopted. The workload guard declares only the buffered HTTP request binding and refuses a gateway " +
-      "that requires any capability it does not implement. The AtlaSent execution boundary runs nothing before " +
-      "verify returns valid, and a revocation or policy change before verify stops execution.",
+      "that requires any capability it does not implement (including http-session). The AtlaSent execution " +
+      "boundary runs nothing before verify returns valid, and a revocation or policy change before verify stops " +
+      "execution. The guard uses the v1 EvaluateHttpRequest RPC, so it must be ported before OpenShell 0.2.0.",
   },
 ];
 

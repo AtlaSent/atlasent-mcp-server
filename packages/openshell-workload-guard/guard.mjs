@@ -170,8 +170,8 @@ function normalizeHost(host) {
  * destination we cannot establish is not one we can bind a permit to.
  *
  * Limit: this trusts the scheme OpenShell reports. NVIDIA/OpenShell#4397 (open
- * 2026-10-10) found plaintext HTTP sent through a CONNECT tunnel reported to
- * middleware as `https`. No check here can see through that; the fix is in
+ * 2026-10-10, issue #4253): plaintext HTTP in a tunnel reaches middleware as
+ * `https`, and plaintext WebSocket as `wss`. No check here can see through that; the fix is in
  * OpenShell. Until a release carrying it is confirmed, treat a reported
  * `https` as necessary, not sufficient (docs/OPENSHELL_AUTHORITY_ADAPTER.md).
  */

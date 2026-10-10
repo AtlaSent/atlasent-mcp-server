@@ -65,8 +65,8 @@ published to npm. Run it from this folder (`npm ci`).
    injected after the guard allows, so it must only ever go here. A scheme,
    host or port OpenShell left empty also denies. The guard trusts the scheme
    OpenShell reports; NVIDIA/OpenShell#4397 (open as of 2026-10-10) can
-   report plaintext HTTP sent through a CONNECT tunnel as `https`, which no
-   middleware check can detect.
+   report plaintext HTTP in a tunnel as `https` (and plaintext WebSocket as
+   `wss`), which no middleware check can detect.
 
    ```
    node cli.mjs --config guard.json

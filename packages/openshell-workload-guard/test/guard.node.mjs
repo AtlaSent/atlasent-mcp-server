@@ -367,12 +367,12 @@ describe("streaming middleware is not adopted (NVIDIA/OpenShell#4359)", () => {
   it("refuses a gateway that requires a capability it does not implement, such as a streaming session", () => {
     const { err } = describeWith({
       ...gatewayMeta,
-      supported_capabilities: [...gatewayMeta.supported_capabilities, "openshell.supervisor-middleware.http-request-session"],
-      required_capabilities: [...gatewayMeta.required_capabilities, "openshell.supervisor-middleware.http-request-session"],
+      supported_capabilities: [...gatewayMeta.supported_capabilities, "openshell.supervisor-middleware.http-session"],
+      required_capabilities: [...gatewayMeta.required_capabilities, "openshell.supervisor-middleware.http-session"],
     });
     assert.ok(err, "a required streaming capability must fail Describe, not be ignored");
     assert.equal(err.code, grpc.status.FAILED_PRECONDITION);
-    assert.match(err.details, /http-request-session/);
+    assert.match(err.details, /http-session/);
   });
 
   it("the vendored service exposes no session RPCs, and WebSocket sessions are refused", () => {
