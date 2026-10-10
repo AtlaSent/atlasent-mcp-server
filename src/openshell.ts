@@ -506,6 +506,15 @@ export const OPENSHELL_OPEN_ADVISORIES: readonly OpenShellAdvisory[] = [
   },
 ];
 
+/**
+ * Releases with a RECORDED pass of the live transport-identity probe
+ * (`npm run test:openshell-transport-acceptance`), with its conditions. Only a
+ * version listed here drops the NVIDIA/OpenShell#4397 advisory. Empty until a
+ * release carrying the fix has been run: a changelog line or a merged PR is
+ * not a pass.
+ */
+export const OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED: Readonly<Record<string, string>> = {};
+
 export type OpenShellAssessment =
   | { status: "known_affected"; reason: string; advisories: readonly OpenShellAdvisory[] }
   | { status: "probe_passed"; reason: string; advisories: readonly OpenShellAdvisory[] }
@@ -513,7 +522,9 @@ export type OpenShellAssessment =
 
 export function assessOpenShellVersion(version: string): OpenShellAssessment {
   const v = version.trim().replace(/^v/, "");
-  const advisories = OPENSHELL_OPEN_ADVISORIES;
+  const advisories = OPENSHELL_OPEN_ADVISORIES.filter(
+    (a) => !(a.id === "NVIDIA/OpenShell#4397" && OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED[v]),
+  );
   const affected = OPENSHELL_KNOWN_AFFECTED[v];
   if (affected) return { status: "known_affected", reason: affected, advisories };
   const passed = OPENSHELL_PROBE_PASSED[v];
@@ -586,4 +597,97 @@ export async function runStartupGenerationProbe(opts: StartupProbeOptions): Prom
   }
   report.passed = report.attempts > 0 && report.failures.length === 0;
   return report;
+}
+
+
+// ── 5. Transport-identity probe (NVIDIA/OpenShell#4397) ────────────────────
+
+/**
+ * One request the probe sends through the sandbox, by how it actually
+ * travels. `tls` is HTTPS (TLS inside the tunnel); `plaintext_tunnel` is
+ * plain HTTP sent inside a CONNECT tunnel, the case #4397 mislabels.
+ */
+export type TransportCase = "tls" | "plaintext_tunnel";
+
+export const TRANSPORT_CASES: readonly TransportCase[] = ["tls", "plaintext_tunnel"];
+
+const EXPECTED_SCHEME: Record<TransportCase, string> = { tls: "https", plaintext_tunnel: "http" };
+
+export type TransportObservation =
+  | { observed: true; reported_scheme: string }
+  | { observed: false; detail?: string };
+
+export interface TransportCaseResult {
+  case: TransportCase;
+  expected_scheme: string;
+  reported_scheme?: string;
+  verdict: "correct" | "mislabelled" | "not_observed";
+  detail?: string;
+}
+
+export interface TransportProbeReport {
+  passed: boolean;
+  results: TransportCaseResult[];
+  /** True when plaintext was reported as https: the #4397 defect itself. */
+  defect_4397: boolean;
+}
+
+/**
+ * Send each case once and compare the scheme middleware was told against how
+ * the request really travelled. Passes only if every case was observed and
+ * reported correctly. The `tls` case is the positive control: a harness that
+ * cannot see the reported scheme fails as `not_observed`, never passes.
+ */
+export async function runTransportIdentityProbe(opts: {
+  send: (c: TransportCase) => Promise<TransportObservation>;
+}): Promise<TransportProbeReport> {
+  const results: TransportCaseResult[] = [];
+  for (const c of TRANSPORT_CASES) {
+    let obs: TransportObservation;
+    try {
+      obs = await opts.send(c);
+    } catch (err) {
+      obs = { observed: false, detail: errMessage(err) };
+    }
+    const expected = EXPECTED_SCHEME[c];
+    if (!obs.observed) {
+      const r: TransportCaseResult = { case: c, expected_scheme: expected, verdict: "not_observed" };
+      if (obs.detail !== undefined) r.detail = obs.detail;
+      results.push(r);
+      continue;
+    }
+    const reported = obs.reported_scheme.trim().toLowerCase();
+    results.push({
+      case: c,
+      expected_scheme: expected,
+      reported_scheme: reported,
+      verdict: reported === expected ? "correct" : "mislabelled",
+    });
+  }
+  const plain = results.find((r) => r.case === "plaintext_tunnel");
+  return {
+    passed: results.length === TRANSPORT_CASES.length && results.every((r) => r.verdict === "correct"),
+    results,
+    defect_4397: plain?.verdict === "mislabelled" && plain.reported_scheme === "https",
+  };
+}
+
+/**
+ * Read the scheme OpenShell reported from workload-guard log output: the last
+ * JSON line from `atlasent-workload-guard` carrying the given request id (or
+ * the last guard line at all when no id is given).
+ */
+export function reportedSchemeFromGuardLog(log: string, oshRequestId?: string): string | undefined {
+  for (const line of log.split("\n").reverse()) {
+    let rec: Record<string, unknown>;
+    try {
+      rec = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (rec.component !== "atlasent-workload-guard") continue;
+    if (oshRequestId !== undefined && rec.osh_request_id !== oshRequestId) continue;
+    return typeof rec.scheme === "string" && rec.scheme !== "" ? rec.scheme : undefined;
+  }
+  return undefined;
 }

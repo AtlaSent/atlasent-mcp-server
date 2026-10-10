@@ -104,6 +104,11 @@ export function createHandlers(cfg) {
         sandbox_id: req.context?.sandbox_id,
         method: req.target?.method,
         path: req.target?.path,
+        // What OpenShell reported, logged as-is: the live transport-identity
+        // probe (NVIDIA/OpenShell#4397) reads it back from this line.
+        scheme: req.target?.scheme,
+        host: req.target?.host,
+        port: req.target?.port,
       };
       try {
         if (req.phase !== "SUPERVISOR_MIDDLEWARE_PHASE_PRE_CREDENTIALS") {

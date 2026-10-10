@@ -400,3 +400,32 @@ describe("streaming middleware is not adopted (NVIDIA/OpenShell#4359)", () => {
     assert.deepEqual(results, ["DECISION_DENY"]);
   });
 });
+
+describe("decision log (read by the live #4397 transport probe)", () => {
+  it("logs the scheme, host and port OpenShell reported, on allow and on deny", () => {
+    const h = createHandlers({ audience: AUD, destination: DEST, gateway: { issuer: ISSUER, keys }, now: () => NOW });
+    const md = new grpc.Metadata();
+    md.set("authorization", `Bearer ${token()}`);
+    const lines = [];
+    const write = process.stderr.write;
+    process.stderr.write = (chunk) => (lines.push(String(chunk)), true);
+    try {
+      for (const scheme of ["https", "http"]) {
+        h.EvaluateHttpRequest(
+          { request: { phase: "SUPERVISOR_MIDDLEWARE_PHASE_PRE_CREDENTIALS", context: ctx, target: { ...evalTarget, scheme }, body: evaluateBody({ kind: "openshell_sandbox", id: SBX }) }, metadata: md },
+          () => {},
+        );
+      }
+    } finally {
+      process.stderr.write = write;
+    }
+    const recs = lines.map((l) => JSON.parse(l)).filter((r) => r.component === "atlasent-workload-guard");
+    assert.deepEqual(
+      recs.map((r) => [r.decision, r.scheme, r.host, r.port]),
+      [
+        ["allow", "https", "api.atlasent.io", 443],
+        ["deny", "http", "api.atlasent.io", 443],
+      ],
+    );
+  });
+});

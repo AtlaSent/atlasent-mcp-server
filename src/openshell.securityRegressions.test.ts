@@ -28,7 +28,15 @@ import assert from "node:assert/strict";
 
 import type { ActionContext, Decision, VerifyResult } from "./decision.js";
 import type { AwaitApprovalParams, AwaitApprovalResult } from "./engine.js";
-import { OpenShellAuthorityAdapter, assessOpenShellVersion, OPENSHELL_OPEN_ADVISORIES } from "./openshell.js";
+import {
+  OpenShellAuthorityAdapter,
+  assessOpenShellVersion,
+  OPENSHELL_OPEN_ADVISORIES,
+  OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED,
+  reportedSchemeFromGuardLog,
+  runTransportIdentityProbe,
+  type TransportObservation,
+} from "./openshell.js";
 import { EXIT, runGoverned, type SpawnOutcome } from "./openshellRun.js";
 import { checkAtlasentTransport } from "./openshellCli.js";
 
@@ -341,5 +349,62 @@ describe("open OpenShell advisories ride on every assessment", () => {
     assert.equal(pre4.status, "probe_passed", "qualification of v0.1.3 continues");
     assert.deepEqual(pre4.advisories.map((a) => a.id), ids);
     assert.equal(assessOpenShellVersion("0.1.2").advisories.length, 2);
+  });
+});
+
+describe("transport-identity probe (NVIDIA/OpenShell#4397)", () => {
+  const scheme = (s: string) => async (): Promise<TransportObservation> => ({ observed: true, reported_scheme: s });
+
+  it("passes only when TLS reads https and tunnelled plaintext reads http", async () => {
+    const r = await runTransportIdentityProbe({ send: async (c) => scheme(c === "tls" ? "https" : "HTTP")() });
+    assert.equal(r.passed, true);
+    assert.equal(r.defect_4397, false);
+    assert.deepEqual(r.results.map((x) => x.verdict), ["correct", "correct"]);
+  });
+
+  it("detects the #4397 defect: plaintext reported as https", async () => {
+    const r = await runTransportIdentityProbe({ send: scheme("https") });
+    assert.equal(r.passed, false);
+    assert.equal(r.defect_4397, true);
+    assert.equal(r.results.find((x) => x.case === "plaintext_tunnel")?.verdict, "mislabelled");
+  });
+
+  it("a harness that sees nothing, or throws, fails rather than passing", async () => {
+    const blind = await runTransportIdentityProbe({ send: async () => ({ observed: false }) });
+    assert.equal(blind.passed, false);
+    assert.equal(blind.defect_4397, false, "not observed is not evidence of the defect either");
+    const thrown = await runTransportIdentityProbe({
+      send: async () => {
+        throw new Error("sandbox exec failed");
+      },
+    });
+    assert.equal(thrown.passed, false);
+    assert.match(thrown.results[0].detail ?? "", /sandbox exec failed/);
+  });
+
+  it("the TLS case is a real positive control: TLS misreported as http fails", async () => {
+    const r = await runTransportIdentityProbe({ send: scheme("http") });
+    assert.equal(r.passed, false);
+    assert.equal(r.results.find((x) => x.case === "tls")?.verdict, "mislabelled");
+  });
+
+  it("reads the reported scheme back from workload-guard log lines", () => {
+    const log = [
+      "not json",
+      JSON.stringify({ component: "other", scheme: "https" }),
+      JSON.stringify({ component: "atlasent-workload-guard", osh_request_id: "r1", scheme: "https" }),
+      JSON.stringify({ component: "atlasent-workload-guard", osh_request_id: "r2", scheme: "http" }),
+    ].join("\n");
+    assert.equal(reportedSchemeFromGuardLog(log), "http", "last guard line");
+    assert.equal(reportedSchemeFromGuardLog(log, "r1"), "https");
+    assert.equal(reportedSchemeFromGuardLog(log, "r9"), undefined);
+    assert.equal(reportedSchemeFromGuardLog(JSON.stringify({ component: "atlasent-workload-guard", scheme: "" })), undefined);
+  });
+
+  it("the #4397 advisory stays on every version until a probe pass is recorded", () => {
+    assert.deepEqual(OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED, {});
+    for (const v of ["0.1.2", "0.1.3-pre.4", "0.1.3", "0.2.0"]) {
+      assert.ok(assessOpenShellVersion(v).advisories.some((a) => a.id === "NVIDIA/OpenShell#4397"), v);
+    }
   });
 });

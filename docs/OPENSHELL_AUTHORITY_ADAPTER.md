@@ -334,6 +334,29 @@ call. **Limit:** neither can see through a mislabelled `https`. Until a release
 confirmed to carry the #4397 fix is recorded here, a reported `https` is
 necessary, not sufficient.
 
+**Measuring the fix: the live transport-identity probe.** Whether a given
+OpenShell release has the #4397 fix is measured, not read from a changelog:
+
+```
+OPENSHELL_VERSION=<x.y.z> \
+OPENSHELL_TRANSPORT_PROBE_CMD='<sh; $1 is tls | plaintext_tunnel>' \
+npm run test:openshell-transport-acceptance
+```
+
+The command sends one request through the sandbox per case. `tls` is HTTPS.
+`plaintext_tunnel` is plain HTTP inside a CONNECT tunnel, for example
+`curl -p -x "$HTTPS_PROXY" http://<stub>/...`. Point it at a stub destination,
+never the AtlaSent API. The command prints `{"reported_scheme":"..."}` or the
+workload guard's log lines, which now record the `scheme`, `host` and `port`
+OpenShell reported. The probe (`runTransportIdentityProbe`) passes only if TLS
+reads `https` and the tunnelled plaintext reads `http`. If the harness cannot
+see a reported scheme, it fails `not_observed`; it never passes. The `tls` case
+is the in-run positive control. On every release so far, expect a failure with
+`defect_4397: true`. That failure is the cross-version control, so record it
+alongside any later pass. A version is added to
+`OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED` only after a recorded pass, and only
+that drops the #4397 advisory for it. The probe has not been run live yet.
+
 Every check above was shown to fail against a mutation of the code it guards
 (verify verdict ignored, spawn before verify, generation check removed, permit
 not consumed, digest check removed, plaintext/ws/wss accepted, destination
@@ -353,9 +376,10 @@ those mutations, not coverage.
 - OpenShell 0.1.3 stable. As of 2026-10-06 the newest tag is
   `v0.1.3-pre.4`. When stable ships, re-run the probe on it and add the
   result.
-- Re-run the two regression suites above on the first OpenShell release that
-  carries the #4397 fix, and record it in `OPENSHELL_FIX_CONFIRMED_IN` style
-  before dropping that advisory. Do not adopt #4359's streaming interface
+- Run the transport-identity probe live: once on 0.1.3-pre.4 (expected to
+  fail with `defect_4397`, the control), then on the first release carrying
+  the #4397 fix. Record both runs here and add the passing version to
+  `OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED`. Do not adopt #4359's streaming interface
   until NVIDIA ships it qualified.
 - Port the workload guard to `EvaluateHttpRequestSession` once #4359 ships
   qualified, and before any OpenShell 0.2.0 deployment: 0.2.0 plans to remove
