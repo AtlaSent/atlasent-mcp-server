@@ -396,6 +396,9 @@ those mutations, not coverage.
 
 ## Remaining
 
+The live runs below each have a single command in
+[`examples/openshell/live-kit/`](../examples/openshell/live-kit/README.md).
+
 - The staging run above, and startup-probe runs on other compute drivers
   (Kubernetes, Podman, VM).
 - Deploying the workload guard
