@@ -315,6 +315,19 @@ sealed itself for every `agent.*` action (atlasent-api #3785). In
 A failed mint or seal adds a note and the evaluate still goes out; the
 runtime refuses it. Tests: `src/agentToolGate.test.ts`.
 
+### Verified actor identity at VERIFY (atlasent-api#3915, 2026-10-10)
+
+`v1-verify-permit` requires an `actor_identity.v1` bound to the **permit's**
+actor when the action class's server-owned `execution_principal_binding` is
+`verified_actor` (`ACTOR_IDENTITY_REQUIRED` / `ACTOR_IDENTITY_INVALID`). In every
+other mode a presented identity is ignored. `verifyRemote` therefore calls
+`attachVerifyActorIdentity`, which mints a fresh assertion for the same action
+types `attachAgentActorIdentity` covers at evaluate (`agent.*` and the four
+change-control types) and attaches it. It never reuses the evaluate assertion,
+which may have expired. A failed mint (403, an older runtime's 404, a malformed
+assertion) leaves the verify unchanged and returns a `notes` entry; the runtime
+decides. Tests: `src/verifyActorIdentity.test.ts`.
+
 Headers: `Authorization: Bearer $ATLASENT_API_KEY`, optional `x-anon-key: $ATLASENT_ANON_KEY`.
 
 ## Disabled Endpoints (atlasent-api)

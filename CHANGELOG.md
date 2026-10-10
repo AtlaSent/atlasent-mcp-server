@@ -13,6 +13,16 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+### Changed
+
+- Verifying a permit for `production.deploy`, `infrastructure.change`,
+  `production.rollback`, `secret.configuration.change` or any `agent.*` action
+  now presents the agent's own verified actor identity, the same one minted at
+  evaluate. AtlaSent can then require a verified actor at the moment of
+  execution without denying this server. Other actions are unchanged. If no
+  identity can be minted, the verification still goes out and the result
+  carries a note.
+
 ## [2.18.0] - 2026-10-08
 
 2.17.5 was never published to npm, so this is the first release to carry its
