@@ -163,6 +163,8 @@ export type VerifyResult = {
   reasons?: string[];
   verify_error_code?: string;
   audit_id?: string;
+  /** Client-side observations, e.g. no actor identity could be presented. */
+  notes?: string[];
 };
 
 /**

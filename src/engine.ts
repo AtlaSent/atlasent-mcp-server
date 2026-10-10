@@ -1052,6 +1052,7 @@ async function verifyRemote(token: string, ctx: ActionContext): Promise<VerifyRe
     // PERMIT_BINDING_MISMATCH. Only kind + id bind; labels are not sent.
     ...(ctx.workload ? { workload: { kind: ctx.workload.kind, id: ctx.workload.id } } : {}),
   };
+  const notes = await attachVerifyActorIdentity(body, ctx.action_type, ctx.environment);
 
   const data = await post<RawVerify>("/v1-verify-permit", body);
 
@@ -1080,7 +1081,42 @@ async function verifyRemote(token: string, ctx: ActionContext): Promise<VerifyRe
     valid: data.valid === true,
     ...(data.reasons?.length && { reasons: data.reasons }),
     ...(data.verify_error_code && { verify_error_code: data.verify_error_code }),
+    ...(notes.length && { notes }),
   };
+}
+
+/**
+ * Commit-point principal proof (atlasent-api#3915). v1-verify-permit requires
+ * a verified actor_identity.v1 bound to the PERMIT's actor when the action
+ * class is classified `verified_actor`, a server-owned mode this client can
+ * neither see nor choose. For every other mode the runtime ignores a presented
+ * identity, so presenting one is safe.
+ *
+ * Mints for the same action types attachAgentActorIdentity mints for at
+ * evaluate (agent.* and the four change-control types), so a class moved to
+ * `verified_actor` does not deny this client's verifications. The assertion is
+ * minted fresh here: the evaluate one may have expired, and it is never kept.
+ *
+ * Never fails the request: without an assertion the verify still goes out and
+ * the runtime decides (ACTOR_IDENTITY_REQUIRED under `verified_actor`).
+ */
+export async function attachVerifyActorIdentity(
+  body: Record<string, unknown>,
+  action_type: string,
+  environment: string | undefined,
+): Promise<string[]> {
+  if (!action_type.startsWith("agent.") && !MANDATORY_CHANGE_CONTROL_ACTION_TYPES.has(action_type)) {
+    return [];
+  }
+  const minted = await mintAgentActorIdentity(action_type, environment ?? "");
+  if (minted.ok) {
+    body.actor_identity = minted.actor_identity;
+    return [];
+  }
+  return [
+    `No actor identity was presented at verify (${minted.reason}). ` +
+      "If this action requires a verified actor at the commit point, the runtime refuses it.",
+  ];
 }
 
 // ---------------------------------------------------------------------------
