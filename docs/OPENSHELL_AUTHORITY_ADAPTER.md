@@ -402,7 +402,8 @@ keys. It is built in atlasent-api behind
 `OPENSHELL_WORKLOAD_ATTESTATION_ENFORCEMENT`, which is **off** until three
 gates close:
 1. the live-kit runs below pass;
-2. the affected keys are counted from `report` mode's logs;
+2. the affected keys are counted, from `report` mode's logs and from a one-off
+   query for keys that have ever sent an OpenShell request (dormant keys);
 3. every OpenShell org has a registered guard key.
 
 What it means here:
@@ -410,8 +411,11 @@ What it means here:
 - **Once `enforce` is set,** `atlasent-openshell` without the workload guard
   stops working on every driver, not only on Docker. That includes the
   default mode, where the sandbox ID comes from `OPENSHELL_SANDBOX_ID`. Every
-  deployment needs the guard registered for the AtlaSent endpoints. Docker
-  deployments also need guard-bound mode.
+  deployment needs the guard registered for the AtlaSent endpoints. A Docker
+  deployment that cannot supply the sandbox ID otherwise also needs
+  guard-bound mode; one that supplies it through
+  `ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE` keeps default mode, and the guard
+  attests the ID it sends.
 - **In `report` mode** nothing is refused. An unattested evaluate carries
   `workload_attestation_unverified: true`. The adapter does not act on that
   field; it is for counting, not for authorization.
