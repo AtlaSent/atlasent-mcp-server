@@ -81,7 +81,38 @@ as the display name.
   `atlasent-openshell` reads `OPENSHELL_SANDBOX_ID`, or a JSON file named by
   `ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE` (re-read before evaluate and again
   before verify). When neither is present it refuses, never guessing. On the
-  Docker driver an operator has to supply the context file.
+  Docker driver an operator has to supply the context file, or use
+  guard-bound mode (below).
+- **Guard-bound mode (opt-in, added 2026-10-10; not yet run live).** With
+  `ATLASENT_OPENSHELL_WORKLOAD_BINDING=guard`, a context with no `sandbox_id`
+  is accepted. The adapter then sends evaluate and verify with **no**
+  `context.workload` (never a label, never a placeholder). The AtlaSent
+  workload guard, registered with `fill_absent_workload: true`, adds the
+  gateway-verified sandbox ID to each request. This amends the rule above:
+  in this mode the adapter does not know the ID, so the guard and the runtime
+  bind the permit to the sandbox, not the adapter. What still holds:
+  - a real `sandbox_id`, if one is present, is used and checked as usual;
+  - a permit evaluated guard-bound does not verify under a real ID, or the
+    other way round;
+  - a malformed ID, a missing or unreadable context, and a policy-generation
+    change are refused exactly as in the default mode;
+  - an unknown mode value is a usage error, never read as the default.
+
+  **It needs** the guard registered for the AtlaSent endpoints with
+  `fill_absent_workload: true`, **and** an API key that requires workload
+  attestation (atlasent-api#4032). The adapter enforces this. In guard-bound
+  mode it accepts an allow or a hold only when the runtime's evaluate response
+  carries `workload_attested: true`. The runtime sends that only when the
+  guard's attestation verified against the exact bytes it received. A missing
+  field means the guard did not run or the key does not require attestation,
+  and in either case the permit would be bound to no sandbox. So the adapter
+  denies, and it records no permit and no HOLD. A real `sandbox_id` and the
+  default mode do not need the field. Local mode never attests, so guard-bound
+  mode always denies there. The runtime field is additive and was added in
+  atlasent-api (`v1-evaluate`, branch
+  `claude/openshell-security-regressions-nl26aa`). Until that change is
+  deployed, guard-bound mode denies everything, which is the fail-closed
+  default.
 - **What OpenShell does not give the workload.** `OPENSHELL_SANDBOX` is
   overwritten with `"1"` inside a workload as an "inside a sandbox" marker, so
   it is never the name there and the adapter never reads it. OpenShell provides
@@ -279,7 +310,94 @@ can reach the AtlaSent staging host, and a **staging** test key with
    run" above, and in `OPENSHELL_PROBE_PASSED` in `src/openshell.ts` if it
    widens what that entry claims.
 
+## Upstream security regressions (2026-10-10)
+
+Two open OpenShell pull requests bear on AtlaSent's guarantees. Neither is in
+a release. `assessOpenShellVersion` reports both on every version as
+`advisories` (`OPENSHELL_OPEN_ADVISORIES` in `src/openshell.ts`) without
+changing qualification status: qualification of v0.1.3 continues.
+
+**NVIDIA/OpenShell#4359, streaming middleware: not adopted.** The revised
+interface (`EvaluateHttpRequestSession` / `EvaluateHttpResponseSession`,
+selected by listing `openshell.supervisor-middleware.http-session` in
+`required_capabilities`) had three blocking findings in review of head
+`7f09efe`: a response, and a request upload, could complete before the
+terminal verdict (fixed `c2684e8`); responses could be written after policy
+revocation (fixed `0a492e2`, generation checked before every write); and
+body-stage `Begin` events lacked preflight header mutations (fixed
+`a491a29`). The follow-up review cleared them but was static only. As of
+2026-10-10 the E2E jobs still need a maintainer re-run and the PR has no
+approving review. Checked against the PR page on 2026-10-10. A DENY or HOLD is
+worthless if the bytes already reached the destination, so AtlaSent pins the
+same three properties at its own boundary, in
+`src/openshell.securityRegressions.test.ts`:
+
+- A. Nothing runs before the final verdict. Evaluate ALLOW is not final;
+  verify is. A pending, hung, throwing or invalid verify, and a HOLD still
+  waiting or rejected, run nothing. An approved HOLD is still verified.
+- B. Revocation stops delivery: a runtime revocation at verify, a policy
+  generation change between evaluate and verify (including during the HOLD
+  wait), and a consumed or dropped permit.
+- C. The verify-side binding is complete: sandbox, action, target and the
+  runtime-bound payload hash. A dropped envelope field or sandbox id fails
+  before the runtime is called.
+
+The workload guard declares only the buffered HTTP request binding and refuses
+a gateway that requires any capability it does not implement, such as a
+streaming session (`packages/openshell-workload-guard/test/guard.node.mjs`).
+Keep any streaming adapter experimental until NVIDIA completes release
+qualification.
+
+The same PR marks the v1 hook RPCs deprecated, with removal planned for
+OpenShell 0.2.0. The guard is built on v1 `EvaluateHttpRequest`, so it will
+stop working on 0.2.0 unless it is ported to the session interface first.
+
+**NVIDIA/OpenShell#4397, request transport identity.** Plaintext HTTP in a
+tunnel reaches middleware as `https`, and plaintext WebSocket as `wss`: the
+scheme was hardcoded rather than derived from the transport (issue #4253).
+The PR (commit `335066c`, opened 2026-10-10) is unreviewed and has not run on
+NVIDIA CI. The guard now
+requires a pinned `destination` (host, port default 443) and denies a reported
+`http`, `ws` or `wss`, any other scheme, a host or port other than the pinned
+one, and any scheme, host or port OpenShell left empty. `atlasent-openshell
+run` refuses a plaintext `ATLASENT_BASE_URL` unless it is loopback, before any
+call. **Limit:** neither can see through a mislabelled `https`. Until a release
+confirmed to carry the #4397 fix is recorded here, a reported `https` is
+necessary, not sufficient.
+
+**Measuring the fix: the live transport-identity probe.** Whether a given
+OpenShell release has the #4397 fix is measured, not read from a changelog:
+
+```
+OPENSHELL_VERSION=<x.y.z> \
+OPENSHELL_TRANSPORT_PROBE_CMD='<sh; $1 is tls | plaintext_tunnel>' \
+npm run test:openshell-transport-acceptance
+```
+
+The command sends one request through the sandbox per case. `tls` is HTTPS.
+`plaintext_tunnel` is plain HTTP inside a CONNECT tunnel, for example
+`curl -p -x "$HTTPS_PROXY" http://<stub>/...`. Point it at a stub destination,
+never the AtlaSent API. The command prints `{"reported_scheme":"..."}` or the
+workload guard's log lines, which now record the `scheme`, `host` and `port`
+OpenShell reported. The probe (`runTransportIdentityProbe`) passes only if TLS
+reads `https` and the tunnelled plaintext reads `http`. If the harness cannot
+see a reported scheme, it fails `not_observed`; it never passes. The `tls` case
+is the in-run positive control. On every release so far, expect a failure with
+`defect_4397: true`. That failure is the cross-version control, so record it
+alongside any later pass. A version is added to
+`OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED` only after a recorded pass, and only
+that drops the #4397 advisory for it. The probe has not been run live yet.
+
+Every check above was shown to fail against a mutation of the code it guards
+(verify verdict ignored, spawn before verify, generation check removed, permit
+not consumed, digest check removed, plaintext/ws/wss accepted, destination
+check removed, a required unknown capability ignored). That is resistance to
+those mutations, not coverage.
+
 ## Remaining
+
+The live runs below each have a single command in
+[`examples/openshell/live-kit/`](../examples/openshell/live-kit/README.md).
 
 - The staging run above, and startup-probe runs on other compute drivers
   (Kubernetes, Podman, VM).
@@ -287,10 +405,22 @@ can reach the AtlaSent staging host, and a **staging** test key with
   ([`OPENSHELL_WORKLOAD_IDENTITY_DESIGN.md`](OPENSHELL_WORKLOAD_IDENTITY_DESIGN.md),
   `packages/openshell-workload-guard`). Phase 1 was live-tested on 0.1.3-pre.4.
   Phase 2 (atlasent-api#4032) is not applied to any environment yet.
-- A sandbox ID for the workload on the Docker driver, where OpenShell does not
-  provide one. One option is for the guard to fill in an absent workload.
+- Run guard-bound mode live on the Docker driver: no `sandbox_id` in the
+  workload, guard with `fill_absent_workload: true`, key with
+  `requires_workload_attestation`. Check that the stub receives the filled
+  body, that the attestation's `body_sha256` matches those bytes, that
+  OpenShell fixes `Content-Length` after the body changes, and that a forged
+  workload still gets `workload_mismatch`.
 - OpenShell 0.1.3 stable. As of 2026-10-06 the newest tag is
   `v0.1.3-pre.4`. When stable ships, re-run the probe on it and add the
   result.
+- Run the transport-identity probe live: once on 0.1.3-pre.4 (expected to
+  fail with `defect_4397`, the control), then on the first release carrying
+  the #4397 fix. Record both runs here and add the passing version to
+  `OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED`. Do not adopt #4359's streaming interface
+  until NVIDIA ships it qualified.
+- Port the workload guard to `EvaluateHttpRequestSession` once #4359 ships
+  qualified, and before any OpenShell 0.2.0 deployment: 0.2.0 plans to remove
+  the v1 RPC the guard uses. Re-run regression suites A–C on the port.
 
 Do not fork OpenShell or duplicate its policy engine.

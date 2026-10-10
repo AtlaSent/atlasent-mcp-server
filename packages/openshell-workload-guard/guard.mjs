@@ -150,20 +150,129 @@ export function parseStrictJson(text) {
   return value;
 }
 
+/**
+ * Offset of the first character of the value of top-level key `key` in a JSON
+ * object text, or -1 when the key is absent. Uses the same string-aware scan
+ * as parseStrictJson, so a key-shaped string inside a value never matches.
+ */
+function topLevelValueStart(text, key) {
+  const re = /"((?:[^"\\]|\\.)*)"\s*:/y;
+  let depth = 0;
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      re.lastIndex = i;
+      const m = re.exec(text);
+      if (m && m.index === i) {
+        if (depth === 1 && JSON.parse(`"${m[1]}"`) === key) {
+          let j = re.lastIndex;
+          while (/\s/.test(text[j] ?? "")) j++;
+          return j;
+        }
+        i = re.lastIndex - 1;
+        continue;
+      }
+      inString = true;
+    } else if (c === "{" || c === "[") {
+      depth++;
+    } else if (c === "}" || c === "]") {
+      depth--;
+    }
+  }
+  return -1;
+}
+
+/** Insert `"name":value` as the first member of the object whose `{` is at `open`. */
+function insertMember(text, open, name, valueJson) {
+  let j = open + 1;
+  while (/\s/.test(text[j] ?? "")) j++;
+  const sep = text[j] === "}" ? "" : ",";
+  return `${text.slice(0, open + 1)}${JSON.stringify(name)}:${valueJson}${sep}${text.slice(open + 1)}`;
+}
+
+/**
+ * Add the verified workload to a body that carries none, by splicing text into
+ * the original bytes. Re-serializing would change the request: JSON numbers
+ * past 2^53 lose precision and key order and escapes move. Returns undefined
+ * when the body has a place the workload would go that is not an object, so
+ * the caller denies instead.
+ */
+function fillWorkload(text, route, sandboxId) {
+  const workload = JSON.stringify({ kind: WORKLOAD_KIND, id: sandboxId });
+  const top = text.search(/\S/);
+  if (text[top] !== "{") return undefined;
+  if (route.workload === "top") return insertMember(text, top, "workload", workload);
+  const ctx = topLevelValueStart(text, "context");
+  if (ctx === -1) return insertMember(text, top, "context", `{"workload":${workload}}`);
+  if (text[ctx] !== "{") return undefined;
+  return insertMember(text, ctx, "workload", workload);
+}
+
 function routeFor(method, path) {
   const m = /\/functions\/v1\/(.+)$/.exec(path) ?? /^\/(.+)$/.exec(path);
   if (!m) return undefined;
   return ROUTES.find((r) => r.method === method && r.pattern.test(m[1]));
 }
 
+function normalizeHost(host) {
+  return String(host).trim().toLowerCase().replace(/\.$/, "");
+}
+
 /**
- * Decide one request. Returns { route, sandbox_id } on allow; throws
- * GuardDenial otherwise.
+ * Check the destination and transport OpenShell reported for this request.
+ *
+ * The AtlaSent key is injected after this guard allows, so the request must
+ * be going to the operator-pinned AtlaSent host and port, over HTTPS. Anything
+ * else denies: plaintext `http`, a WebSocket scheme (`ws`/`wss` are never an
+ * evaluate or verify), and any field OpenShell left empty, because a
+ * destination we cannot establish is not one we can bind a permit to.
+ *
+ * Limit: this trusts the scheme OpenShell reports. NVIDIA/OpenShell#4397 (open
+ * 2026-10-10, issue #4253): plaintext HTTP in a tunnel reaches middleware as
+ * `https`, and plaintext WebSocket as `wss`. No check here can see through that; the fix is in
+ * OpenShell. Until a release carrying it is confirmed, treat a reported
+ * `https` as necessary, not sufficient (docs/OPENSHELL_AUTHORITY_ADAPTER.md).
  */
-export function checkRequest({ claims, context, target, body }) {
+export function checkDestination(target, destination) {
+  if (!destination || typeof destination.host !== "string" || destination.host.trim() === "") {
+    throw new GuardDenial("destination_unconfigured", "no pinned AtlaSent destination host");
+  }
+  const scheme = typeof target?.scheme === "string" ? target.scheme.trim().toLowerCase() : "";
+  if (scheme === "") throw new GuardDenial("transport_unknown", "OpenShell reported no request scheme");
+  if (scheme === "http") throw new GuardDenial("transport_not_secure", "plaintext http");
+  if (scheme === "ws" || scheme === "wss") throw new GuardDenial("transport_not_http", `${scheme} is not an AtlaSent API request`);
+  if (scheme !== "https") throw new GuardDenial("transport_unknown", `unrecognized scheme ${scheme}`);
+  const host = typeof target?.host === "string" ? normalizeHost(target.host) : "";
+  if (host === "") throw new GuardDenial("destination_unknown", "OpenShell reported no destination host");
+  if (host !== normalizeHost(destination.host)) throw new GuardDenial("destination_mismatch", `host ${host}`);
+  const port = Number(target?.port);
+  if (!Number.isInteger(port) || port <= 0) throw new GuardDenial("destination_unknown", "OpenShell reported no destination port");
+  if (port !== (destination.port ?? 443)) throw new GuardDenial("destination_mismatch", `port ${port}`);
+}
+
+/**
+ * Decide one request. Returns { route, sandbox_id } on allow, plus `body` (the
+ * replacement bytes) when the workload was filled in; throws GuardDenial
+ * otherwise.
+ *
+ * `fillAbsentWorkload` (opt-in, operator config): when the evaluate or verify
+ * body carries NO workload at all, add the verified one instead of denying.
+ * This serves sandboxes whose workload cannot learn its own ID (OpenShell's
+ * Docker driver). A workload that is present but wrong, null, or not an
+ * object is never rewritten: it denies exactly as before, because a forged
+ * workload denied is the evidence of the forgery.
+ */
+export function checkRequest({ claims, context, target, body, destination, fillAbsentWorkload = false }) {
   if (!context || context.sandbox_id !== claims.sandbox_id) {
     throw new GuardDenial("context_mismatch", "request context sandbox_id differs from the gateway token");
   }
+  checkDestination(target, destination);
   const method = String(target?.method ?? "").toUpperCase();
   const route = routeFor(method, String(target?.path ?? ""));
   if (!route) throw new GuardDenial("path_not_allowed", `${method} ${target?.path}`);
@@ -177,12 +286,28 @@ export function checkRequest({ claims, context, target, body }) {
     throw new GuardDenial("body_not_json");
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new GuardDenial("body_not_json");
-  const workload = route.workload === "context" ? parsed.context?.workload : parsed.workload;
+  const holder = route.workload === "context" ? parsed.context : parsed;
+  const absent =
+    route.workload === "context"
+      ? !Object.hasOwn(parsed, "context") || (isPlainObject(parsed.context) && !Object.hasOwn(parsed.context, "workload"))
+      : !Object.hasOwn(parsed, "workload");
+  if (absent && fillAbsentWorkload) {
+    const filled = fillWorkload(Buffer.from(body ?? []).toString("utf8"), route, claims.sandbox_id);
+    if (filled === undefined) throw new GuardDenial("workload_missing");
+    // Re-check the result with the strict path, so a splice bug denies.
+    const again = checkRequest({ claims, context, target, body: Buffer.from(filled, "utf8"), destination });
+    return { ...again, body: Buffer.from(filled, "utf8"), filled: true };
+  }
+  const workload = holder?.workload;
   if (!workload || typeof workload !== "object") throw new GuardDenial("workload_missing");
   if (workload.kind !== WORKLOAD_KIND || workload.id !== claims.sandbox_id) {
     throw new GuardDenial("workload_mismatch", `body names ${workload.kind}:${workload.id}`);
   }
   return { route, sandbox_id: claims.sandbox_id };
+}
+
+function isPlainObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
 /**

@@ -54,10 +54,27 @@ published to npm. Run it from this folder (`npm ci`).
      "listen": "0.0.0.0:50061",
      "audience": "urn:atlasent:openshell:workload-guard",
      "gateway": { "issuer": "openshell-gateway:openshell", "jwks_path": "/etc/atlasent/jwks.json" },
+     "destination": { "host": "api.atlasent.io", "port": 443 },
      "tls": { "cert_path": "/etc/atlasent/guard.pem", "key_path": "/etc/atlasent/guard.key" },
      "attestation": { "signing_key_path": "/etc/atlasent/attest.pem", "kid": "guard-1" }
    }
    ```
+
+   `"fill_absent_workload": true` is optional and off by default. Use it on
+   OpenShell's Docker driver, where the workload cannot learn its own sandbox
+   ID. When an evaluate or verify body has no workload, the guard adds the
+   verified one, returns the new body, and signs the attestation over it. A
+   workload that is present is never rewritten, and a wrong one still denies.
+   Pair it with `ATLASENT_OPENSHELL_WORKLOAD_BINDING=guard` on the adapter and
+   a key that requires workload attestation.
+
+   `destination` is required. The guard denies any request whose reported
+   scheme is not `https`, or whose host or port is not this one: the key is
+   injected after the guard allows, so it must only ever go here. A scheme,
+   host or port OpenShell left empty also denies. The guard trusts the scheme
+   OpenShell reports; NVIDIA/OpenShell#4397 (open as of 2026-10-10) can
+   report plaintext HTTP in a tunnel as `https` (and plaintext WebSocket as
+   `wss`), which no middleware check can detect.
 
    ```
    node cli.mjs --config guard.json
