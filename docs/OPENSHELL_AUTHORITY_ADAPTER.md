@@ -394,6 +394,34 @@ not consumed, digest check removed, plaintext/ws/wss accepted, destination
 check removed, a required unknown capability ignored). That is resistance to
 those mutations, not coverage.
 
+## Attestation for every OpenShell request (CROSS-070, decided 2026-10-10)
+
+The founder chose to require a verified workload attestation for **every**
+runtime request naming `kind: "openshell_sandbox"`, not only for flagged
+keys. It is built in atlasent-api behind
+`OPENSHELL_WORKLOAD_ATTESTATION_ENFORCEMENT`, which is **off** until three
+gates close:
+1. the live-kit runs below pass;
+2. the affected keys are counted, from `report` mode's logs and from a one-off
+   query for keys that have ever sent an OpenShell request (dormant keys);
+3. every deployed guard's own signing key is registered (one per guard host).
+
+What it means here:
+
+- **Once `enforce` is set,** `atlasent-openshell` without the workload guard
+  stops working on every driver, not only on Docker. That includes the
+  default mode, where the sandbox ID comes from `OPENSHELL_SANDBOX_ID`. Every
+  deployment needs the guard registered for the AtlaSent endpoints. A Docker
+  deployment that cannot supply the sandbox ID otherwise also needs
+  guard-bound mode; one that supplies it through
+  `ATLASENT_OPENSHELL_SANDBOX_CONTEXT_FILE` keeps default mode, and the guard
+  attests the ID it sends.
+- **In `report` mode** nothing is refused. An unattested evaluate carries
+  `workload_attestation_unverified: true`. The adapter does not act on that
+  field; it is for counting, not for authorization.
+- **Nothing changes in the adapter.** It already sends the workload, or relies
+  on the guard in guard-bound mode. The runtime decides.
+
 ## Remaining
 
 The live runs below each have a single command in
