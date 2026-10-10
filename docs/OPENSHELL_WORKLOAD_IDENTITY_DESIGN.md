@@ -218,6 +218,22 @@ Found along the way:
   environment, so `atlasent-openshell` needs an operator-supplied context file
   there. The guard checks whatever ID is sent, so this is a usability gap, not
   a hole.
+
+  **Addressed 2026-10-10, opt-in, not yet run live.** The guard takes
+  `fill_absent_workload: true`. When the evaluate or verify body has no
+  workload at all, the guard adds `{kind: "openshell_sandbox", id: <verified
+  sandbox_id>}` and returns the new body (`has_body`). The attestation signs
+  that new body. Rules:
+  - The guard splices into the original bytes instead of re-serializing,
+    which would lose precision on large numbers and move keys and escapes.
+    The result is re-checked through the strict path, so a splice bug denies.
+  - A workload that is present is never rewritten: forged, null, the wrong
+    kind or not an object still denies.
+  - A `context` that is not an object denies.
+  - Transport, destination and duplicate-key checks run first.
+
+  On the adapter side, `ATLASENT_OPENSHELL_WORKLOAD_BINDING=guard` sends no
+  workload when it has no ID (`OPENSHELL_AUTHORITY_ADAPTER.md` §1).
 - **`--policy` replaces the whole policy.** A sandbox created with `--policy`
   gets that policy instead of the default one. A middleware-only policy file
   left the workload unable to start (`Permission denied`), so keep the

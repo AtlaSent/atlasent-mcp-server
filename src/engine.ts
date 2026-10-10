@@ -328,6 +328,8 @@ interface RawEvaluate {
   approval_request_id?: string;
   /** Present when the runtime admitted sealed source provenance. */
   source_provenance?: Record<string, unknown>;
+  /** CROSS-066 phase 2: present and true only when the workload guard's attestation verified. */
+  workload_attested?: unknown;
 }
 
 // Shared base request-body construction for POST /v1-evaluate. Both call
@@ -967,6 +969,8 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
     if (data.source_provenance && provenance.action_hash) out.bound_payload_hash = provenance.action_hash;
     if (typeof body.actor_id === "string" && body.actor_id !== ctx.actor_id) out.bound_actor_id = body.actor_id;
     if (sealed_binding) out.sealed_binding = sealed_binding;
+    // Strictly `true`: any other value (a string, 1) is not an attestation.
+    if (data.workload_attested === true) out.workload_attested = true;
     if (audit_id) out.audit_id = audit_id;
     if (envelope_hash) out.envelope_hash = envelope_hash;
     if (data.conditions?.length) out.conditions = data.conditions;
@@ -995,6 +999,7 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
       ...(data.source_provenance && provenance.action_hash && { bound_payload_hash: provenance.action_hash }),
       ...(typeof body.actor_id === "string" && body.actor_id !== ctx.actor_id && { bound_actor_id: body.actor_id }),
       ...(sealed_binding && { sealed_binding }),
+      ...(data.workload_attested === true && { workload_attested: true as const }),
     };
   }
 

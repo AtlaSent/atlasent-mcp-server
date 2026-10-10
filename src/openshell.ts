@@ -59,6 +59,31 @@ const CONTROL_OR_SPACE = /[\s\u0000-\u001f\u007f]/;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/g;
 
+/**
+ * Stands in for the sandbox ID in guard-bound mode, where the workload cannot
+ * learn its own ID and the AtlaSent workload guard adds the verified one to
+ * each request instead. It contains a space, which parseSandboxContext rejects
+ * in a real sandbox_id, so it can never equal one.
+ */
+export const GUARD_BOUND_SANDBOX_ID = "openshell guard-bound";
+
+/**
+ * Who puts the sandbox identity on the wire.
+ *  - "adapter" (default): the adapter sends the sandbox_id it was given and
+ *    refuses without one.
+ *  - "guard": a request with no sandbox_id is sent with NO workload, and the
+ *    AtlaSent workload guard (`fill_absent_workload: true`) adds the
+ *    gateway-verified one. Only safe when that guard is registered for the
+ *    AtlaSent endpoints and the API key requires workload attestation
+ *    (atlasent-api#4032); otherwise the permit is not bound to any sandbox.
+ */
+export type WorkloadBindingMode = "adapter" | "guard";
+
+export const GUARD_BOUND_UNATTESTED =
+  "Guard-bound mode: the runtime did not report workload_attested, so this decision is not bound to any " +
+  "sandbox. Register the AtlaSent workload guard with fill_absent_workload and use a key that requires " +
+  "workload attestation, or supply the sandbox_id.";
+
 export type SandboxParse =
   | { ok: true; sandbox: Required<Pick<OpenShellSandboxContext, "sandbox_id">> & OpenShellSandboxContext }
   | { ok: false; reason: string };
@@ -69,12 +94,15 @@ export type SandboxParse =
  * `workspace`. Labels are trimmed, stripped of control characters and capped,
  * and dropped when empty.
  */
-export function parseSandboxContext(raw: unknown): SandboxParse {
+export function parseSandboxContext(raw: unknown, opts: { mode?: WorkloadBindingMode } = {}): SandboxParse {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return { ok: false, reason: "OpenShell sandbox context missing: refusing to evaluate without a sandbox_id." };
   }
   const r = raw as Record<string, unknown>;
   const id = r.sandbox_id;
+  if (opts.mode === "guard" && (id === undefined || (typeof id === "string" && id.trim() === ""))) {
+    return { ok: true, sandbox: withLabels(r, { sandbox_id: GUARD_BOUND_SANDBOX_ID }) };
+  }
   if (typeof id !== "string" || id.trim() === "") {
     return {
       ok: false,
@@ -85,7 +113,13 @@ export function parseSandboxContext(raw: unknown): SandboxParse {
   if (id !== id.trim() || CONTROL_OR_SPACE.test(id) || id.length > MAX_ID_LENGTH) {
     return { ok: false, reason: "OpenShell sandbox_id malformed (whitespace, control characters or over 256 chars)." };
   }
-  const out: OpenShellSandboxContext & { sandbox_id: string } = { sandbox_id: id };
+  return { ok: true, sandbox: withLabels(r, { sandbox_id: id }) };
+}
+
+function withLabels(
+  r: Record<string, unknown>,
+  out: OpenShellSandboxContext & { sandbox_id: string },
+): OpenShellSandboxContext & { sandbox_id: string } {
   // OpenShell's middleware RequestContext (proto/supervisor_middleware.proto)
   // calls the display name `sandbox`; `sandbox_name` is accepted too.
   const name = cleanLabel(r.sandbox) ?? cleanLabel(r.sandbox_name);
@@ -96,7 +130,7 @@ export function parseSandboxContext(raw: unknown): SandboxParse {
   if ((typeof gen === "string" && gen.trim() !== "") || (typeof gen === "number" && Number.isFinite(gen))) {
     out.policy_generation = gen;
   }
-  return { ok: true, sandbox: out };
+  return out;
 }
 
 function cleanLabel(value: unknown): string | undefined {
@@ -105,8 +139,12 @@ function cleanLabel(value: unknown): string | undefined {
   return s === "" ? undefined : s;
 }
 
-/** The workload binding sent to /v1-evaluate. Labels are nested, never the id. */
-export function workloadBinding(sandbox: OpenShellSandboxContext): WorkloadBinding {
+/**
+ * The workload binding sent to /v1-evaluate. Labels are nested, never the id.
+ * Undefined in guard-bound mode: the guard adds the verified workload.
+ */
+export function workloadBinding(sandbox: OpenShellSandboxContext): WorkloadBinding | undefined {
+  if (sandbox.sandbox_id === GUARD_BOUND_SANDBOX_ID) return undefined;
   const binding: WorkloadBinding = { kind: "openshell_sandbox", id: sandbox.sandbox_id };
   const labels: NonNullable<WorkloadBinding["labels"]> = {};
   if (sandbox.sandbox_name !== undefined) labels.sandbox_name = sandbox.sandbox_name;
@@ -202,8 +240,9 @@ export function toActionContext(envelope: CanonicalActionEnvelope, sandbox: Open
     action_type: envelope.action_type,
     actor_id: envelope.actor_id,
     environment: envelope.environment,
-    workload: workloadBinding(sandbox),
   };
+  const workload = workloadBinding(sandbox);
+  if (workload !== undefined) ctx.workload = workload;
   if (envelope.target_id !== undefined) ctx.target_id = envelope.target_id;
   if (envelope.target_system !== undefined) ctx.target_system = envelope.target_system;
   if (envelope.payload_hash !== undefined) ctx.payload_hash = envelope.payload_hash;
@@ -246,6 +285,8 @@ export interface OpenShellAdapterDeps {
   authorize?: (ctx: ActionContext) => Promise<Decision>;
   verify?: (token: string, ctx: ActionContext) => Promise<VerifyResult>;
   awaitApproval?: (params: AwaitApprovalParams) => Promise<AwaitApprovalResult>;
+  /** Default "adapter". See WorkloadBindingMode. */
+  workloadBinding?: WorkloadBindingMode;
 }
 
 /**
@@ -265,6 +306,7 @@ export class OpenShellAuthorityAdapter {
   private readonly authorizeFn: NonNullable<OpenShellAdapterDeps["authorize"]>;
   private readonly verifyFn: NonNullable<OpenShellAdapterDeps["verify"]>;
   private readonly awaitApprovalFn: NonNullable<OpenShellAdapterDeps["awaitApproval"]>;
+  private readonly mode: WorkloadBindingMode;
   private readonly holds = new Map<string, Issued>();
   private readonly permits = new Map<string, Issued>();
 
@@ -272,11 +314,12 @@ export class OpenShellAuthorityAdapter {
     this.authorizeFn = deps.authorize ?? engineAuthorize;
     this.verifyFn = deps.verify ?? engineVerify;
     this.awaitApprovalFn = deps.awaitApproval ?? engineAwaitApproval;
+    this.mode = deps.workloadBinding ?? "adapter";
   }
 
   /** Evaluate one consequential action from one sandbox. */
   async evaluate(rawEnvelope: unknown, rawSandbox: unknown): Promise<AdapterResult> {
-    const sb = parseSandboxContext(rawSandbox);
+    const sb = parseSandboxContext(rawSandbox, { mode: this.mode });
     if (!sb.ok) return { outcome: "DENY", reasons: [sb.reason] };
     const env = parseActionEnvelope(rawEnvelope);
     if (!env.ok) return { outcome: "DENY", reasons: [env.reason] };
@@ -297,6 +340,20 @@ export class OpenShellAuthorityAdapter {
       policy_generation: sandbox.policy_generation,
       envelope,
     };
+    // Guard-bound mode: the adapter sent no workload and cannot see the
+    // sandbox ID, so the only proof the permit is bound to this sandbox is the
+    // runtime reporting that the guard's attestation verified. Without it the
+    // guard did not run (or the key does not require attestation) and the
+    // permit is bound to no sandbox: refuse it rather than trust the setup.
+    if (
+      sandbox.sandbox_id === GUARD_BOUND_SANDBOX_ID &&
+      (decision.decision === "allow" || decision.decision === "hold") &&
+      decision.workload_attested !== true
+    ) {
+      const out: AdapterResult = { outcome: "DENY", reasons: [GUARD_BOUND_UNATTESTED] };
+      if (decision.audit_id !== undefined) out.audit_id = decision.audit_id;
+      return out;
+    }
     if (decision.decision === "allow") {
       this.permits.set(decision.permit_token, issued);
       const out: AdapterResult = { outcome: "PERMIT", permit_token: decision.permit_token, display };
@@ -329,7 +386,7 @@ export class OpenShellAuthorityAdapter {
     rawSandbox: unknown,
     opts: { max_wait_ms: number; poll_interval_ms?: number },
   ): Promise<AdapterResult> {
-    const sb = parseSandboxContext(rawSandbox);
+    const sb = parseSandboxContext(rawSandbox, { mode: this.mode });
     if (!sb.ok) return { outcome: "DENY", reasons: [sb.reason] };
     const held = this.holds.get(approvalRequestId);
     if (!held) {
@@ -371,7 +428,7 @@ export class OpenShellAuthorityAdapter {
     rawSandbox: unknown,
     opts: { payload_hash?: string } = {},
   ): Promise<{ execute: true; verify: VerifyResult } | { execute: false; reasons: string[]; reevaluate?: true }> {
-    const sb = parseSandboxContext(rawSandbox);
+    const sb = parseSandboxContext(rawSandbox, { mode: this.mode });
     if (!sb.ok) return { execute: false, reasons: [sb.reason] };
     const env = parseActionEnvelope(rawEnvelope);
     if (!env.ok) return { execute: false, reasons: [env.reason] };
@@ -461,22 +518,80 @@ export const OPENSHELL_PROBE_PASSED: Readonly<Record<string, string>> = {
     "unchanged revision and a stale generation). Recorded in docs/OPENSHELL_AUTHORITY_ADAPTER.md.",
 };
 
+/**
+ * Open upstream OpenShell issues that bear on AtlaSent's guarantees but do not
+ * disqualify a release from qualification. Neither is fixed in any OpenShell
+ * release as of 2026-10-10; both are open pull requests. They are reported on
+ * every assessment so a reader of `atlasent-openshell check` sees them, and
+ * are removed only when a release confirmed (by commit ancestry) to carry the
+ * fix has passed the relevant regression suite.
+ */
+export interface OpenShellAdvisory {
+  id: string;
+  summary: string;
+  atlasent_posture: string;
+}
+
+export const OPENSHELL_OPEN_ADVISORIES: readonly OpenShellAdvisory[] = [
+  {
+    id: "NVIDIA/OpenShell#4397",
+    summary:
+      "Plaintext HTTP in a tunnel is reported to supervisor middleware as https (and plaintext WebSocket as " +
+      "wss): the scheme is hardcoded, not derived from the transport (issue NVIDIA/OpenShell#4253). PR opened " +
+      "2026-10-10 (commit 335066c), not yet reviewed or run on NVIDIA CI.",
+    atlasent_posture:
+      "The workload guard denies any request not reported as https to the pinned AtlaSent host and port, and " +
+      "any request whose scheme, host or port OpenShell left empty. It cannot detect a mislabelled https, so a " +
+      "reported https is treated as necessary, not sufficient. atlasent-openshell run refuses a non-loopback " +
+      "plaintext ATLASENT_BASE_URL before any call.",
+  },
+  {
+    id: "NVIDIA/OpenShell#4359",
+    summary:
+      "Next-generation middleware hooks EvaluateHttpRequestSession / EvaluateHttpResponseSession, selected by " +
+      "listing openshell.supervisor-middleware.http-session in required_capabilities. Review of head 7f09efe " +
+      "found: a response (and request upload) could complete before the terminal verdict (fixed c2684e8); " +
+      "responses could be written after policy revocation (fixed 0a492e2, generation checked before every " +
+      "write); body-stage Begin events lacked preflight header mutations (fixed a491a29). The follow-up review " +
+      "was static only. E2E re-run and maintainer approval outstanding as of 2026-10-10. The PR also deprecates " +
+      "the v1 hook RPCs, with removal planned for OpenShell 0.2.0.",
+    atlasent_posture:
+      "Not adopted. The workload guard declares only the buffered HTTP request binding and refuses a gateway " +
+      "that requires any capability it does not implement (including http-session). The AtlaSent execution " +
+      "boundary runs nothing before verify returns valid, and a revocation or policy change before verify stops " +
+      "execution. The guard uses the v1 EvaluateHttpRequest RPC, so it must be ported before OpenShell 0.2.0.",
+  },
+];
+
+/**
+ * Releases with a RECORDED pass of the live transport-identity probe
+ * (`npm run test:openshell-transport-acceptance`), with its conditions. Only a
+ * version listed here drops the NVIDIA/OpenShell#4397 advisory. Empty until a
+ * release carrying the fix has been run: a changelog line or a merged PR is
+ * not a pass.
+ */
+export const OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED: Readonly<Record<string, string>> = {};
+
 export type OpenShellAssessment =
-  | { status: "known_affected"; reason: string }
-  | { status: "probe_passed"; reason: string }
-  | { status: "unverified"; reason: string };
+  | { status: "known_affected"; reason: string; advisories: readonly OpenShellAdvisory[] }
+  | { status: "probe_passed"; reason: string; advisories: readonly OpenShellAdvisory[] }
+  | { status: "unverified"; reason: string; advisories: readonly OpenShellAdvisory[] };
 
 export function assessOpenShellVersion(version: string): OpenShellAssessment {
   const v = version.trim().replace(/^v/, "");
+  const advisories = OPENSHELL_OPEN_ADVISORIES.filter(
+    (a) => !(a.id === "NVIDIA/OpenShell#4397" && OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED[v]),
+  );
   const affected = OPENSHELL_KNOWN_AFFECTED[v];
-  if (affected) return { status: "known_affected", reason: affected };
+  if (affected) return { status: "known_affected", reason: affected, advisories };
   const passed = OPENSHELL_PROBE_PASSED[v];
-  if (passed) return { status: "probe_passed", reason: passed };
+  if (passed) return { status: "probe_passed", reason: passed, advisories };
   const fixed = OPENSHELL_FIX_CONFIRMED_IN[v];
-  if (fixed) return { status: "unverified", reason: `${fixed} No recorded startup-probe pass on it.` };
+  if (fixed) return { status: "unverified", reason: `${fixed} No recorded startup-probe pass on it.`, advisories };
   return {
     status: "unverified",
     reason: "Not a known-affected release. Production readiness still requires a recorded startup-probe pass.",
+    advisories,
   };
 }
 
@@ -539,4 +654,97 @@ export async function runStartupGenerationProbe(opts: StartupProbeOptions): Prom
   }
   report.passed = report.attempts > 0 && report.failures.length === 0;
   return report;
+}
+
+
+// ── 5. Transport-identity probe (NVIDIA/OpenShell#4397) ────────────────────
+
+/**
+ * One request the probe sends through the sandbox, by how it actually
+ * travels. `tls` is HTTPS (TLS inside the tunnel); `plaintext_tunnel` is
+ * plain HTTP sent inside a CONNECT tunnel, the case #4397 mislabels.
+ */
+export type TransportCase = "tls" | "plaintext_tunnel";
+
+export const TRANSPORT_CASES: readonly TransportCase[] = ["tls", "plaintext_tunnel"];
+
+const EXPECTED_SCHEME: Record<TransportCase, string> = { tls: "https", plaintext_tunnel: "http" };
+
+export type TransportObservation =
+  | { observed: true; reported_scheme: string }
+  | { observed: false; detail?: string };
+
+export interface TransportCaseResult {
+  case: TransportCase;
+  expected_scheme: string;
+  reported_scheme?: string;
+  verdict: "correct" | "mislabelled" | "not_observed";
+  detail?: string;
+}
+
+export interface TransportProbeReport {
+  passed: boolean;
+  results: TransportCaseResult[];
+  /** True when plaintext was reported as https: the #4397 defect itself. */
+  defect_4397: boolean;
+}
+
+/**
+ * Send each case once and compare the scheme middleware was told against how
+ * the request really travelled. Passes only if every case was observed and
+ * reported correctly. The `tls` case is the positive control: a harness that
+ * cannot see the reported scheme fails as `not_observed`, never passes.
+ */
+export async function runTransportIdentityProbe(opts: {
+  send: (c: TransportCase) => Promise<TransportObservation>;
+}): Promise<TransportProbeReport> {
+  const results: TransportCaseResult[] = [];
+  for (const c of TRANSPORT_CASES) {
+    let obs: TransportObservation;
+    try {
+      obs = await opts.send(c);
+    } catch (err) {
+      obs = { observed: false, detail: errMessage(err) };
+    }
+    const expected = EXPECTED_SCHEME[c];
+    if (!obs.observed) {
+      const r: TransportCaseResult = { case: c, expected_scheme: expected, verdict: "not_observed" };
+      if (obs.detail !== undefined) r.detail = obs.detail;
+      results.push(r);
+      continue;
+    }
+    const reported = obs.reported_scheme.trim().toLowerCase();
+    results.push({
+      case: c,
+      expected_scheme: expected,
+      reported_scheme: reported,
+      verdict: reported === expected ? "correct" : "mislabelled",
+    });
+  }
+  const plain = results.find((r) => r.case === "plaintext_tunnel");
+  return {
+    passed: results.length === TRANSPORT_CASES.length && results.every((r) => r.verdict === "correct"),
+    results,
+    defect_4397: plain?.verdict === "mislabelled" && plain.reported_scheme === "https",
+  };
+}
+
+/**
+ * Read the scheme OpenShell reported from workload-guard log output: the last
+ * JSON line from `atlasent-workload-guard` carrying the given request id (or
+ * the last guard line at all when no id is given).
+ */
+export function reportedSchemeFromGuardLog(log: string, oshRequestId?: string): string | undefined {
+  for (const line of log.split("\n").reverse()) {
+    let rec: Record<string, unknown>;
+    try {
+      rec = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (rec.component !== "atlasent-workload-guard") continue;
+    if (oshRequestId !== undefined && rec.osh_request_id !== oshRequestId) continue;
+    return typeof rec.scheme === "string" && rec.scheme !== "" ? rec.scheme : undefined;
+  }
+  return undefined;
 }

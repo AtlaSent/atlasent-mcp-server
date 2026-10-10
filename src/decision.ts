@@ -108,6 +108,12 @@ export type AllowDecision = {
   bound_actor_id?: string;
   /** What the sealed action hash was computed over, when provenance was admitted. */
   sealed_binding?: SealedBinding;
+  /**
+   * True only when the runtime reported `workload_attested: true`: the
+   * OpenShell workload guard's attestation verified against the exact request
+   * bytes (atlasent-api, CROSS-066 phase 2). Absent means not attested.
+   */
+  workload_attested?: true;
 };
 
 export type DenyDecision = {
@@ -152,6 +158,12 @@ export type HoldDecision = {
   bound_actor_id?: string;
   /** What the sealed action hash was computed over, when provenance was admitted. */
   sealed_binding?: SealedBinding;
+  /**
+   * True only when the runtime reported `workload_attested: true`: the
+   * OpenShell workload guard's attestation verified against the exact request
+   * bytes (atlasent-api, CROSS-066 phase 2). Absent means not attested.
+   */
+  workload_attested?: true;
 };
 
 export type Decision = AllowDecision | DenyDecision | HoldDecision;
