@@ -23,7 +23,7 @@
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "node scripts/lint.mjs",
-    "test": "node --import tsx --test src/actionTypePattern.test.ts src/actionRetrieval.test.ts src/functionRegion.test.ts src/server.test.ts src/awaitApproval.test.ts src/planMismatch.test.ts src/agentToolGate.test.ts src/governedAction.test.ts src/hitlDemo.test.ts src/hitlDemoPreflight.test.ts src/agentSession.test.ts src/mode.test.ts src/server.verify-before-execute.test.ts src/v2Client.test.ts src/v2Tools.test.ts src/complianceTools.test.ts src/vqpTools.test.ts src/evidenceGap.test.ts src/exposureReview.test.ts src/openshell.test.ts src/openshellRun.test.ts src/distribution.test.ts src/streamableHttp.integration.test.ts scripts/acceptance/l2-commit-point/harness.test.ts",
+    "test": "node --import tsx --test src/actionTypePattern.test.ts src/actionRetrieval.test.ts src/functionRegion.test.ts src/server.test.ts src/awaitApproval.test.ts src/planMismatch.test.ts src/agentToolGate.test.ts src/governedAction.test.ts src/hitlDemo.test.ts src/hitlDemoPreflight.test.ts src/agentSession.test.ts src/mode.test.ts src/server.verify-before-execute.test.ts src/v2Client.test.ts src/v2Tools.test.ts src/complianceTools.test.ts src/vqpTools.test.ts src/evidenceGap.test.ts src/exposureReview.test.ts src/openshell.test.ts src/openshellRun.test.ts src/openshell.securityRegressions.test.ts src/distribution.test.ts src/streamableHttp.integration.test.ts scripts/acceptance/l2-commit-point/harness.test.ts",
     "test:openshell-acceptance": "node --import tsx --test src/openshell.acceptance.test.ts",
     "test:integration": "node --import tsx --test src/integration.test.ts src/integration.write.test.ts",
     "demo": "node examples/demo.mjs",

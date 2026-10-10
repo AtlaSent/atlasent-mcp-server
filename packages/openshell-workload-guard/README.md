@@ -54,10 +54,19 @@ published to npm. Run it from this folder (`npm ci`).
      "listen": "0.0.0.0:50061",
      "audience": "urn:atlasent:openshell:workload-guard",
      "gateway": { "issuer": "openshell-gateway:openshell", "jwks_path": "/etc/atlasent/jwks.json" },
+     "destination": { "host": "api.atlasent.io", "port": 443 },
      "tls": { "cert_path": "/etc/atlasent/guard.pem", "key_path": "/etc/atlasent/guard.key" },
      "attestation": { "signing_key_path": "/etc/atlasent/attest.pem", "kid": "guard-1" }
    }
    ```
+
+   `destination` is required. The guard denies any request whose reported
+   scheme is not `https`, or whose host or port is not this one: the key is
+   injected after the guard allows, so it must only ever go here. A scheme,
+   host or port OpenShell left empty also denies. The guard trusts the scheme
+   OpenShell reports; NVIDIA/OpenShell#4397 (open as of 2026-10-10) can
+   report plaintext HTTP sent through a CONNECT tunnel as `https`, which no
+   middleware check can detect.
 
    ```
    node cli.mjs --config guard.json

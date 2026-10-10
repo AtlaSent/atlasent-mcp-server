@@ -59,6 +59,7 @@ export function checkGatewayMetadata(gateway) {
  * @param {object} cfg
  * @param {{issuer: string, keys: Map<string, import("node:crypto").KeyObject>}} cfg.gateway
  * @param {string} cfg.audience
+ * @param {{host: string, port?: number}} cfg.destination pinned AtlaSent API host (and port, default 443)
  * @param {{signingKey: import("node:crypto").KeyObject, kid: string} | undefined} cfg.attestation
  * @param {() => number} [cfg.now]
  */
@@ -114,7 +115,13 @@ export function createHandlers(cfg) {
           audience: cfg.audience,
           now: now(),
         });
-        const { route, sandbox_id } = checkRequest({ claims, context: req.context, target: req.target, body: req.body });
+        const { route, sandbox_id } = checkRequest({
+          claims,
+          context: req.context,
+          target: req.target,
+          body: req.body,
+          destination: cfg.destination,
+        });
         const header_mutations = [];
         if (route.workload && cfg.attestation) {
           const value = signAttestation({
@@ -151,8 +158,15 @@ export function loadConfig(raw) {
     throw new Error('config.gateway.issuer must be "openshell-gateway:<gateway_id>"');
   }
   if (typeof raw.gateway?.jwks_path !== "string") throw new Error("config.gateway.jwks_path is required");
+  if (typeof raw.destination?.host !== "string" || raw.destination.host.trim() === "") {
+    throw new Error("config.destination.host is required (the AtlaSent API host the key is injected for)");
+  }
+  if (raw.destination.port !== undefined && !(Number.isInteger(raw.destination.port) && raw.destination.port > 0 && raw.destination.port < 65536)) {
+    throw new Error("config.destination.port must be a TCP port");
+  }
   const cfg = {
     listen: raw.listen,
+    destination: { host: raw.destination.host, port: raw.destination.port ?? 443 },
     audience: raw.audience,
     gateway: { issuer: raw.gateway.issuer, keys: loadJwks(JSON.parse(readFileSync(raw.gateway.jwks_path, "utf8"))) },
     tls: undefined,

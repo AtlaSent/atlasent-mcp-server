@@ -156,14 +156,51 @@ function routeFor(method, path) {
   return ROUTES.find((r) => r.method === method && r.pattern.test(m[1]));
 }
 
+function normalizeHost(host) {
+  return String(host).trim().toLowerCase().replace(/\.$/, "");
+}
+
+/**
+ * Check the destination and transport OpenShell reported for this request.
+ *
+ * The AtlaSent key is injected after this guard allows, so the request must
+ * be going to the operator-pinned AtlaSent host and port, over HTTPS. Anything
+ * else denies: plaintext `http`, a WebSocket scheme (`ws`/`wss` are never an
+ * evaluate or verify), and any field OpenShell left empty, because a
+ * destination we cannot establish is not one we can bind a permit to.
+ *
+ * Limit: this trusts the scheme OpenShell reports. NVIDIA/OpenShell#4397 (open
+ * 2026-10-10) found plaintext HTTP sent through a CONNECT tunnel reported to
+ * middleware as `https`. No check here can see through that; the fix is in
+ * OpenShell. Until a release carrying it is confirmed, treat a reported
+ * `https` as necessary, not sufficient (docs/OPENSHELL_AUTHORITY_ADAPTER.md).
+ */
+export function checkDestination(target, destination) {
+  if (!destination || typeof destination.host !== "string" || destination.host.trim() === "") {
+    throw new GuardDenial("destination_unconfigured", "no pinned AtlaSent destination host");
+  }
+  const scheme = typeof target?.scheme === "string" ? target.scheme.trim().toLowerCase() : "";
+  if (scheme === "") throw new GuardDenial("transport_unknown", "OpenShell reported no request scheme");
+  if (scheme === "http") throw new GuardDenial("transport_not_secure", "plaintext http");
+  if (scheme === "ws" || scheme === "wss") throw new GuardDenial("transport_not_http", `${scheme} is not an AtlaSent API request`);
+  if (scheme !== "https") throw new GuardDenial("transport_unknown", `unrecognized scheme ${scheme}`);
+  const host = typeof target?.host === "string" ? normalizeHost(target.host) : "";
+  if (host === "") throw new GuardDenial("destination_unknown", "OpenShell reported no destination host");
+  if (host !== normalizeHost(destination.host)) throw new GuardDenial("destination_mismatch", `host ${host}`);
+  const port = Number(target?.port);
+  if (!Number.isInteger(port) || port <= 0) throw new GuardDenial("destination_unknown", "OpenShell reported no destination port");
+  if (port !== (destination.port ?? 443)) throw new GuardDenial("destination_mismatch", `port ${port}`);
+}
+
 /**
  * Decide one request. Returns { route, sandbox_id } on allow; throws
  * GuardDenial otherwise.
  */
-export function checkRequest({ claims, context, target, body }) {
+export function checkRequest({ claims, context, target, body, destination }) {
   if (!context || context.sandbox_id !== claims.sandbox_id) {
     throw new GuardDenial("context_mismatch", "request context sandbox_id differs from the gateway token");
   }
+  checkDestination(target, destination);
   const method = String(target?.method ?? "").toUpperCase();
   const route = routeFor(method, String(target?.path ?? ""));
   if (!route) throw new GuardDenial("path_not_allowed", `${method} ${target?.path}`);

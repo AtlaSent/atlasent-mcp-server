@@ -279,6 +279,56 @@ can reach the AtlaSent staging host, and a **staging** test key with
    run" above, and in `OPENSHELL_PROBE_PASSED` in `src/openshell.ts` if it
    widens what that entry claims.
 
+## Upstream security regressions (2026-10-10)
+
+Two open OpenShell pull requests bear on AtlaSent's guarantees. Neither is in
+a release. `assessOpenShellVersion` reports both on every version as
+`advisories` (`OPENSHELL_OPEN_ADVISORIES` in `src/openshell.ts`) without
+changing qualification status: qualification of v0.1.3 continues.
+
+**NVIDIA/OpenShell#4359, streaming middleware: not adopted.** The revised
+interface (`EvaluateHttpRequestSession` / `EvaluateHttpResponseSession`,
+selected by a required capability) had three findings in security review: a
+request could complete before the final middleware verdict, a response could
+be delivered after revocation, and request metadata could be incomplete
+between stages. Fixes and regression tests are submitted; end-to-end
+qualification and maintainer approval are outstanding. A DENY or HOLD is
+worthless if the bytes already reached the destination, so AtlaSent pins the
+same three properties at its own boundary, in
+`src/openshell.securityRegressions.test.ts`:
+
+- A. Nothing runs before the final verdict. Evaluate ALLOW is not final;
+  verify is. A pending, hung, throwing or invalid verify, and a HOLD still
+  waiting or rejected, run nothing. An approved HOLD is still verified.
+- B. Revocation stops delivery: a runtime revocation at verify, a policy
+  generation change between evaluate and verify (including during the HOLD
+  wait), and a consumed or dropped permit.
+- C. The verify-side binding is complete: sandbox, action, target and the
+  runtime-bound payload hash. A dropped envelope field or sandbox id fails
+  before the runtime is called.
+
+The workload guard declares only the buffered HTTP request binding and refuses
+a gateway that requires any capability it does not implement, such as a
+streaming session (`packages/openshell-workload-guard/test/guard.node.mjs`).
+Keep any streaming adapter experimental until NVIDIA completes release
+qualification.
+
+**NVIDIA/OpenShell#4397, request transport identity.** Plaintext HTTP through
+a CONNECT tunnel can be reported to middleware as `https`. The guard now
+requires a pinned `destination` (host, port default 443) and denies a reported
+`http`, `ws` or `wss`, any other scheme, a host or port other than the pinned
+one, and any scheme, host or port OpenShell left empty. `atlasent-openshell
+run` refuses a plaintext `ATLASENT_BASE_URL` unless it is loopback, before any
+call. **Limit:** neither can see through a mislabelled `https`. Until a release
+confirmed to carry the #4397 fix is recorded here, a reported `https` is
+necessary, not sufficient.
+
+Every check above was shown to fail against a mutation of the code it guards
+(verify verdict ignored, spawn before verify, generation check removed, permit
+not consumed, digest check removed, plaintext/ws/wss accepted, destination
+check removed, a required unknown capability ignored). That is resistance to
+those mutations, not coverage.
+
 ## Remaining
 
 - The staging run above, and startup-probe runs on other compute drivers
@@ -292,5 +342,9 @@ can reach the AtlaSent staging host, and a **staging** test key with
 - OpenShell 0.1.3 stable. As of 2026-10-06 the newest tag is
   `v0.1.3-pre.4`. When stable ships, re-run the probe on it and add the
   result.
+- Re-run the two regression suites above on the first OpenShell release that
+  carries the #4397 fix, and record it in `OPENSHELL_FIX_CONFIRMED_IN` style
+  before dropping that advisory. Do not adopt #4359's streaming interface
+  until NVIDIA ships it qualified.
 
 Do not fork OpenShell or duplicate its policy engine.

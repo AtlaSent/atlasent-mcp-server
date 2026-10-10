@@ -461,22 +461,64 @@ export const OPENSHELL_PROBE_PASSED: Readonly<Record<string, string>> = {
     "unchanged revision and a stale generation). Recorded in docs/OPENSHELL_AUTHORITY_ADAPTER.md.",
 };
 
+/**
+ * Open upstream OpenShell issues that bear on AtlaSent's guarantees but do not
+ * disqualify a release from qualification. Neither is fixed in any OpenShell
+ * release as of 2026-10-10; both are open pull requests. They are reported on
+ * every assessment so a reader of `atlasent-openshell check` sees them, and
+ * are removed only when a release confirmed (by commit ancestry) to carry the
+ * fix has passed the relevant regression suite.
+ */
+export interface OpenShellAdvisory {
+  id: string;
+  summary: string;
+  atlasent_posture: string;
+}
+
+export const OPENSHELL_OPEN_ADVISORIES: readonly OpenShellAdvisory[] = [
+  {
+    id: "NVIDIA/OpenShell#4397",
+    summary:
+      "Plaintext HTTP sent through a CONNECT tunnel can be reported to supervisor middleware as https. " +
+      "Opened 2026-10-10; the proposed fix derives the scheme from the actual transport.",
+    atlasent_posture:
+      "The workload guard denies any request not reported as https to the pinned AtlaSent host and port, and " +
+      "any request whose scheme, host or port OpenShell left empty. It cannot detect a mislabelled https, so a " +
+      "reported https is treated as necessary, not sufficient. atlasent-openshell run refuses a non-loopback " +
+      "plaintext ATLASENT_BASE_URL before any call.",
+  },
+  {
+    id: "NVIDIA/OpenShell#4359",
+    summary:
+      "Next-generation streaming middleware (EvaluateHttpRequestSession / EvaluateHttpResponseSession, selected " +
+      "by a required capability). Security review found a request could complete before the final verdict, a " +
+      "response could be delivered after revocation, and request metadata could be incomplete between stages. " +
+      "Fixes submitted; end-to-end qualification and maintainer approval outstanding as of 2026-10-10.",
+    atlasent_posture:
+      "Not adopted. The workload guard declares only the buffered HTTP request binding and refuses a gateway " +
+      "that requires any capability it does not implement. The AtlaSent execution boundary runs nothing before " +
+      "verify returns valid, and a revocation or policy change before verify stops execution.",
+  },
+];
+
 export type OpenShellAssessment =
-  | { status: "known_affected"; reason: string }
-  | { status: "probe_passed"; reason: string }
-  | { status: "unverified"; reason: string };
+  | { status: "known_affected"; reason: string; advisories: readonly OpenShellAdvisory[] }
+  | { status: "probe_passed"; reason: string; advisories: readonly OpenShellAdvisory[] }
+  | { status: "unverified"; reason: string; advisories: readonly OpenShellAdvisory[] };
 
 export function assessOpenShellVersion(version: string): OpenShellAssessment {
   const v = version.trim().replace(/^v/, "");
+  const advisories = OPENSHELL_OPEN_ADVISORIES;
   const affected = OPENSHELL_KNOWN_AFFECTED[v];
-  if (affected) return { status: "known_affected", reason: affected };
+  if (affected) return { status: "known_affected", reason: affected, advisories };
   const passed = OPENSHELL_PROBE_PASSED[v];
-  if (passed) return { status: "probe_passed", reason: passed };
+  if (passed) return { status: "probe_passed", reason: passed, advisories };
   const fixed = OPENSHELL_FIX_CONFIRMED_IN[v];
-  if (fixed) return { status: "unverified", reason: `${fixed} No recorded startup-probe pass on it.` };
+  if (fixed) return { status: "unverified", reason: `${fixed} No recorded startup-probe pass on it.`, advisories };
   return {
     status: "unverified",
     reason: "Not a known-affected release. Production readiness still requires a recorded startup-probe pass.",
+    advisories,
   };
 }
 

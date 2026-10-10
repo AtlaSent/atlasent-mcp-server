@@ -46,6 +46,37 @@ export function parseArgs(args: string[]): ParsedArgs | { error: string } {
   return { command, flags, argv: rest.slice(i) };
 }
 
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * The AtlaSent call carries the API key, so it must go over TLS. A plaintext
+ * base URL is refused unless it is loopback (a local runtime under test). A
+ * URL that does not parse is refused too: a destination we cannot establish is
+ * not one we send a key to. See NVIDIA/OpenShell#4397.
+ * Returns a refusal reason, or undefined when the transport is acceptable.
+ */
+export function checkAtlasentTransport(env: NodeJS.ProcessEnv): string | undefined {
+  const raw = env.ATLASENT_BASE_URL ?? "https://api.atlasent.io/functions/v1";
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return `ATLASENT_BASE_URL is not a valid URL; refusing to send the AtlaSent key to it.`;
+  }
+  if (url.hostname === "") return "ATLASENT_BASE_URL has no host; refusing to send the AtlaSent key.";
+  if (url.protocol === "https:") return undefined;
+  if (url.protocol === "http:" && LOOPBACK.has(url.hostname)) return undefined;
+  return `ATLASENT_BASE_URL must be https (got ${url.protocol}//${url.host}); refusing to send the AtlaSent key over it.`;
+}
+
+/** Same rule as engine.getMode(), read from the env main() was given. */
+function remoteModeIn(env: NodeJS.ProcessEnv): boolean {
+  const explicit = env.ATLASENT_MODE?.toLowerCase();
+  if (explicit === "remote") return true;
+  if (explicit === "local") return false;
+  return Boolean(env.ATLASENT_API_KEY);
+}
+
 function intFlag(flags: Record<string, string>, name: string): number | undefined | { error: string } {
   if (flags[name] === undefined) return undefined;
   const n = Number(flags[name]);
@@ -72,6 +103,14 @@ export async function main(args: string[], env: NodeJS.ProcessEnv = process.env)
       openshell_assessment: version ? assessOpenShellVersion(version) : null,
     });
     return sandbox.ok ? 0 : EXIT.USAGE;
+  }
+
+  if (remoteModeIn(env)) {
+    const refused = checkAtlasentTransport(env);
+    if (refused) {
+      emit({ outcome: "DENY", reasons: [refused] });
+      return EXIT.DENY;
+    }
   }
 
   const wait = intFlag(parsed.flags, "wait-ms");
