@@ -10,6 +10,11 @@ const starter = { version: 1, default: 'deny', rules: [
   { id: 'demo-read', tool: 'read_status', effect: 'allow', kind: 'read' },
   { id: 'demo-sandbox-write', tool: 'set_status', effect: 'allow', kind: 'write', argumentsEquals: { environment: 'sandbox', status: 'ready' } }
 ] };
+// Where a local-edition user learns this is part of a product. Names only what is
+// true today (README "Free / paid boundary"): the organizational features are
+// planned, so this points at the plans page and promises nothing. Tagged so a
+// signup that follows is attributed to this CLI.
+const LOCAL_EDITION_NOTE = 'This is the free local edition (AtlaSent Community plan): https://www.atlasent.io/pricing?utm_source=mcp-gate&utm_medium=cli';
 const escape = x => String(x).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function main() {
   let [mode, ...args] = process.argv.slice(2);
@@ -39,7 +44,7 @@ async function main() {
     console.error('Connection configuration valid; no remote enrollment performed');
   } else if (mode === 'setup' && args.length >= 3 && args[1] === '--') {
     const dir = setup(args[0], args[2], args.slice(3));
-    console.error('Setup created: ' + dir + '\nReview policy.json, then copy the entry from mcp-client.json into your client. All tool calls start blocked.');
+    console.error('Setup created: ' + dir + '\nReview policy.json, then copy the entry from mcp-client.json into your client. All tool calls start blocked.\n' + LOCAL_EDITION_NOTE);
   } else if (mode === 'init' && args.length === 1) {
     writeFileSync(args[0], JSON.stringify(starter, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
     console.error('Created deny-by-default demo policy. Review explicit tool rules before connecting a real server.');
