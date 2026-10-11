@@ -105,3 +105,14 @@ test('setup is deny-by-default, generates absolute config and survives two clien
     const {readdirSync}=await import('node:fs');assert.equal(readdirSync(join(target,'activity')).length,2);
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
+
+test('local setup names the free edition with an attributed link, and promises nothing more', {timeout:10000}, async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'atlasent-gate-'));
+  try {
+    const c=spawn(process.execPath,['cli.mjs','setup',join(dir,'setup'),'--','node',join(cwd,'demo-server.mjs')],{cwd});
+    let stderr='';c.stderr.on('data',x=>stderr+=x);
+    assert.equal((await once(c,'exit'))[0],0);
+    assert.match(stderr,/free local edition \(AtlaSent Community plan\): https:\/\/www\.atlasent\.io\/pricing\?utm_source=mcp-gate&utm_medium=cli\n?$/);
+    assert.doesNotMatch(stderr,/approval|retained evidence|enforce/i);
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});
