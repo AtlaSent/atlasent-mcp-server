@@ -1,0 +1,38 @@
+# Draft entry for the Docker MCP Catalog (github.com/docker/mcp-registry).
+# Copy to servers/atlasent/server.yaml in a fork of that repo and open a PR;
+# steps in docs/DISTRIBUTION.md. Docker builds the image from this repo's
+# Dockerfile at `source.commit`, so refresh the commit to the release you
+# want listed before submitting.
+#
+# With no API key the server runs its local demo engine: unsigned permits,
+# default allow, not protection. Say so in the listing; do not describe the
+# keyless mode as enforcement.
+name: atlasent
+image: mcp/atlasent
+type: server
+meta:
+  category: security
+  tags:
+    - security
+    - authorization
+    - ai-agents
+about:
+  title: AtlaSent
+  description: >-
+    Authorize consequential AI-agent actions before they run. The agent asks
+    AtlaSent before a production deploy, data export or secret rotation, and
+    proceeds only on an allow with a permit verified at the point of action.
+    Without an API key it runs a local demo engine whose permits are unsigned
+    and whose default is allow; that mode is for evaluation, not protection.
+  icon: https://avatars.githubusercontent.com/u/264521874?s=200&v=4
+source:
+  project: https://github.com/AtlaSent/atlasent-mcp-server
+  commit: 4d11145db0054b449d02e42d9caecc6db5b36c05
+config:
+  description: >-
+    Optional. Create a free account at console.atlasent.io, choose "Connect an
+    AI agent", and paste the API key here. Leave it empty for the local demo.
+  secrets:
+    - name: atlasent.api_key
+      env: ATLASENT_API_KEY
+      example: ask_live_...
