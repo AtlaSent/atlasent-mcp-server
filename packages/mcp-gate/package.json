@@ -1,6 +1,6 @@
 {
   "name": "@atlasent/mcp-gate",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Local, fail-closed MCP stdio gate with metadata-only activity evidence. Blocks every tool call until you write a rule. No account, no network, no dependencies.",
   "keywords": [
