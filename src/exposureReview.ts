@@ -127,7 +127,7 @@ export function renderExposureReview(report: EvidenceGapReport): ExposureReview 
         lines.push(f.fix.gate_step.trimEnd());
         lines.push("```");
       }
-      if (f.fix?.bind_if) lines.push(`- **Then give the step this condition:** \`if: ${f.fix.bind_if}\``);
+      if (f.fix?.bind_if) lines.push(`- **Then give the step this condition:** \`${f.fix.bind_if}\``);
       if (f.fix?.change) lines.push(`- **Change:** ${f.fix.change}`);
       if (f.fix?.job_permissions) lines.push(`- **Job permissions:** ${f.fix.job_permissions}`);
       if (f.fix?.note) lines.push(`- **Note:** ${f.fix.note}`);

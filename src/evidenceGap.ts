@@ -332,10 +332,17 @@ function isGateUses(uses: string): boolean {
   return /(^|\/)atlasent-action(@|\/)/i.test(uses);
 }
 
+/**
+ * The run text with comments dropped and the quoted text of echo/printf lines
+ * blanked: `echo "helm install ..."` in a job summary prints instructions, it
+ * does not deploy. Only the quoted part is blanked, so `echo "$M" | kubectl
+ * apply -f -` is still detected.
+ */
 function runWithoutComments(run: string): string {
   return run
     .split("\n")
     .filter((l) => !/^\s*#/.test(l))
+    .map((l) => (/^\s*(echo|printf)\b/.test(l) ? l.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""') : l))
     .join("\n");
 }
 

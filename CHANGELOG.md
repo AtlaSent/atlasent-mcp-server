@@ -11,6 +11,11 @@ version, ask the server with MCP `tools/list`.
 Companion packages in this repository (`@atlasent/mcp-gate`, the
 `atlasent-guard` Claude Code plugin) are listed at the end.
 
+
+## Unreleased
+
+- **New: `atlasent-exposure-scan`.** The free Authorization Exposure Review as one command against a repository checkout. It writes a self-contained HTML report (plus Markdown and JSON) you can forward. Offline, no API key; `--fail-on-gaps` for CI.
+
 ## [Unreleased]
 
 ### Changed

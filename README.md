@@ -358,6 +358,17 @@ Every gap (`ungoverned` or `weak`) carries a `fix`: the `atlasent-action` step t
 
 Works in local mode: no API key, no network, nothing executed. `gate_actions` names your own gate wrappers (a composite action, say); they are reported as custom gates whose internals were not inspected. The report always lists what it cannot see (repository settings, deploys outside CI, the inside of `./deploy.sh`), and a file it cannot parse is listed in `parse_errors`, never skipped. A clean report is not proof that nothing is ungoverned.
 
+### `atlasent-exposure-scan` (one command, shareable report)
+
+The same review, run against a real checkout, written as a report you can open and forward:
+
+```bash
+npx -y -p @atlasent/mcp-server atlasent-exposure-scan path/to/repo
+# writes atlasent-exposure-review.html, .md and .json
+```
+
+Offline: it reads `.github/workflows/` and makes no network call. The HTML is a single self-contained file (no scripts or external assets). Add `--fail-on-gaps` to use it as a CI check; `--out <dir>` picks where the files go.
+
 ### `atlasent_exposure_review`
 
 The free Authorization Exposure Review. It runs the same offline analysis as `atlasent_evidence_gap_report` and returns it as a review a person can read: what was scanned and what it cannot see, every step that can change a real system without a gate that can stop it, the exact fix for each, and what is already gated.
