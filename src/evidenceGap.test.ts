@@ -108,6 +108,16 @@ describe("detectStep", () => {
     });
   }
 
+  it("does not treat install instructions printed by echo/printf as a deploy", () => {
+    assert.equal(detectStep({ run: 'echo "## Published"\necho "helm install atlasent oci://x --version 1.0.0"' }), null);
+    assert.equal(detectStep({ run: "printf '%s\\n' 'kubectl apply -f k8s/'" }), null);
+  });
+
+  it("still detects a real command that an echo line pipes into", () => {
+    assert.equal(detectStep({ run: 'echo "$MANIFEST" | kubectl apply -f -' })?.detected_by, "kubectl");
+    assert.equal(detectStep({ run: 'echo "deploying" && helm upgrade app ./chart' })?.detected_by, "helm upgrade/install");
+  });
+
   it("marks a deploy script as 'possible', not certain", () => {
     const d = detectStep({ run: "./scripts/deploy.sh prod" });
     assert.equal(d?.category, "deploy");
