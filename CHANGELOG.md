@@ -12,11 +12,21 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 `atlasent-guard` Claude Code plugin) are listed at the end.
 
 
-## Unreleased
+## [2.19.0] - 2026-10-13
 
-- **New: `atlasent-exposure-scan`.** The free Authorization Exposure Review as one command against a repository checkout. It writes a self-contained HTML report (plus Markdown and JSON) you can forward. Offline, no API key; `--fail-on-gaps` for CI.
+### Added
 
-## [Unreleased]
+- `atlasent-exposure-scan`: the free Authorization Exposure Review as one
+  command against a repository checkout
+  (`npx -y -p @atlasent/mcp-server atlasent-exposure-scan path/to/repo`). It
+  writes a self-contained HTML report you can forward, plus Markdown and JSON.
+  Offline, no API key; `--fail-on-gaps` for CI.
+
+### Fixed
+
+- The review's fix line no longer reads `if: if: ...`.
+- Install instructions printed with `echo` or `printf` (for example in a job
+  summary) are no longer reported as deploys.
 
 ### Changed
 
