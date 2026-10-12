@@ -1347,5 +1347,24 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     ],
     "domain": "data",
     "pattern": "approval-chain"
+  },
+  "code.merge": {
+    "requires": [],
+    "produces": [
+      "audit-chain",
+      "permit"
+    ],
+    "assertions": [],
+    "frameworks": [
+      "nist_800_53",
+      "soc2"
+    ],
+    "controls": [
+      "NIST SP 800-53 Rev.5 CM-3 — Configuration Change Control",
+      "NIST SP 800-53 Rev.5 SA-11 — Developer Testing and Evaluation",
+      "SOC 2 CC8.1 — Change Management"
+    ],
+    "domain": "production",
+    "pattern": "role-only"
   }
 };
