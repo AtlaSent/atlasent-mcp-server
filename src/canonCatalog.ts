@@ -3369,5 +3369,63 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
       "enterprise",
       "regulated-industries"
     ]
+  },
+  {
+    "id": "ACT-0060",
+    "canon_id": "CANON-000057",
+    "slug": "code.merge",
+    "display_name": "Code Merge",
+    "description": "Authorization gate for merging a source change into a protected branch (for example, a pull request into main or a release branch), conditioned on automated evidence: required CI checks passing on the change and branch protection active on the target branch, both asserted by the source-control connector rather than by the caller. A merge is not a deploy — many repositories merge without deploying, and a deploy of the merged code is separately governed by production.deploy (CANON-000001). A merge is also not an approval — workflow.approve (CANON-000003) records a human's review decision, while this action is gated on machine-sourced facts about the change and the branch. Merging is the point where a change becomes part of the protected line every later release, deploy, and audit is built from, so it needs its own attributable, evidence-bound authorization — especially once coding agents can open and merge their own changes.",
+    "family": "production.deploy",
+    "risk_posture": "standard",
+    "ai_risk": "High",
+    "gate_flags": {
+      "requires_human_approval": false,
+      "requires_mfa": false,
+      "requires_verified_actor": false,
+      "requires_state_snapshot": false,
+      "required_assertion_classes": []
+    },
+    "authorization_pattern": {
+      "type": "role-only",
+      "machine_executable": true
+    },
+    "regulatory_mappings": [
+      {
+        "framework": "soc2",
+        "clause": "SOC 2 CC8.1 — Change Management",
+        "mapping": "Every merge into a protected branch is evaluated against connector-sourced CI-passing and branch-protection evidence before it executes, and the decision, the evidence keys consulted, and the actor are recorded — the authorized, tested change path CC8.1 expects for changes entering the production code line.\n",
+        "evidence_source": "external_assertion",
+        "status_query": "code_merge_evidence_gated_pct"
+      },
+      {
+        "framework": "nist_800_53",
+        "clause": "NIST SP 800-53 Rev.5 CM-3 — Configuration Change Control",
+        "mapping": "A merge into a protected branch is a controlled change to the system's source baseline. AtlaSent records an evaluation for each merge with the repository, base and head branches, and the assertions it was gated on, providing the change-control record CM-3 requires.\n",
+        "evidence_source": "evaluation_record",
+        "status_query": "code_merge_change_control_pct"
+      },
+      {
+        "framework": "nist_800_53",
+        "clause": "NIST SP 800-53 Rev.5 SA-11 — Developer Testing and Evaluation",
+        "mapping": "The merge is permitted only when the ci_passing assertion is present, so developer testing is demonstrably completed before a change enters the protected branch rather than assumed.\n",
+        "evidence_source": "external_assertion",
+        "status_query": "code_merge_ci_passing_pct"
+      }
+    ],
+    "evidence_requirements": {
+      "minimum_pattern": "EP-01",
+      "approval_artifact_required": false,
+      "state_snapshot_required": false,
+      "notes": "Intent is the provider API request to merge (the merge call naming repository, pull request, and base branch). Execution is the provider webhook event — pull_request closed with merged=true — which records that GitHub executed the merge but does not by itself prove its effect on the branch. Effect is an independent provider read: the merge_commit_sha is confirmed reachable from the base ref via the GitHub compare API (compare base...merge_commit_sha returning identical or behind), so the merged content is verified against the provider's own state rather than the event that reported it. The evaluate context should carry repository, base_branch, and head_branch alongside the evaluator-populated activeAssertions. CI-passing and branch-protection facts are connector-sourced external assertion keys, not assertion.v1 classes, which is why required_assertion_classes is empty.\n"
+    },
+    "use_case": "Make every merge into a protected branch an authorized, evidence-bound event: the merge proceeds only when the source-control connector asserts CI is passing and branch protection is active, and the merge's effect on the branch is independently verified afterward. Coding agents and merge bots get the same gate as people.",
+    "industries": [
+      "saas",
+      "developer-tools",
+      "fintech",
+      "healthtech",
+      "enterprise"
+    ]
   }
 ];
