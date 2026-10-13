@@ -4,7 +4,7 @@
  * command against a real checkout, producing a report a person can open and
  * forward (a CISO, an auditor, an engineering lead).
  *
- *   npx -y -p @atlasent/mcp-server atlasent-exposure-scan [repo-dir]
+ *   npx -y -p @atlasent/mcp-server@latest atlasent-exposure-scan [repo-dir]
  *       [--out <dir>] [--fail-on-gaps]
  *
  * Reads <repo-dir>/.github/workflows/*.yml|*.yaml, runs the same offline
