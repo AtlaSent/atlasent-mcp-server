@@ -134,3 +134,16 @@ describe("hitl demo (examples/hitl-demo)", () => {
     assert.equal(result.failed_stage, "setup");
   });
 });
+
+describe("examples/hitl-demo.mjs on Windows", () => {
+  it("imports dist modules through file:// URLs, not bare absolute paths", async () => {
+    // On Windows import("C:\\...\\dist\\server.js") throws "Received protocol 'c:'"
+    // (seen 2026-10-13 on a real preflight). Every dynamic import must go
+    // through pathToFileURL.
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../examples/hitl-demo.mjs", import.meta.url), "utf8");
+    const dynamic = [...src.matchAll(/await import\(([^)]*\)?)\)/g)].map((m) => m[1]);
+    assert.ok(dynamic.length >= 2, "expected the demo's dynamic imports");
+    for (const arg of dynamic) assert.match(arg, /^pathToFileURL\(/, `bare path import: ${arg}`);
+  });
+});
