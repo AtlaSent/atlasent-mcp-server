@@ -1,10 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { EXIT, collectWorkflows, esc, main, parseArgs, renderHtml } from "./exposureScanCli.js";
+import { EXIT, collectWorkflows, esc, isEntryPoint, main, parseArgs, renderHtml } from "./exposureScanCli.js";
 import { analyzeWorkflows } from "./evidenceGap.js";
 
 const UNGATED = `name: Deploy
@@ -89,5 +91,29 @@ describe("atlasent-exposure-scan", () => {
     const empty = mkdtempSync(join(tmpdir(), "exposure-empty-"));
     assert.equal(quiet(() => main([empty, "--out", join(empty, "o")])), EXIT.NO_WORKFLOWS);
     assert.ok(!existsSync(join(empty, "o", "atlasent-exposure-review.html")));
+  });
+
+  it("recognizes itself when started through a bin link, as npm and npx do", () => {
+    const real = join(mkdtempSync(join(tmpdir(), "bin-")), "exposureScanCli.js");
+    writeFileSync(real, "");
+    const link = join(mkdtempSync(join(tmpdir(), "bin-")), "atlasent-exposure-scan");
+    symlinkSync(real, link);
+    const url = pathToFileURL(real).href;
+    assert.equal(isEntryPoint(link, url), true, "a link to this file is this file");
+    assert.equal(isEntryPoint(real, url), true);
+    assert.equal(isEntryPoint(join(tmpdir(), "other.js"), url), false);
+    assert.equal(isEntryPoint(undefined, url), false);
+  });
+
+  it("the built bin, run through a link, writes the report", { skip: !existsSync(fileURLToPath(new URL("../dist/exposureScanCli.js", import.meta.url))) }, () => {
+    const built = fileURLToPath(new URL("../dist/exposureScanCli.js", import.meta.url));
+    const link = join(mkdtempSync(join(tmpdir(), "bin-")), "atlasent-exposure-scan");
+    symlinkSync(built, link);
+    const dir = repo({ "deploy.yml": UNGATED });
+    const out = join(dir, "out");
+    const r = spawnSync(process.execPath, [link, dir, "--out", out], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /1 with no gate that can stop them/);
+    assert.ok(existsSync(join(out, "atlasent-exposure-review.html")));
   });
 });

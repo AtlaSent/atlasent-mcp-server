@@ -23,7 +23,7 @@
  * gaps, 2 no workflow files found, 64 usage.
  */
 
-import { readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -319,6 +319,22 @@ export function main(argv: string[], now: Date = new Date()): number {
   return args.failOnGaps && s.gaps > 0 ? EXIT.GAPS : EXIT.OK;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/**
+ * True when `argv1` is this module. npm and npx start a bin through a link
+ * (node_modules/.bin/atlasent-exposure-scan -> ../@atlasent/mcp-server/dist/
+ * exposureScanCli.js), so argv[1] is the link while import.meta.url is the
+ * resolved file. Comparing them unresolved made 2.19.0 exit 0 having done
+ * nothing. Resolve the link first.
+ */
+export function isEntryPoint(argv1: string | undefined, moduleUrl: string): boolean {
+  if (!argv1) return false;
+  try {
+    return pathToFileURL(realpathSync(argv1)).href === moduleUrl;
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint(process.argv[1], import.meta.url)) {
   process.exitCode = main(process.argv.slice(2));
 }

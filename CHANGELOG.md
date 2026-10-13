@@ -12,6 +12,15 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 `atlasent-guard` Claude Code plugin) are listed at the end.
 
 
+## [2.19.1] - 2026-10-13
+
+### Fixed
+
+- `atlasent-exposure-scan` did nothing when started through npm or npx: it
+  exited 0 with no output and no report. npm starts a bin through a link, and
+  the command compared the link's path with its own without resolving it.
+  2.19.0 is affected; upgrade.
+
 ## [2.19.0] - 2026-10-13
 
 ### Added

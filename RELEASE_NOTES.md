@@ -1,5 +1,12 @@
 # Release Notes
 
+## v2.19.1 — 2026-10-13
+
+- **Fix: `atlasent-exposure-scan` now runs when started with `npx`.** In 2.19.0
+  it exited silently without writing a report, because npm starts a command
+  through a link and the check for "was I started directly" did not follow it.
+  A test now runs the built command through a link.
+
 ## v2.19.0 — 2026-10-13
 
 - **New: `atlasent-exposure-scan`, the free Exposure Review as one command.**
