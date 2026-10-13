@@ -111,4 +111,27 @@ describe("distribution metadata", () => {
       assert.doesNotMatch(read(f), /when approval was required/i, f);
     }
   });
+
+  it("README one-click install links decode to the documented quickstart config", () => {
+    // A stale or mis-encoded deeplink installs the wrong thing with no error
+    // the reader can see, so pin both buttons to the quickstart block.
+    const readme = read("README.md");
+    const quick = readme.match(/```json\n(\{\n  "mcpServers"[\s\S]*?)```/);
+    assert.ok(quick, "quickstart mcpServers block not found");
+    const expected = JSON.parse(quick[1]).mcpServers.atlasent;
+    assert.deepEqual(expected.args, ["-y", pkg.name]);
+
+    const vs = readme.match(/\((https:\/\/vscode\.dev\/redirect\/mcp\/install\?[^)]+)\)/);
+    assert.ok(vs, "VS Code install link not found");
+    const vsUrl = new URL(vs[1]);
+    assert.equal(vsUrl.searchParams.get("name"), "atlasent");
+    assert.deepEqual(JSON.parse(vsUrl.searchParams.get("config") ?? ""), expected);
+
+    const cur = readme.match(/\((https:\/\/cursor\.com\/en\/install-mcp\?[^)]+)\)/);
+    assert.ok(cur, "Cursor install link not found");
+    const curUrl = new URL(cur[1]);
+    assert.equal(curUrl.searchParams.get("name"), "atlasent");
+    const decoded = Buffer.from(curUrl.searchParams.get("config") ?? "", "base64").toString("utf8");
+    assert.deepEqual(JSON.parse(decoded), expected);
+  });
 });
