@@ -1,5 +1,20 @@
 # Release Notes
 
+## v2.19.0 — 2026-10-13
+
+- **New: `atlasent-exposure-scan`, the free Exposure Review as one command.**
+  Run `npx -y -p @atlasent/mcp-server atlasent-exposure-scan path/to/repo` on
+  any checkout. It writes `atlasent-exposure-review.html`, a single
+  self-contained report you can open and forward, plus Markdown and JSON. It
+  lists every CI step that can change production with no gate that can stop
+  it, and the fix for each. Offline: no API key, no network call.
+  `--fail-on-gaps` makes it a CI check.
+- **Fixes to the review:** the suggested condition no longer reads
+  `if: if:`, and `echo "helm install ..."` lines in job summaries are no
+  longer reported as deploys.
+- **Verify now presents the agent's verified identity** for change-controlled
+  and `agent.*` actions, so AtlaSent can require a verified actor at execution.
+
 ## v2.18.0 — 2026-10-08
 
 - **New: `atlasent_exposure_review`, the free Authorization Exposure Review.**
