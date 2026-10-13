@@ -76,6 +76,8 @@ Action proposed
 
 You don't need an AtlaSent account or API key to try this server. With no credentials set, it runs in **local mode**: an in-process rules engine that works offline.
 
+One-click install (local mode, no account): [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_AtlaSent-0098FF?logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=atlasent&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40atlasent/mcp-server%22%5D%2C%22env%22%3A%7B%22ATLASENT_MODE%22%3A%22local%22%7D%7D) [![Install in Cursor](https://img.shields.io/badge/Cursor-Install_AtlaSent-000000?logo=cursor&logoColor=white)](https://cursor.com/en/install-mcp?name=atlasent&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBhdGxhc2VudC9tY3Atc2VydmVyIl0sImVudiI6eyJBVExBU0VOVF9NT0RFIjoibG9jYWwifX0=)
+
 Add this to your MCP host config (Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, and others; per-host file locations are [below](#claude-desktop)):
 
 ```json
