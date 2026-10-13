@@ -202,6 +202,9 @@ call. It is a **manual execution-key connection**, not managed enrollment, an ap
 inbox, or a billing integration. Local deny still wins. A cloud deny, hold, escalation,
 error or invalid permit never falls back to local allow. No cloud decision is cached.
 
+Connected mode needs an AtlaSent organization and an API key. [Create a free
+account](https://console.atlasent.io/auth/sign-up?utm_source=mcp-gate&utm_medium=readme) to get one.
+
 Copy `connection.example.json` and replace the runtime URL, registered actor, and tool
 mappings with values approved for your organization. All three ship as explicit
 placeholders and `validateConnection` refuses each one, so the example cannot be
