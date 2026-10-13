@@ -116,7 +116,7 @@ describe("distribution metadata", () => {
     // A stale or mis-encoded deeplink installs the wrong thing with no error
     // the reader can see, so pin both buttons to the quickstart block.
     const readme = read("README.md");
-    const quick = readme.match(/```json\n(\{\n  "mcpServers"[\s\S]*?)```/);
+    const quick = readme.match(/```json\n(\{\n {2}"mcpServers"[\s\S]*?)```/);
     assert.ok(quick, "quickstart mcpServers block not found");
     const expected = JSON.parse(quick[1]).mcpServers.atlasent;
     assert.deepEqual(expected.args, ["-y", pkg.name]);
