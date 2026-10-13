@@ -44,7 +44,7 @@
  * one demo file in the configured repository, and a JSON evidence file in the
  * working directory (permit recorded as sha256 only).
  */
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 import { writeFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -85,7 +85,7 @@ function die(msg) {
 async function preflightMain() {
   if (simulate) die("--preflight checks a live setup; it cannot be combined with --simulate.");
   if (!existsSync(resolve(DIST, "index.js"))) die("dist/index.js not found. Run npm run build first.");
-  const { functionRegionHeaders } = await import(resolve(DIST, "functionRegion.js"));
+  const { functionRegionHeaders } = await import(pathToFileURL(resolve(DIST, "functionRegion.js")).href);
   const listToolNames = async () => {
     const transport = new StdioClientTransport({
       command: process.execPath,
@@ -135,7 +135,7 @@ async function main() {
     });
     delete process.env.ATLASENT_AI_ACTION_PATH_PREFIX;
     delete process.env.ATLASENT_AI_ACTION_RUNTIME_EFFECT;
-    const { createServer } = await import(resolve(DIST, "server.js"));
+    const { createServer } = await import(pathToFileURL(resolve(DIST, "server.js")).href);
     const server = createServer();
     const [c, s] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: "atlasent-hitl-demo", version: "1.0.0" });
