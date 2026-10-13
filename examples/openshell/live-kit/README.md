@@ -37,13 +37,31 @@ Never point any of this at the real AtlaSent API. Use `stub-atlasent.mjs`.
 
 ```
 OPENSHELL_VERSION=0.1.3-pre.4 \
-OPENSHELL_TRANSPORT_PROBE_CMD="sh examples/openshell/live-kit/probe-transport.sh" \
+OPENSHELL_TRANSPORT_PROBE_CMD='sh examples/openshell/live-kit/probe-transport.sh "$@"' \
 OSH_EXEC="openshell sandbox exec <name> --" GUARD_LOG=guard.log PROBE_HOST=<stub-host>:18443 \
 npm run test:openshell-transport-acceptance
 ```
 
+Keep the single quotes and the `"$@"`: the harness runs this command with
+`sh -c` and passes the case as an argument. Without `"$@"` every case fails
+with the script's usage error before anything is sent.
+
 On 0.1.3-pre.4, expect a FAIL with `defect_4397: true`. That failure is the
-control. On a release carrying the fix, expect a pass, then record both runs in
+control.
+
+**OpenShell 0.1.3, Docker driver.** The sandbox has no reachable CONNECT
+proxy: the supervisor's proxy listens in its own network, and every sandbox
+connection is intercepted transparently. The default plaintext case is then
+never observed. Add `PROBE_PLAINTEXT_MODE=transparent`, which sends the plain
+HTTP request straight to `PROBE_HOST`. On 0.1.3 the supervisor logs that
+request as `http://…` and still tells the guard `https`, so this run is the
+control (recorded 2026-10-13, atlasent-api#4281). The same host needed:
+`openshell sandbox exec --name <name> --` for `OSH_EXEC`; an explicit
+`binaries:` list on the network rule; a stub hostname that public DNS resolves
+to a private IP listed in `allowed_ips`, because `host.openshell.internal`
+maps to `127.0.0.1` and is refused; and the test CA added, world-readable, to
+the supervisor image's `/etc/ssl/certs/ca-certificates.crt`. The supervisor
+reads its own trust store, not the sandbox image's, and runs as user 65534. On a release carrying the fix, expect a pass, then record both runs in
 `docs/OPENSHELL_AUTHORITY_ADAPTER.md` and the version in
 `OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED`.
 
