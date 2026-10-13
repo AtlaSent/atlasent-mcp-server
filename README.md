@@ -363,11 +363,11 @@ Works in local mode: no API key, no network, nothing executed. `gate_actions` na
 The same review, run against a real checkout, written as a report you can open and forward:
 
 ```bash
-npx -y -p @atlasent/mcp-server atlasent-exposure-scan path/to/repo
+npx -y -p @atlasent/mcp-server@latest atlasent-exposure-scan path/to/repo
 # writes atlasent-exposure-review.html, .md and .json
 ```
 
-Offline: it reads `.github/workflows/` and makes no network call. The HTML is a single self-contained file (no scripts or external assets). Add `--fail-on-gaps` to use it as a CI check; `--out <dir>` picks where the files go.
+Keep `@latest`: without it `npx` can reuse an older cached copy that has no such command (on Windows it then reports "'atlasent-exposure-scan' is not recognized"). Offline: it reads `.github/workflows/` and makes no network call. The HTML is a single self-contained file (no scripts or external assets). Add `--fail-on-gaps` to use it as a CI check; `--out <dir>` picks where the files go.
 
 ### `atlasent_exposure_review`
 
