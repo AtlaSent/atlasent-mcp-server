@@ -83,7 +83,7 @@ as the display name.
   before verify). When neither is present it refuses, never guessing. On the
   Docker driver an operator has to supply the context file, or use
   guard-bound mode (below).
-- **Guard-bound mode (opt-in, added 2026-10-10; not yet run live).** With
+- **Guard-bound mode (opt-in, added 2026-10-10; run live on OpenShell 0.1.3's Docker driver 2026-10-13, `run-guard-bound.sh` PASS, atlasent-api#4281).** With
   `ATLASENT_OPENSHELL_WORKLOAD_BINDING=guard`, a context with no `sandbox_id`
   is accepted. The adapter then sends evaluate and verify with **no**
   `context.workload` (never a label, never a placeholder). The AtlaSent
