@@ -1,5 +1,14 @@
 # Release Notes
 
+## v2.19.2 — 2026-10-14
+
+- **Fix: `atlasent_evaluate` works for `agent.*` actions.** It now seals the
+  request's source provenance before evaluating, as the gated tools already
+  did, so the runtime no longer refuses it. The response carries
+  `bound_payload_hash` and `bound_actor_id`, which `verify_permit` needs as
+  `payload_hash` and `actor_id`. If you leave `actor_id` out, your key's own
+  agent is used. Other action types send exactly the same request as before.
+
 ## v2.19.1 — 2026-10-13
 
 - **Fix: `atlasent-exposure-scan` now runs when started with `npx`.** In 2.19.0

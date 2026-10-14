@@ -12,6 +12,18 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 `atlasent-guard` Claude Code plugin) are listed at the end.
 
 
+## [2.19.2] - 2026-10-14
+
+### Fixed
+
+- `atlasent_evaluate` now seals source provenance for `agent.*` actions, the
+  same way the gated tools do. Before, the runtime refused every `agent.*`
+  action sent through `atlasent_evaluate` with an agent-bound key. The response
+  now includes `bound_payload_hash` and `bound_actor_id`; pass them to
+  `verify_permit` as `payload_hash` and `actor_id`. When `actor_id` is omitted,
+  the key's own agent is sent and returned. Non-`agent.*` requests are
+  unchanged.
+
 ## [2.19.1] - 2026-10-13
 
 ### Fixed
