@@ -33,6 +33,7 @@ import {
   assessOpenShellVersion,
   reportedSchemeFromGuardLog,
   runTransportIdentityProbe,
+  type PlaintextPath,
   type TransportObservation,
 } from "./openshell.js";
 
@@ -40,6 +41,10 @@ const run = promisify(execFile);
 const probeCmd = process.env.OPENSHELL_TRANSPORT_PROBE_CMD;
 const version = process.env.OPENSHELL_VERSION;
 const skip = !probeCmd || !version ? "set OPENSHELL_VERSION and OPENSHELL_TRANSPORT_PROBE_CMD to run" : false;
+// Same variable the live kit's probe-transport.sh reads, so the report records
+// the path the plaintext case really took. A transparent-path pass never
+// qualifies a version (see TransportProbeReport.qualifies).
+const plaintextMode = process.env.PROBE_PLAINTEXT_MODE ?? "connect";
 
 function observationFrom(stdout: string): TransportObservation {
   for (const line of stdout.split("\n").reverse()) {
@@ -56,7 +61,12 @@ function observationFrom(stdout: string): TransportObservation {
 
 describe("OpenShell transport identity acceptance (live, NVIDIA/OpenShell#4397)", { skip }, () => {
   it("middleware is told the scheme the request actually travelled over", { timeout: 120_000 }, async () => {
+    assert.ok(
+      plaintextMode === "connect" || plaintextMode === "transparent",
+      `PROBE_PLAINTEXT_MODE must be connect or transparent, got: ${plaintextMode}`,
+    );
     const report = await runTransportIdentityProbe({
+      plaintextPath: plaintextMode as PlaintextPath,
       send: async (c) => {
         const { stdout } = await run("sh", ["-c", probeCmd as string, "probe", c], { timeout: 30_000 });
         return observationFrom(stdout);
@@ -64,5 +74,10 @@ describe("OpenShell transport identity acceptance (live, NVIDIA/OpenShell#4397)"
     });
     console.log(JSON.stringify({ openshell_version: version, assessment: assessOpenShellVersion(version as string), report }, null, 2));
     assert.ok(report.passed, `transport-identity probe failed: ${JSON.stringify(report.results)}`);
+    assert.ok(
+      report.qualifies,
+      "transparent-path pass: correct labelling of intercepted plain HTTP does not show CONNECT tunnels are fixed; " +
+        "rerun with PROBE_PLAINTEXT_MODE=connect before adding a version to OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED",
+    );
   });
 });

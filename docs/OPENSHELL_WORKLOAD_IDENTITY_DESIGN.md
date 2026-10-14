@@ -219,7 +219,7 @@ Found along the way:
   there. The guard checks whatever ID is sent, so this is a usability gap, not
   a hole.
 
-  **Addressed 2026-10-10, opt-in, not yet run live.** The guard takes
+  **Addressed 2026-10-10, opt-in. Run live 2026-10-13 on OpenShell 0.1.3 (Docker driver): `run-guard-bound.sh` PASS, the honest case executed with a verified attestation over the filled body and the forged case never reached the stub (atlasent-api#4281).** The guard takes
   `fill_absent_workload: true`. When the evaluate or verify body has no
   workload at all, the guard adds `{kind: "openshell_sandbox", id: <verified
   sandbox_id>}` and returns the new body (`has_body`). The attestation signs

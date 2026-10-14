@@ -369,6 +369,22 @@ describe("transport-identity probe (NVIDIA/OpenShell#4397)", () => {
     assert.equal(r.results.find((x) => x.case === "plaintext_tunnel")?.verdict, "mislabelled");
   });
 
+  it("only a CONNECT-path pass qualifies a version; a transparent-path pass never does", async () => {
+    const correct = (c: string) => async () => ({ observed: true as const, reported_scheme: c === "tls" ? "https" : "http" });
+    const connectPass = await runTransportIdentityProbe({ send: (c) => correct(c)() });
+    assert.equal(connectPass.plaintext_path, "connect", "connect is the default path");
+    assert.equal(connectPass.passed, true);
+    assert.equal(connectPass.qualifies, true);
+
+    const transparentPass = await runTransportIdentityProbe({ send: (c) => correct(c)(), plaintextPath: "transparent" });
+    assert.equal(transparentPass.passed, true);
+    assert.equal(transparentPass.qualifies, false, "intercepted plain HTTP labelled correctly says nothing about CONNECT");
+
+    const transparentControl = await runTransportIdentityProbe({ send: scheme("https"), plaintextPath: "transparent" });
+    assert.equal(transparentControl.defect_4397, true, "a transparent-path mislabel is still a valid control");
+    assert.equal(transparentControl.qualifies, false);
+  });
+
   it("a harness that sees nothing, or throws, fails rather than passing", async () => {
     const blind = await runTransportIdentityProbe({ send: async () => ({ observed: false }) });
     assert.equal(blind.passed, false);

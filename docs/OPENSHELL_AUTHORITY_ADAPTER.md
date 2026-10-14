@@ -83,7 +83,7 @@ as the display name.
   before verify). When neither is present it refuses, never guessing. On the
   Docker driver an operator has to supply the context file, or use
   guard-bound mode (below).
-- **Guard-bound mode (opt-in, added 2026-10-10; not yet run live).** With
+- **Guard-bound mode (opt-in, added 2026-10-10; run live on OpenShell 0.1.3's Docker driver 2026-10-13, `run-guard-bound.sh` PASS, atlasent-api#4281).** With
   `ATLASENT_OPENSHELL_WORKLOAD_BINDING=guard`, a context with no `sandbox_id`
   is accepted. The adapter then sends evaluate and verify with **no**
   `context.workload` (never a label, never a placeholder). The AtlaSent
@@ -386,7 +386,17 @@ is the in-run positive control. On every release so far, expect a failure with
 `defect_4397: true`. That failure is the cross-version control, so record it
 alongside any later pass. A version is added to
 `OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED` only after a recorded pass, and only
-that drops the #4397 advisory for it. The probe has not been run live yet.
+that drops the #4397 advisory for it. The pass must be on the CONNECT path:
+the report's `qualifies` is true only then. With `PROBE_PLAINTEXT_MODE=transparent`
+(plain HTTP sent straight to the endpoint, for drivers with no reachable
+CONNECT proxy), a pass never qualifies, but a mislabel is still a valid
+control.
+
+**Recorded control run (2026-10-13, atlasent-api#4281).** OpenShell 0.1.3,
+Docker driver, transparent mode (the sandbox has no reachable CONNECT proxy
+there). `tls` was reported `https` (correct). `plaintext_tunnel` was reported
+`https`, while the supervisor logged the same request as `http://…`
+(mislabelled). Result: `defect_4397: true`. The #4397 advisory stays on 0.1.3.
 
 Every check above was shown to fail against a mutation of the code it guards
 (verify verdict ignored, spawn before verify, generation check removed, permit

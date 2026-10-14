@@ -162,6 +162,56 @@ describe("probe-transport.sh", () => {
     assert.throws(() => run({ OSH_EXEC: "true", GUARD_LOG: "/dev/null", PROBE_HOST: "" }, "tls"));
   });
 
+  // A fake OSH_EXEC that records the command it was asked to run.
+  function recordingExec(dir, guardLog, record) {
+    const p = join(dir, "record-exec.sh");
+    writeFileSync(
+      p,
+      `#!/bin/sh\nprintf '%s\\n' "$*" >> "${record}"\nprintf '%s\\n' '{"component":"atlasent-workload-guard","scheme":"https"}' >> "${guardLog}"\n`,
+    );
+    return `sh ${p}`;
+  }
+
+  it("transparent mode sends plain HTTP straight to the host, with no proxy or tunnel", () => {
+    const dir = mkdtempSync(join(tmpdir(), "probe-"));
+    const log = join(dir, "guard.log");
+    const record = join(dir, "cmd.txt");
+    writeFileSync(log, "");
+    run(
+      { OSH_EXEC: recordingExec(dir, log, record), GUARD_LOG: log, PROBE_HOST: "stub:18443", PROBE_PLAINTEXT_MODE: "transparent" },
+      "plaintext_tunnel",
+    );
+    const cmd = readFileSync(record, "utf8");
+    assert.match(cmd, /'http:\/\/stub:18443\/functions\/v1\/v1-evaluate'/);
+    assert.doesNotMatch(cmd, / -p | -x /, "transparent mode must not use a proxy or a tunnel");
+    assert.match(cmd, /--noproxy '\*'/, "an ambient http_proxy / ALL_PROXY must not re-route the request");
+  });
+
+  it("connect mode stays the default and tunnels through the proxy", () => {
+    const dir = mkdtempSync(join(tmpdir(), "probe-"));
+    const log = join(dir, "guard.log");
+    const record = join(dir, "cmd.txt");
+    writeFileSync(log, "");
+    run({ OSH_EXEC: recordingExec(dir, log, record), GUARD_LOG: log, PROBE_HOST: "stub:18443", PROBE_PROXY: "http://p:3128" }, "plaintext_tunnel");
+    assert.match(readFileSync(record, "utf8"), / -p -x 'http:\/\/p:3128' /);
+  });
+
+  it("refuses an unknown plaintext mode", () => {
+    assert.throws(() => run({ OSH_EXEC: "true", GUARD_LOG: "/dev/null", PROBE_HOST: "x", PROBE_PLAINTEXT_MODE: "tunnel" }, "plaintext_tunnel"));
+  });
+
+  it("the documented harness command hands the case to the script; the old one did not", () => {
+    const dir = mkdtempSync(join(tmpdir(), "probe-"));
+    const log = join(dir, "guard.log");
+    writeFileSync(log, "");
+    const env = { ...process.env, OSH_EXEC: fakeExec(dir, log, "https"), GUARD_LOG: log, PROBE_HOST: "stub:18443" };
+    const script = join(HERE, "probe-transport.sh");
+    // The harness runs: sh -c "$OPENSHELL_TRANSPORT_PROBE_CMD" probe <case>
+    const harness = (cmd) => execFileSync("sh", ["-c", cmd, "probe", "tls"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    assert.match(harness(`sh ${script} "$@"`), /"scheme":"https"/);
+    assert.throws(() => harness(`sh ${script}`), "without \"$@\" the case never reaches the script");
+  });
+
   it("its output feeds the transport acceptance harness unchanged", async () => {
     const { reportedSchemeFromGuardLog } = await import("../../../src/openshell.ts");
     const dir = mkdtempSync(join(tmpdir(), "probe-"));
