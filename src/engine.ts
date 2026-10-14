@@ -531,6 +531,13 @@ export async function attachAgentActorIdentity(
     // any policy runs. The caller's actor_id is a report, never authority, so
     // for agent.* send the identity's own principal instead.
     const principal = (minted.actor_identity.subject as Record<string, unknown> | undefined)?.principal_id;
+    // No reported actor: the runtime binds the permit to the key's agent
+    // anyway. Send it explicitly so the caller learns the actor_id it must
+    // present at verify (bound_actor_id); a matching actor is never refused.
+    if (agentAction && typeof principal === "string" && body.actor_id === undefined) {
+      body.actor_id = principal;
+      return [];
+    }
     if (agentAction && typeof principal === "string" && body.actor_id !== undefined && body.actor_id !== principal) {
       const reported = body.actor_id;
       body.actor_id = principal;

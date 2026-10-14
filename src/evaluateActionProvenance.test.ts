@@ -159,6 +159,15 @@ describe("atlasent_evaluate (evaluateAction): agent.* sealed provenance", () => 
     assert.equal(v.target_id, "search");
   });
 
+  it("with no actor_id reported, sends the key's agent and returns it as bound_actor_id", async () => {
+    runtime({ decision: "allow", permit_token: "pt.1", source_provenance: { admitted: true } });
+    const { actor_id: _omitted, ...args } = AGENT_ARGS;
+    const out = await call(await client(), "atlasent_evaluate", args);
+    assert.equal(posts(EVAL)[0].body!.actor_id, "agent:a1");
+    assert.equal(out.bound_actor_id, "agent:a1", "verify_permit needs an actor_id; the caller must learn it");
+    assert.equal(out.bound_payload_hash, ACTION_HASH);
+  });
+
   it("does not claim a provenance binding the runtime did not admit", async () => {
     runtime({ decision: "allow", permit_token: "pt.1" });
     const out = await call(await client(), "atlasent_evaluate", AGENT_ARGS);
