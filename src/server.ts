@@ -668,7 +668,9 @@ export function createServer(): McpServer {
         "Evaluate an action against your published AtlaSent policies. " +
         "Returns allow/deny/hold/escalate with a permitToken on allow. " +
         "Use this when ATLASENT_MODE=remote and you need to gate an action " +
-        "against your hosted policy engine.",
+        "against your hosted policy engine. For agent.* actions the result may carry " +
+        "bound_payload_hash and bound_actor_id: pass them to verify_permit as payload_hash " +
+        "and actor_id, since the permit is bound to them.",
       inputSchema: z.object({
         actor_id: z
           .string()

@@ -605,6 +605,24 @@ export async function attachSourceProvenance(
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * What an admitted seal bound the permit to, for the verify boundary to
+ * present: the sealed action hash (only when the runtime admitted the
+ * provenance) and the key's agent, when it replaced the reported actor_id.
+ * Shared by authorizeRemote and evaluateAction so both report it alike.
+ */
+function provenanceBindings(
+  admitted: unknown,
+  actionHash: string | undefined,
+  sentActorId: unknown,
+  reportedActorId: string | undefined,
+): { bound_payload_hash?: string; bound_actor_id?: string } {
+  return {
+    ...(admitted && actionHash ? { bound_payload_hash: actionHash } : {}),
+    ...(typeof sentActorId === "string" && sentActorId !== reportedActorId && { bound_actor_id: sentActorId }),
+  };
+}
+
+/**
  * The client-side twin of the runtime's EXECUTION_PAYLOAD_HASH_REQUIRED gate:
  * a mandatory-change-control action without a complete change plan can only
  * ever be denied, so say what to send instead of spending a runtime call.
@@ -966,8 +984,7 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
     const out: AllowDecision = { decision: "allow", permit_token: data.permit_token };
     // Admitted provenance binds the permit to the sealed action hash (not to
     // any execution_payload_hash we sent); record what verify must present.
-    if (data.source_provenance && provenance.action_hash) out.bound_payload_hash = provenance.action_hash;
-    if (typeof body.actor_id === "string" && body.actor_id !== ctx.actor_id) out.bound_actor_id = body.actor_id;
+    Object.assign(out, provenanceBindings(data.source_provenance, provenance.action_hash, body.actor_id, ctx.actor_id));
     if (sealed_binding) out.sealed_binding = sealed_binding;
     // Strictly `true`: any other value (a string, 1) is not an attestation.
     if (data.workload_attested === true) out.workload_attested = true;
@@ -996,8 +1013,7 @@ async function authorizeRemote(ctx: ActionContext): Promise<Decision> {
       ...(notes.length && { notes }),
       // Same binding the allow path reports: the permit claimed after approval
       // is bound to the sealed action hash and the key's agent.
-      ...(data.source_provenance && provenance.action_hash && { bound_payload_hash: provenance.action_hash }),
-      ...(typeof body.actor_id === "string" && body.actor_id !== ctx.actor_id && { bound_actor_id: body.actor_id }),
+      ...provenanceBindings(data.source_provenance, provenance.action_hash, body.actor_id, ctx.actor_id),
       ...(sealed_binding && { sealed_binding }),
       ...(data.workload_attested === true && { workload_attested: true as const }),
     };
@@ -1175,11 +1191,22 @@ export interface EvaluateResponse extends RawEvaluate {
 }
 
 export async function evaluateAction(params: EvaluateParams): Promise<EvaluateResponse> {
+  // agent.* (CROSS-063, #3785): same preparation as authorizeRemote. The
+  // sealer accepts only a bare UUID request_id, and the seal binds the permit
+  // to the sealed action hash (context + resource_id), not to the top-level
+  // execution_payload_hash, so the digest also rides inside the sealed
+  // context. Non-agent actions are untouched: no request_id, same context.
+  const agentAction = params.action_type.startsWith("agent.");
+  let context = params.context;
+  if (agentAction && params.execution_payload_hash !== undefined) {
+    context = { ...(context ?? {}), action_digest: normalizePayloadHash(params.execution_payload_hash) };
+  }
   const body = buildEvaluateRequestBody({
     action_type: params.action_type,
     actor_id: params.actor_id,
     agent_session: params.agent_session,
-    context: params.context,
+    context,
+    ...(agentAction ? { request_id: randomUUID() } : {}),
     explain: params.explain,
     state_snapshot: params.state_snapshot,
     ...(params.execution_payload_hash !== undefined
@@ -1201,12 +1228,21 @@ export async function evaluateAction(params: EvaluateParams): Promise<EvaluateRe
     params.action_type,
     typeof env === "string" ? env : undefined,
   );
+  // Last: the seal covers the exact request_id/context/resource_id sent below.
+  const provenance = await attachSourceProvenance(body);
   const res = await post<EvaluateResponse>("/v1-evaluate", body);
   if (res.decision === "hold" || res.decision === "escalate") changeControl.remember(res.approval_request_id);
-  const added = [...changeControl.notes, ...identityNotes];
-  if (added.length) {
-    const prior = Array.isArray(res.notes) ? (res.notes as unknown[]) : [];
-    return { ...res, notes: [...prior, ...added] };
+  const added = [...changeControl.notes, ...identityNotes, ...provenance.notes];
+  // What verify_permit must present (payload_hash, actor_id) for this permit.
+  // Empty for every non-agent action, so their response is unchanged.
+  const bindings = provenanceBindings(res.source_provenance, provenance.action_hash, body.actor_id, params.actor_id);
+  if (added.length || Object.keys(bindings).length) {
+    const out: EvaluateResponse = { ...res, ...bindings };
+    if (added.length) {
+      const prior = Array.isArray(res.notes) ? (res.notes as unknown[]) : [];
+      out.notes = [...prior, ...added];
+    }
+    return out;
   }
   return res;
 }
