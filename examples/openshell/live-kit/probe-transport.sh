@@ -27,7 +27,9 @@
 #                             supervisor's network, not the sandbox's, so
 #                             connect mode is never observed. The question is
 #                             the same: is the guard told http for a request
-#                             that was not TLS?
+#                             that was not TLS? A pass in this mode never
+#                             qualifies a version: it says nothing about
+#                             CONNECT tunnels. A mislabel is a valid control.
 #
 # Prints the guard log lines written during this request. The harness reads
 # the scheme the guard was told from the last of them.
@@ -50,7 +52,9 @@ if [ "$1" = tls ]; then
   $OSH_EXEC sh -c "curl -sS -o /dev/null -X POST -d '{}' 'https://$PROBE_HOST$path'" || true
 elif [ "$mode" = transparent ]; then
   # Plain HTTP straight to the endpoint; OpenShell intercepts it transparently.
-  $OSH_EXEC sh -c "curl -sS -o /dev/null -m 10 -X POST -d '{}' 'http://$PROBE_HOST$path'" || true
+  # --noproxy '*' so an ambient http_proxy / ALL_PROXY cannot turn this back
+  # into a proxied request.
+  $OSH_EXEC sh -c "curl -sS -o /dev/null -m 10 --noproxy '*' -X POST -d '{}' 'http://$PROBE_HOST$path'" || true
 else
   # Plain HTTP forced through a CONNECT tunnel (-p): the case #4397 mislabels.
   proxy="${PROBE_PROXY:-}"

@@ -55,7 +55,10 @@ connection is intercepted transparently. The default plaintext case is then
 never observed. Add `PROBE_PLAINTEXT_MODE=transparent`, which sends the plain
 HTTP request straight to `PROBE_HOST`. On 0.1.3 the supervisor logs that
 request as `http://…` and still tells the guard `https`, so this run is the
-control (recorded 2026-10-13, atlasent-api#4281). The same host needed:
+control (recorded 2026-10-13, atlasent-api#4281). A transparent-mode *pass*
+never qualifies a version for `OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED`: it
+says nothing about CONNECT tunnels, and the harness fails it as
+non-qualifying. Qualification needs a pass in the default `connect` mode. The same host needed:
 `openshell sandbox exec --name <name> --` for `OSH_EXEC`; an explicit
 `binaries:` list on the network rule; a stub hostname that public DNS resolves
 to a private IP listed in `allowed_ips`, because `host.openshell.internal`

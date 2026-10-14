@@ -184,6 +184,7 @@ describe("probe-transport.sh", () => {
     const cmd = readFileSync(record, "utf8");
     assert.match(cmd, /'http:\/\/stub:18443\/functions\/v1\/v1-evaluate'/);
     assert.doesNotMatch(cmd, / -p | -x /, "transparent mode must not use a proxy or a tunnel");
+    assert.match(cmd, /--noproxy '\*'/, "an ambient http_proxy / ALL_PROXY must not re-route the request");
   });
 
   it("connect mode stays the default and tunnels through the proxy", () => {

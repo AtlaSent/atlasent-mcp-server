@@ -682,11 +682,29 @@ export interface TransportCaseResult {
   detail?: string;
 }
 
+/**
+ * How the `plaintext_tunnel` case reached the endpoint. `connect` is plain
+ * HTTP inside a CONNECT tunnel, the shape NVIDIA/OpenShell#4397 describes.
+ * `transparent` is plain HTTP sent straight to the endpoint and intercepted,
+ * for drivers whose sandboxes have no reachable CONNECT proxy (OpenShell
+ * 0.1.3's Docker driver).
+ */
+export type PlaintextPath = "connect" | "transparent";
+
 export interface TransportProbeReport {
   passed: boolean;
   results: TransportCaseResult[];
   /** True when plaintext was reported as https: the #4397 defect itself. */
   defect_4397: boolean;
+  plaintext_path: PlaintextPath;
+  /**
+   * True only for a pass on the CONNECT path. Only a qualifying run may add a
+   * version to OPENSHELL_TRANSPORT_IDENTITY_CONFIRMED. A transparent-path pass
+   * shows that path is labelled correctly. It says nothing about CONNECT
+   * tunnels, which can still carry the defect, so it never qualifies. A
+   * transparent-path mislabel is still a valid control: it proves the defect.
+   */
+  qualifies: boolean;
 }
 
 /**
@@ -697,7 +715,9 @@ export interface TransportProbeReport {
  */
 export async function runTransportIdentityProbe(opts: {
   send: (c: TransportCase) => Promise<TransportObservation>;
+  plaintextPath?: PlaintextPath;
 }): Promise<TransportProbeReport> {
+  const plaintextPath: PlaintextPath = opts.plaintextPath ?? "connect";
   const results: TransportCaseResult[] = [];
   for (const c of TRANSPORT_CASES) {
     let obs: TransportObservation;
@@ -722,10 +742,13 @@ export async function runTransportIdentityProbe(opts: {
     });
   }
   const plain = results.find((r) => r.case === "plaintext_tunnel");
+  const passed = results.length === TRANSPORT_CASES.length && results.every((r) => r.verdict === "correct");
   return {
-    passed: results.length === TRANSPORT_CASES.length && results.every((r) => r.verdict === "correct"),
+    passed,
     results,
     defect_4397: plain?.verdict === "mislabelled" && plain.reported_scheme === "https",
+    plaintext_path: plaintextPath,
+    qualifies: passed && plaintextPath === "connect",
   };
 }
 
