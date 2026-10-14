@@ -229,7 +229,7 @@ function resolveBase(path: string): string {
 function handleHttpError(status: number, body: string): never {
   if (status === 401) throw new Error("Authentication failed — check your ATLASENT_API_KEY");
   if (status === 403) {
-    // An OpenShell supervisor-middleware denial (the workload guard) is a 403
+    // An OpenShell supervisor-middleware denial (e.g. the workload guard) is a 403
     // AtlaSent never issued; do not blame key scopes for it (#263). Still throws.
     const denial = parseMiddlewareDenial(status, body);
     if (denial) throw new Error(middlewareDenialMessage(denial));

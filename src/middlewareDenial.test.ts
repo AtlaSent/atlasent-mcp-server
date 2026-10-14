@@ -37,12 +37,20 @@ describe("parseMiddlewareDenial", () => {
     assert.equal(parseMiddlewareDenial(500, GUARD_BODY), null);
   });
 
-  it("message names the guard and the code, and does not blame key scopes", () => {
+  it("message gives the code, does not blame key scopes, and does not claim which middleware refused", () => {
     const m = middlewareDenialMessage({ reason_code: "workload_mismatch" });
-    assert.match(m, /workload guard/);
+    assert.match(m, /supervisor middleware/);
     assert.match(m, /workload_mismatch/);
     assert.match(m, /different sandbox/);
+    assert.match(m, /does not say which middleware refused/);
+    assert.doesNotMatch(m, /^Refused by the OpenShell workload guard/);
     assert.doesNotMatch(m, /lacks the required scope/);
+    // No code, or a code the guard does not use: generic, and no workload-guard attribution at all.
+    for (const d of [{ reason_code: null }, { reason_code: "rate_limited" }]) {
+      const g = middlewareDenialMessage(d);
+      assert.match(g, /supervisor middleware/);
+      assert.doesNotMatch(g, /workload guard/);
+    }
     assert.match(middlewareDenialMessage({ reason_code: null }), /no reason_code/);
   });
 });
@@ -86,7 +94,7 @@ describe("403 wording through the remote engine and the openshell run CLI", () =
     assert.equal(r.exit_code, EXIT.DENY);
     assert.equal(spawned, 0);
     assert.equal(r.reasons.length, 1);
-    assert.match(r.reasons[0], /workload guard/);
+    assert.match(r.reasons[0], /supervisor middleware/);
     assert.match(r.reasons[0], /workload_mismatch/);
     assert.doesNotMatch(r.reasons[0], /lacks the required scope/);
   });

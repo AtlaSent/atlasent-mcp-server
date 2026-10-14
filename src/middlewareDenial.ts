@@ -1,7 +1,7 @@
 // Recognises OpenShell's canonical supervisor-middleware denial (issue #263).
 //
-// When an OpenShell supervisor middleware (for AtlaSent, the workload guard in
-// packages/openshell-workload-guard) blocks a request, OpenShell answers with
+// When an OpenShell supervisor middleware (the AtlaSent workload guard in
+// packages/openshell-workload-guard, or any other registered middleware) blocks a request, OpenShell answers with
 // its own canonical response instead of the upstream one: HTTP 403 with a JSON
 // body whose `error` is exactly "middleware_denied", plus a validated
 // `reason_code` when the middleware supplied one (see
@@ -16,7 +16,12 @@
 /** OpenShell's reason_code format: lowercase letter first, then [a-z0-9_], max 64 bytes. */
 const REASON_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 
-/** What each workload-guard code means, for the codes an operator is most likely to see. */
+/**
+ * Codes the AtlaSent workload guard emits. The response never identifies which
+ * middleware refused (any supervisor middleware returns the same canonical
+ * shape), so these only describe what a code means; they are not proof that the
+ * workload guard sent it.
+ */
 const GUARD_CODE_MEANING: Record<string, string> = {
   workload_mismatch: "the request names a different sandbox than the one it was sent from",
   workload_missing: "the request names no workload",
@@ -49,12 +54,20 @@ export function parseMiddlewareDenial(status: number, body: string): MiddlewareD
   return { reason_code: typeof code === "string" && REASON_CODE.test(code) ? code : null };
 }
 
-/** Operator-facing message for a middleware denial. Never mentions key scopes as the cause. */
+/**
+ * Operator-facing message for a middleware denial. Never mentions key scopes as
+ * the cause, and never claims which middleware refused: OpenShell's canonical
+ * denial carries no middleware identity. A code the AtlaSent workload guard is
+ * known to use is described as such, not attributed.
+ */
 export function middlewareDenialMessage(d: MiddlewareDenial): string {
   const code = d.reason_code ? ` (reason_code: ${d.reason_code})` : " (no reason_code given)";
-  const meaning = d.reason_code && GUARD_CODE_MEANING[d.reason_code] ? `: ${GUARD_CODE_MEANING[d.reason_code]}` : "";
+  const meaning = d.reason_code && GUARD_CODE_MEANING[d.reason_code]
+    ? `: ${GUARD_CODE_MEANING[d.reason_code]}. That code is one the AtlaSent workload guard uses, ` +
+      `but the response does not say which middleware refused`
+    : "";
   return (
-    `Refused by the OpenShell workload guard — supervisor middleware denied the request at the sandbox boundary` +
+    `Refused by OpenShell supervisor middleware at the sandbox boundary` +
     `${code}${meaning}. This is not an AtlaSent API key scope problem.`
   );
 }
