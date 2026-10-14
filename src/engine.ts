@@ -37,6 +37,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { VERSION } from "./version.js";
 import { functionRegionHeaders } from "./functionRegion.js";
+import { middlewareDenialMessage, parseMiddlewareDenial } from "./middlewareDenial.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -227,7 +228,13 @@ function resolveBase(path: string): string {
 
 function handleHttpError(status: number, body: string): never {
   if (status === 401) throw new Error("Authentication failed — check your ATLASENT_API_KEY");
-  if (status === 403) throw new Error("Permission denied — your key lacks the required scope");
+  if (status === 403) {
+    // An OpenShell supervisor-middleware denial (the workload guard) is a 403
+    // AtlaSent never issued; do not blame key scopes for it (#263). Still throws.
+    const denial = parseMiddlewareDenial(status, body);
+    if (denial) throw new Error(middlewareDenialMessage(denial));
+    throw new Error("Permission denied — your key lacks the required scope");
+  }
   if (status === 429) throw new Error("Rate limited — back off and retry");
   // Try to surface { error, message } from the body
   try {

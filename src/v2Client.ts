@@ -36,6 +36,7 @@
 
 import { VERSION } from "./version.js";
 import { functionRegionHeaders } from "./functionRegion.js";
+import { middlewareDenialMessage, parseMiddlewareDenial } from "./middlewareDenial.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const STREAM_TIMEOUT_MS = 60_000;
@@ -128,10 +129,12 @@ function handleStatus(flag: TenantFlag, status: number, body: string): never {
     );
   }
   if (status === 403) {
+    // OpenShell workload-guard refusal, not an AtlaSent scope 403 (#263).
+    const denial = parseMiddlewareDenial(status, body);
     throw new V2HttpError(
       status,
       body,
-      "Permission denied — your key lacks the required scope",
+      denial ? middlewareDenialMessage(denial) : "Permission denied — your key lacks the required scope",
     );
   }
   if (status === 429) {
