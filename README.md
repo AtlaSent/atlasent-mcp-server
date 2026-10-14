@@ -314,6 +314,8 @@ Protected deployment demonstration. It performs the necessary Authorization and 
 
 Hosted V1 API-facing tools. Use the richer remote evaluation path when you need additional context beyond the small `evaluate` demo envelope. Verification remains an execution-boundary operation.
 
+For `agent.*` actions (e.g. `agent.tool.invoke`) `atlasent_evaluate` seals source provenance before evaluating, as `evaluate` does, and the result may carry `bound_payload_hash` and `bound_actor_id`. The permit is bound to those values, so present them to `verify_permit` as `payload_hash` and `actor_id`.
+
 ### `atlasent_lookup_action`
 
 Read-only Canon lookup for Action Types, gate flags, authorization patterns, evidence requirements, and graph relationships.
