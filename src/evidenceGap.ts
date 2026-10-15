@@ -242,7 +242,15 @@ export function parseYamlSubset(source: string): YValue {
 // Consequential-step detection
 // ---------------------------------------------------------------------------
 
-export type Category = "deploy" | "publish" | "migrate" | "infrastructure";
+export type Category = "deploy" | "publish" | "migrate" | "infrastructure" | "dynamic";
+
+/**
+ * certain: the command is in the file. possible: a deploy/release-named
+ * script is called and its contents were not read. unresolved: the command
+ * is built at run time (a variable, expression or eval) and cannot be read
+ * from the file at all; it is treated as a potential change, never as clean.
+ */
+export type Confidence = "certain" | "possible" | "unresolved";
 
 interface Detector {
   category: Category;
@@ -332,24 +340,151 @@ function isGateUses(uses: string): boolean {
   return /(^|\/)atlasent-action(@|\/)/i.test(uses);
 }
 
+/** A pipe into something that executes its stdin: a shell, `source`, `.`, `eval` or xargs. */
+const PIPES_TO_SHELL =
+  /\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+)?(?:(?:\/usr)?\/bin\/)?(?:(?:ba|z|da|k)?sh|source|eval|xargs)(?=\s|$)|\|\s*\.(?=\s)/;
+
+/** The file an echo/printf line writes to, when it is not a GitHub env/output/summary file or /dev/*. */
+function redirectTarget(line: string): string | null {
+  const m = />>?\s*("?)([^\s;&|"]+)\1/.exec(line);
+  if (!m) return null;
+  const t = m[2];
+  if (/GITHUB_(ENV|OUTPUT|STEP_SUMMARY|PATH|STATE)|^\/dev\//.test(t)) return null;
+  return t;
+}
+
 /**
  * The run text with comments dropped and the quoted text of echo/printf lines
  * blanked: `echo "helm install ..."` in a job summary prints instructions, it
  * does not deploy. Only the quoted part is blanked, so `echo "$M" | kubectl
  * apply -f -` is still detected.
+ *
+ * The text is NOT blanked when it is executed after all (#261): piped into a
+ * shell (`echo "terraform apply" | sh`), or written to a file the same step
+ * mentions again (`echo "npm publish" > run.sh; bash run.sh`).
  */
 function runWithoutComments(run: string): string {
-  return run
-    .split("\n")
-    .filter((l) => !/^\s*#/.test(l))
-    .map((l) => (/^\s*(echo|printf)\b/.test(l) ? l.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""') : l))
+  const lines = run.split("\n").filter((l) => !/^\s*#/.test(l));
+  return lines
+    .map((l) => {
+      if (!/^\s*(echo|printf)\b/.test(l) || PIPES_TO_SHELL.test(l)) return l;
+      const target = redirectTarget(l);
+      if (target && lines.some((o) => o !== l && o.includes(target))) return l;
+      return l.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
+    })
     .join("\n");
+}
+
+/**
+ * The same text with shell quoting and wrapper syntax removed, so a command
+ * spelled through `bash -c "..."`, `sh -c '...'`, `eval "..."`, `$(...)`,
+ * backticks, `"terraform" apply`, `kubectl\ apply`, `${IFS}` or a here-string
+ * reads as the command it runs (#261).
+ */
+export function normalizeShell(run: string): string {
+  return run
+    .replace(/\\\n/g, " ") // line continuation
+    .replace(/\$\{?IFS\}?/g, " ")
+    .replace(/\$'((?:[^'\\]|\\.)*)'/g, "$1") // ANSI-C quoting
+    .replace(/\\(.)/g, "$1") // escapes
+    .replace(/["'`]/g, " ")
+    .replace(/\$\(/g, " ( ")
+    .replace(/<<<?-?/g, " ")
+    .replace(/[ \t]+/g, " ");
+}
+
+/** Has the text shell indirection that normalizeShell() resolves? */
+function hasIndirection(run: string): boolean {
+  return /\b(?:(?:ba|z|da|k)?sh)\s+-\w*c\w*\b|\beval\b|\$\(|`|\$'|\\\S|\$\{?IFS\b|["'][A-Za-z-]+["']|<<</.test(run) || PIPES_TO_SHELL.test(run);
+}
+
+// ---------------------------------------------------------------------------
+// Unresolved dynamic command construction (#261). A command whose name or
+// subcommand comes from a variable, an expression or eval cannot be read from
+// the file, so it is never treated as clean: it is reported as category
+// "dynamic", confidence "unresolved", and classified against the gates like
+// any other consequential step.
+// ---------------------------------------------------------------------------
+
+/** Tools whose subcommand decides whether they change a real system. */
+const MUTATING_TOOLS =
+  /^(terraform|tofu|pulumi|cdk|kubectl|helm|npm|pnpm|yarn|cargo|gem|twine|poetry|docker|podman|gcloud|aws|az|firebase|wrangler|vercel|netlify|flyctl|fly|railway|supabase|prisma|alembic|flyway|knex|serverless|sls|eb|gh|mvn|dotnet)$/;
+
+/** An expansion standing alone as a word: $X, ${X}, "$X", $@, $1, $(...), `...`, ${{ ... }}. */
+function isExpansionWord(w: string): boolean {
+  const t = w.replace(/^"|"$/g, "");
+  return /^\$(\{[^}]*\}|\w+|[@*#?!\d]|\(.*|\{\{.*)$/.test(t) || /^`/.test(t);
+}
+
+/** Split a shell line into simple commands (very roughly; enough for command position). */
+function simpleCommands(text: string): string[] {
+  return text
+    .replace(/\$\{\{[^}]*\}\}/g, (m) => m.replace(/\s+/g, "")) // keep ${{ expr }} as one word
+    .split(/\n|;|&&|\|\||\||\(|\)|\bthen\b|\bdo\b|\belse\b/)
+    .map((c) => c.trim())
+    .filter((c) => c !== "");
+}
+
+/** Strip leading assignments and prefix commands that run the next word. */
+function stripPrefixes(cmd: string): string {
+  let c = cmd;
+  for (;;) {
+    const next = c
+      .replace(/^(?:if|elif|while|until|!|\{|time|exec|nohup|command|builtin)\s+/, "")
+      .replace(/^sudo(?:\s+-\S+)*\s+/, "")
+      .replace(/^env(?:\s+-\S+)*(?:\s+\w+=\S*)*\s+/, "")
+      .replace(/^xargs(?:\s+-[^\s]+(?:\s+(?!-)\S+)?)*?\s+(?=[\w./$"'])/, "")
+      .replace(/^\w+=(?:"[^"]*"|'[^']*'|\S*)\s+/, "");
+    if (next === c) return c;
+    c = next;
+  }
+}
+
+/**
+ * A command in `run` whose name or mutating subcommand is not literal text,
+ * or null. Examples: `$CMD`, `${{ inputs.command }}`, `eval "$X"`,
+ * `bash -c "$X"`, `xargs sh -c '{}'`, `source "$F"`, `terraform $ACTION`.
+ */
+export function dynamicCommand(run: string): string | null {
+  for (const raw of simpleCommands(run)) {
+    const cmd = stripPrefixes(raw);
+    const words = cmd.split(/\s+/);
+    const first = words[0] ?? "";
+    const rest = words.slice(1).join(" ");
+    const snippet = raw.length > 80 ? `${raw.slice(0, 77)}...` : raw;
+    if (first.startsWith("${{") || isExpansionWord(first)) return snippet;
+    if (first === "eval" && /[$`]/.test(rest)) return snippet;
+    if (/^(?:(?:\/usr)?\/bin\/)?(?:ba|z|da|k)?sh$/.test(first)) {
+      const args = words.slice(1);
+      const cIdx = args.findIndex((a) => /^-\w*c\w*$/.test(a));
+      if (cIdx >= 0) {
+        const body = args.slice(cIdx + 1).join(" ");
+        if (/[$`]|\{\}/.test(body)) return snippet;
+      } else {
+        const script = args.find((a) => !a.startsWith("-"));
+        if (script && isExpansionWord(script)) return snippet;
+      }
+    }
+    if ((first === "source" || first === ".") && words[1] && isExpansionWord(words[1])) return snippet;
+    if (MUTATING_TOOLS.test(first)) {
+      const sub = words.slice(1).find((a) => !a.startsWith("-"));
+      if (sub && (isExpansionWord(sub) || sub.startsWith("${{"))) return snippet;
+    }
+  }
+  return null;
 }
 
 interface Detection {
   category: Category;
   detected_by: string;
-  confidence: "certain" | "possible";
+  confidence: Confidence;
+}
+
+function runDetection(run: string): Detection | null {
+  for (const d of RUN_DETECTORS) {
+    if (d.re.test(run)) return { category: d.category, detected_by: d.label, confidence: "certain" };
+  }
+  return null;
 }
 
 export function detectStep(step: YMap, extraGates: string[] = []): Detection | null {
@@ -366,14 +501,23 @@ export function detectStep(step: YMap, extraGates: string[] = []): Detection | n
   if (/^pulumi\/actions@/i.test(uses)) return null;
   if (uses && /^hashicorp\/setup-terraform/i.test(uses)) return null;
   if (run) {
-    for (const d of RUN_DETECTORS) {
-      if (d.re.test(run)) return { category: d.category, detected_by: d.label, confidence: "certain" };
+    const direct = runDetection(run);
+    if (direct) return direct;
+    const normalized = normalizeShell(run);
+    const viaShell = runDetection(normalized);
+    if (viaShell) {
+      return {
+        ...viaShell,
+        detected_by: hasIndirection(run) ? `${viaShell.detected_by} (through shell indirection)` : viaShell.detected_by,
+      };
     }
-    const hint = scriptHint(run);
+    const hint = scriptHint(run) ?? scriptHint(normalized);
     if (hint) {
       const cat: Category = /migrate/.test(hint) ? "migrate" : /publish|release/.test(hint) ? "publish" : "deploy";
       return { category: cat, detected_by: `script: ${hint}`, confidence: "possible" };
     }
+    const dyn = dynamicCommand(run);
+    if (dyn) return { category: "dynamic", detected_by: `dynamic command: ${dyn}`, confidence: "unresolved" };
   }
   return null;
 }
@@ -522,7 +666,7 @@ export interface Finding {
   line: number;
   category: Category;
   detected_by: string;
-  confidence: "certain" | "possible";
+  confidence: Confidence;
   status: GapStatus;
   reason: string;
   /** Present on gaps (ungoverned / weak): the concrete change for this step. */
