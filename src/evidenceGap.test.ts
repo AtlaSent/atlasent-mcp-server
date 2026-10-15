@@ -535,3 +535,88 @@ jobs:
     assert.deepEqual(again.findings.map((f) => f.status), ["bound", "bound"]);
   });
 });
+
+// #261: a command handed to another shell, split by quotes or a line
+// continuation, or built at run time, must never read as "no finding".
+// Every case below returned null before this change.
+describe("shell indirection (#261)", () => {
+  for (const [run, by] of [
+    ['echo start && bash -c "npm publish"', "npm publish"],
+    ["echo 'kubectl apply -f k8s/' | bash", "kubectl"],
+    ["printf 'npm publish' | sh -s", "npm publish"],
+    ["env CI=1 sh -lc 'echo go; terraform apply -auto-approve'", "terraform apply"],
+    ["terraform \\\n  apply -auto-approve", "terraform apply"],
+    ["terra\\\nform apply -auto-approve", "terraform apply"],
+    ['n"pm" publish', "npm publish"],
+    ["bash -c 'bash -c \"cargo publish\"'", "cargo publish"],
+    ["echo \"$(helm upgrade app ./chart)\"", "helm upgrade/install"],
+  ] as const) {
+    it(`sees through ${JSON.stringify(run)}`, () => {
+      const d = detectStep({ run });
+      assert.equal(d?.detected_by, by);
+      assert.equal(d?.confidence, "certain");
+    });
+  }
+
+  for (const run of [
+    "$CMD",
+    '"${DEPLOY_CMD}" --prod',
+    'eval "$x"',
+    "eval $(./generate.sh)",
+    'bash -c "$VAR"',
+    "sh -c '${{ inputs.command }}'",
+    "${{ inputs.command }}",
+    'echo "$SCRIPT" | bash',
+    "OUT=$(eval \"$Y\")",
+  ]) {
+    it(`flags run-time command construction ${JSON.stringify(run)} as unknown, never passes it`, () => {
+      const d = detectStep({ run });
+      assert.equal(d?.category, "unknown");
+      assert.equal(d?.confidence, "possible");
+      assert.match(d?.detected_by ?? "", /^command built at run time: /);
+    });
+  }
+
+  for (const run of [
+    "echo \"bash -c 'npm publish'\"",
+    'echo "Run: $CMD"',
+    'case "$TARGET" in\n  prod) echo prod ;;\nesac',
+    "for f in $FILES; do echo $f; done",
+    'if [ "$X" = y ]; then echo ok; fi',
+    "cat <<EOF > notes.txt\n$BODY\nEOF",
+    "$GITHUB_WORKSPACE/scripts/build.sh",
+    "FOO=$BAR",
+    "npm ci 2>&1 | tee install.log",
+    // Found by scanning real AtlaSent workflows: none of these runs a variable.
+    'if [[ -z "$A" || "${B^^}" != "N/A" ]]; then echo x; fi',
+    "DEADLINE=$(( $(date +%s) + 75 * 60 ))",
+    '[ $(( ${#payload} % 4 )) -ne 0 ] && payload="${payload}="',
+    'targets+=("$name")',
+  ]) {
+    it(`does not invent a finding for ${JSON.stringify(run)}`, () => {
+      assert.equal(detectStep({ run }), null);
+    });
+  }
+
+  it("reads pwsh and other non-POSIX shells literally (step shell or defaults.run.shell)", () => {
+    const ps = "$gateTests = @(Get-ChildItem x)\n& $tool --version";
+    assert.equal(detectStep({ run: ps, shell: "pwsh" }), null);
+    assert.equal(detectStep({ run: ps }, [], "pwsh"), null);
+    assert.equal(detectStep({ run: ps, shell: "bash" }, [], "pwsh")?.category, "unknown", "a step's own shell wins");
+    const r = analyzeWorkflows(wf("on: push\ndefaults:\n  run:\n    shell: pwsh\njobs:\n  d:\n    steps:\n      - run: $x = 1\n"));
+    assert.equal(r.findings.length, 0);
+    // A literal deploy is still seen under any shell.
+    assert.equal(detectStep({ run: "npm publish", shell: "pwsh" })?.detected_by, "npm publish");
+  });
+
+  it("a dynamic command with no gate is a gap; behind a bound gate it is bound", () => {
+    const ungated = analyzeWorkflows(wf("on: push\njobs:\n  d:\n    steps:\n      - name: Run it\n        run: bash -c \"$DEPLOY\"\n"));
+    assert.equal(ungated.findings[0].category, "unknown");
+    assert.equal(ungated.findings[0].status, "ungoverned");
+    assert.equal(ungated.summary.gaps, 1);
+    assert.ok(ungated.findings[0].fix?.gate_step);
+    const bound = analyzeWorkflows(wf(BOUND.replace("run: terraform apply -auto-approve plan.tfplan", 'run: eval "$CMD"')));
+    assert.equal(bound.findings[0].category, "unknown");
+    assert.equal(bound.findings[0].status, "bound");
+  });
+});
