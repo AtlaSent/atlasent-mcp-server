@@ -20,7 +20,13 @@
  * MCP tool does; it is never an assessment of the reader's whole posture.
  *
  * Exit codes: 0 report written, 1 report written and --fail-on-gaps found
- * gaps, 2 no workflow files found, 64 usage.
+ * gaps, 2 no workflow files found, 3 report written but the scan is
+ * INCOMPLETE (a workflow file could not be listed, read or parsed; the files
+ * are named in all three outputs), 64 usage. 3 takes precedence over 1.
+ *
+ * Completeness (#261): every *.yml/*.yaml under .github/workflows is read.
+ * There is no file-count cap. A file that cannot be read is never skipped
+ * quietly: the scan keeps every other finding and ends non-zero.
  */
 
 import { readdirSync, readFileSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
@@ -31,8 +37,7 @@ import { analyzeWorkflows, type EvidenceGapReport, type Finding, type WorkflowIn
 import { HELP_NOTE, REVIEW_SIGN_UP_URL, helpUrl, renderExposureReview } from "./exposureReview.js";
 import { VERSION } from "./version.js";
 
-export const EXIT = { OK: 0, GAPS: 1, NO_WORKFLOWS: 2, USAGE: 64 } as const;
-const MAX_FILES = 200;
+export const EXIT = { OK: 0, GAPS: 1, NO_WORKFLOWS: 2, INCOMPLETE: 3, USAGE: 64 } as const;
 const MAX_FILE_BYTES = 256 * 1024;
 
 export interface CliArgs {
@@ -60,33 +65,72 @@ export function parseArgs(argv: string[]): CliArgs | { error: string } | { help:
   return { dir: dir ?? ".", out: out ?? ".", failOnGaps };
 }
 
-/** Workflow files under <dir>/.github/workflows, sorted, size-capped. */
-export function collectWorkflows(dir: string): { inputs: WorkflowInput[]; skipped: string[] } {
+export interface ScanError {
+  path: string;
+  error: string;
+}
+
+export interface Collected {
+  inputs: WorkflowInput[];
+  /** Workflow files found, whether or not they could be read. */
+  discovered: number;
+  /** Files (or the directory) that could not be listed or read. */
+  errors: ScanError[];
+}
+
+function errText(e: unknown): string {
+  const code = (e as NodeJS.ErrnoException)?.code;
+  const msg = e instanceof Error ? e.message : String(e);
+  return code && !msg.startsWith(code) ? `${code}: ${msg}` : msg;
+}
+
+/**
+ * Every workflow file under <dir>/.github/workflows, sorted. Exhaustive: no
+ * count cap. A file that cannot be stat'ed or read, or is over the size
+ * limit, is an error, never a silent skip.
+ */
+export function collectWorkflows(dir: string, read: (path: string) => string = (p) => readFileSync(p, "utf8")): Collected {
   const wfDir = join(dir, ".github", "workflows");
   let names: string[];
   try {
     names = readdirSync(wfDir);
-  } catch {
-    return { inputs: [], skipped: [] };
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return { inputs: [], discovered: 0, errors: [] };
+    return { inputs: [], discovered: 0, errors: [{ path: ".github/workflows", error: `cannot list directory: ${errText(e)}` }] };
   }
   const inputs: WorkflowInput[] = [];
-  const skipped: string[] = [];
+  const errors: ScanError[] = [];
+  let discovered = 0;
   for (const name of names.filter((n) => /\.ya?ml$/i.test(n)).sort()) {
     const path = `.github/workflows/${name}`;
     const full = join(wfDir, name);
-    const st = statSync(full);
-    if (!st.isFile()) continue;
+    let st;
+    try {
+      st = statSync(full);
+    } catch (e) {
+      // A broken symlink, for example: a workflow that was not read.
+      discovered++;
+      errors.push({ path, error: `cannot read: ${errText(e)}` });
+      continue;
+    }
+    if (st.isDirectory()) continue;
+    discovered++;
+    if (!st.isFile()) {
+      errors.push({ path, error: "not a regular file; not read" });
+      continue;
+    }
     if (st.size > MAX_FILE_BYTES) {
-      skipped.push(`${path} (larger than ${MAX_FILE_BYTES / 1024} KB)`);
+      errors.push({ path, error: `larger than ${MAX_FILE_BYTES / 1024} KB; not read` });
       continue;
     }
-    if (inputs.length >= MAX_FILES) {
-      skipped.push(`${path} (more than ${MAX_FILES} workflow files)`);
-      continue;
+    try {
+      inputs.push({ path, content: read(full) });
+    } catch (e) {
+      errors.push({ path, error: `cannot read: ${errText(e)}` });
     }
-    inputs.push({ path, content: readFileSync(full, "utf8") });
   }
-  return { inputs, skipped };
+  return { inputs, discovered, errors };
 }
 
 // ---------------------------------------------------------------------------
@@ -117,12 +161,14 @@ const CATEGORY: Record<Finding["category"], string> = {
   publish: "Package or image publish",
   migrate: "Database migration",
   infrastructure: "Infrastructure change",
+  unknown: "Command built at run time",
 };
 
 export interface HtmlMeta {
   target: string;
   generatedAt: string;
-  skipped: string[];
+  /** Present when the scan is incomplete: the files that were not covered. */
+  incomplete?: ScanError[];
 }
 
 function where(f: Finding): string {
@@ -140,7 +186,8 @@ export function renderHtml(report: EvidenceGapReport, meta: HtmlMeta): string {
       : s.gaps > 0
         ? `${s.gaps} of ${s.consequential_steps} production-changing step${s.consequential_steps === 1 ? "" : "s"} can run with no approval that could stop ${s.gaps === 1 ? "it" : "them"}.`
         : `All ${s.consequential_steps} production-changing step${s.consequential_steps === 1 ? " has" : "s have"} a gate in front.`;
-  const headTone = report.findings.length === 0 ? "warn" : s.gaps > 0 ? "bad" : "ok";
+  const incomplete = meta.incomplete ?? [];
+  const headTone = incomplete.length > 0 ? "bad" : report.findings.length === 0 ? "warn" : s.gaps > 0 ? "bad" : "ok";
 
   const stat = (n: number, label: string, tone: string) =>
     `<div class="stat ${tone}"><div class="n">${n}</div><div class="l">${esc(label)}</div></div>`;
@@ -152,7 +199,7 @@ export function renderHtml(report: EvidenceGapReport, meta: HtmlMeta): string {
   <div class="fhead"><span class="pill bad">${esc(STATUS[f.status].label)}</span><h3>${i + 1}. ${esc(CATEGORY[f.category])}</h3></div>
   <p class="where">${where(f)}</p>
   <p><strong>Why it matters:</strong> ${esc(f.reason)}</p>
-  ${f.confidence === "possible" ? `<p class="muted">Confidence: possible. A script is called and its contents were not read.</p>` : ""}
+  ${f.confidence === "possible" ? `<p class="muted">Confidence: possible. ${esc(possibleNote(f))}</p>` : ""}
   ${fx?.gate_step ? `<p><strong>Fix: add this step before it</strong></p><pre>${esc(fx.gate_step.trimEnd())}</pre>` : ""}
   ${fx?.bind_if ? `<p><strong>Then give the step this condition:</strong> <code>${esc(fx.bind_if)}</code></p>` : ""}
   ${fx?.change ? `<p><strong>Change:</strong> ${esc(fx.change)}</p>` : ""}
@@ -169,10 +216,7 @@ export function renderHtml(report: EvidenceGapReport, meta: HtmlMeta): string {
     )
     .join("\n");
 
-  const unreadable = [
-    ...report.parse_errors.map((e) => `${e.workflow}${e.line ? ` line ${e.line}` : ""}: ${e.error}`),
-    ...meta.skipped,
-  ];
+  const unreadable = report.parse_errors.map((e) => `${e.workflow}${e.line ? ` line ${e.line}` : ""}: ${e.error}`);
 
   const offerHelp = s.gaps > 0 || report.findings.length === 0;
 
@@ -218,6 +262,11 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:0 16px 32px}
   <p>Generated ${esc(meta.generatedAt)} · ${s.workflows_scanned} workflow file${s.workflows_scanned === 1 ? "" : "s"} read · offline, nothing was sent anywhere</p>
 </div></header>
 <main class="wrap">
+${
+  incomplete.length
+    ? `<section><p class="headline bad">INCOMPLETE SCAN: ${incomplete.length} workflow file${incomplete.length === 1 ? "" : "s"} could not be read. This review does not cover the whole repository.</p><ul>${incomplete.map((e) => `<li><code>${esc(e.path)}</code>: ${esc(e.error)}</li>`).join("")}</ul><p class="muted">Every other file was still analyzed below. Fix these files and run the scan again before relying on the result.</p></section>`
+    : ""
+}
 <section>
   <p class="headline ${headTone}">${esc(headline)}</p>
   <div class="stats">
@@ -273,6 +322,12 @@ Reads <repo-dir>/.github/workflows and writes atlasent-exposure-review.{html,md,
 to --out (default: the current directory). No network call, no API key.
 `;
 
+function possibleNote(f: Finding): string {
+  return f.category === "unknown"
+    ? "The command is chosen at run time, so what it runs is not known."
+    : "A script is called and its contents were not read.";
+}
+
 export function main(argv: string[], now: Date = new Date()): number {
   const args = parseArgs(argv);
   if ("help" in args) {
@@ -284,8 +339,9 @@ export function main(argv: string[], now: Date = new Date()): number {
     return EXIT.USAGE;
   }
   const dir = resolve(args.dir);
-  const { inputs, skipped } = collectWorkflows(dir);
-  if (inputs.length === 0) {
+  const collected = collectWorkflows(dir);
+  const { inputs } = collected;
+  if (inputs.length === 0 && collected.errors.length === 0) {
     process.stderr.write(
       `No workflow files found in ${join(dir, ".github", "workflows")}. Run this from a repository checkout, or pass its path.\n`,
     );
@@ -293,11 +349,32 @@ export function main(argv: string[], now: Date = new Date()): number {
   }
 
   const report = analyzeWorkflows(inputs);
-  const review = renderExposureReview(report);
+  // Files that could not be read join the files that could not be parsed:
+  // either way the scan did not cover them, and the result must say so.
+  for (const e of collected.errors) report.parse_errors.push({ workflow: e.path, line: 0, error: e.error });
+  report.summary.workflows_unreadable = report.parse_errors.length;
+  const incomplete: ScanError[] = report.parse_errors.map((e) => ({
+    path: e.workflow,
+    error: `${e.line ? `line ${e.line}: ` : ""}${e.error}`,
+  }));
+  const scan = {
+    complete: incomplete.length === 0,
+    files_discovered: collected.discovered,
+    files_read: inputs.length,
+    files_analyzed: report.summary.workflows_scanned,
+    errors: incomplete,
+  };
+  if (!scan.complete) {
+    report.next_step =
+      `INCOMPLETE SCAN: ${incomplete.length} workflow file${incomplete.length === 1 ? "" : "s"} could not be read ` +
+      `(${incomplete.map((e) => e.path).join(", ")}). Every other file was analyzed; no conclusion is drawn about ` +
+      "the repository as a whole until these are fixed and the scan is run again.";
+  }
+  const review = renderExposureReview(report, scan.complete ? undefined : { incomplete });
   const html = renderHtml(report, {
     target: basename(dir),
     generatedAt: now.toISOString().replace("T", " ").slice(0, 16) + " UTC",
-    skipped,
+    ...(scan.complete ? {} : { incomplete }),
   });
 
   const out = resolve(args.out);
@@ -309,13 +386,20 @@ export function main(argv: string[], now: Date = new Date()): number {
   };
   writeFileSync(files.html, html);
   writeFileSync(files.md, review.markdown + "\n");
-  writeFileSync(files.json, JSON.stringify({ ...report, skipped }, null, 2) + "\n");
+  writeFileSync(files.json, JSON.stringify({ ...report, scan }, null, 2) + "\n");
 
   const s = report.summary;
   process.stdout.write(
     `${s.workflows_scanned} workflow files, ${s.consequential_steps} production-changing steps, ${s.gaps} with no gate that can stop them.\n` +
       `Report: ${files.html}\n`,
   );
+  if (!scan.complete) {
+    process.stderr.write(
+      `INCOMPLETE SCAN: ${incomplete.length} workflow file(s) could not be read:\n` +
+        incomplete.map((e) => `  ${e.path}: ${e.error}\n`).join(""),
+    );
+    return EXIT.INCOMPLETE;
+  }
   return args.failOnGaps && s.gaps > 0 ? EXIT.GAPS : EXIT.OK;
 }
 

@@ -12,6 +12,21 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 `atlasent-guard` Claude Code plugin) are listed at the end.
 
 
+## [Unreleased]
+
+### Fixed
+
+- `atlasent-exposure-scan` and the evidence-gap report see through shell
+  indirection (`bash -c`, `sh -lc`, `env … bash -c`, `eval`, `echo … | sh`,
+  split quotes, line continuations). A command chosen at run time (`$CMD`,
+  `eval "$x"`, `bash -c "$VAR"`, `${{ inputs.cmd }}`) is reported as an
+  `unknown` finding instead of being passed (#261).
+- `atlasent-exposure-scan` no longer stops at 200 workflow files. A file it
+  cannot read, or that is too large or malformed, no longer disappears into a
+  "skipped" list: every other finding is kept, the report says INCOMPLETE SCAN
+  in the HTML, Markdown and JSON (`scan.complete: false`, with the file names),
+  and the command exits 3 (#261).
+
 ## [2.19.2] - 2026-10-14
 
 ### Fixed

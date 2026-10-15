@@ -242,7 +242,12 @@ export function parseYamlSubset(source: string): YValue {
 // Consequential-step detection
 // ---------------------------------------------------------------------------
 
-export type Category = "deploy" | "publish" | "migrate" | "infrastructure";
+/**
+ * "unknown": the step runs a command whose program is chosen at run time
+ * (`$CMD`, `eval "$x"`, `bash -c "$VAR"`, `${{ inputs.cmd }}`). What it does
+ * cannot be read from the file, so it is reported rather than passed.
+ */
+export type Category = "deploy" | "publish" | "migrate" | "infrastructure" | "unknown";
 
 interface Detector {
   category: Category;
@@ -346,15 +351,330 @@ function runWithoutComments(run: string): string {
     .join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Shell indirection (#261). A detector that reads `run:` text literally is
+// evaded by handing the command to another shell (`bash -c '...'`,
+// `sh -lc "..."`, `env X=1 bash -c`, `eval`, `echo '...' | sh`), by splitting
+// it with quotes or line continuations, or by building it at run time
+// (`$CMD`, `eval "$x"`, `bash -c "$VAR"`, `${{ inputs.cmd }}`). analyzeShell
+// lexes the text the way a POSIX shell would split it, unwraps those forms so
+// the detectors see the inner command, and returns every command position
+// whose program cannot be known from the file. Such a step is never passed:
+// it is reported as an "unknown" finding (confidence "possible").
+// ---------------------------------------------------------------------------
+
+interface ShWord {
+  /** Source text of the word, quotes included. */
+  raw: string;
+  /** Quotes removed; expansions kept literally (`$X` stays `$X`). */
+  value: string;
+  quoted: boolean;
+  /** Bodies of $(...) and `...`, which the shell runs as commands. */
+  subs: string[];
+}
+
+interface ShSegment {
+  words: ShWord[];
+  /** Operator that ends the segment: ";", "&&", "||", "|", "&", "\n", "(" , ")" or "". */
+  op: string;
+  /** Heredoc body or here-string fed to this command's stdin. */
+  stdin?: string;
+}
+
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash"]);
+const PREFIX_COMMANDS = new Set(["env", "sudo", "exec", "command", "nohup", "time", "builtin", "nice", "doas"]);
+const SKIP_KEYWORDS = new Set(["if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!", "{", "}", "esac"]);
+/** Keywords whose next words are names or patterns, never a command. */
+const BLOCK_KEYWORDS = new Set(["for", "case", "select", "function", "in"]);
+/** A word that is nothing but one expansion: the program is chosen at run time. */
+const PURE_EXPANSION = /^"?(?:\$[A-Za-z_]\w*|\$[0-9@*#?!$-]|\$\{\{[^}]*\}\}|\$\{[^}]*\}|\$\([\s\S]*\)|`[\s\S]*`)"?$/;
+const MAX_SHELL_DEPTH = 4;
+
+/** Index just past the `)` matching the `(` at `open`, quote-aware. */
+function matchParen(s: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    const c = s[i];
+    if (c === "\\") { i++; continue; }
+    if (c === "'") { const e = s.indexOf("'", i + 1); i = e < 0 ? s.length : e; continue; }
+    if (c === '"') {
+      for (i++; i < s.length && s[i] !== '"'; i++) if (s[i] === "\\") i++;
+      continue;
+    }
+    if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return i + 1;
+  }
+  return s.length;
+}
+
+export function lexShell(src: string): ShSegment[] {
+  const segs: ShSegment[] = [];
+  let words: ShWord[] = [];
+  let w: ShWord | null = null;
+  const pending: Array<{ delim: string; seg: ShWord[] }> = [];
+  const stdinFor = new Map<ShWord[], string>();
+  let hereString = false;
+  /** Inside [[ ... ]], && || ( ) are part of the test, not separators. */
+  let dblBracket = false;
+  const word = (): ShWord => (w ??= { raw: "", value: "", quoted: false, subs: [] });
+  const endWord = () => {
+    if (!w) return;
+    if (hereString) {
+      stdinFor.set(words, w.value);
+      hereString = false;
+    } else {
+      if (!w.quoted && w.value === "[[") dblBracket = true;
+      if (!w.quoted && w.value === "]]") dblBracket = false;
+      words.push(w);
+    }
+    w = null;
+  };
+  const endSeg = (op: string) => {
+    endWord();
+    const stdin = stdinFor.get(words);
+    if (words.length || op === "|") segs.push({ words, op, ...(stdin !== undefined ? { stdin } : {}) });
+    words = [];
+  };
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const n = src[i + 1];
+    if (c === "\\" && n === "\n") { i += 2; continue; }
+    if (c === "\\") { const x = word(); x.raw += c + (n ?? ""); x.value += n ?? ""; i += 2; continue; }
+    if (c === " " || c === "\t" || c === "\r") { endWord(); i++; continue; }
+    if (c === "#" && !w) { while (i < src.length && src[i] !== "\n") i++; continue; }
+    if (c === "'") {
+      const e = src.indexOf("'", i + 1);
+      const end = e < 0 ? src.length : e;
+      const x = word(); x.quoted = true; x.raw += src.slice(i, end + 1); x.value += src.slice(i + 1, end);
+      i = end + 1;
+      continue;
+    }
+    if (c === '"') {
+      const x = word(); x.quoted = true;
+      let j = i + 1;
+      let v = "";
+      while (j < src.length && src[j] !== '"') {
+        if (src[j] === "\\" && j + 1 < src.length) {
+          const nx = src[j + 1];
+          if (nx === "\n") { j += 2; continue; }
+          v += "$`\"\\".includes(nx) ? nx : "\\" + nx;
+          j += 2;
+          continue;
+        }
+        if (src[j] === "$" && src[j + 1] === "(") {
+          const e = matchParen(src, j + 1);
+          // $(( ... )) is arithmetic, not a command.
+          if (src[j + 2] !== "(") x.subs.push(src.slice(j + 2, e - 1));
+          v += src.slice(j, e);
+          j = e;
+          continue;
+        }
+        if (src[j] === "`") {
+          const e = src.indexOf("`", j + 1);
+          const end = e < 0 ? src.length : e;
+          x.subs.push(src.slice(j + 1, end));
+          v += src.slice(j, end + 1);
+          j = end + 1;
+          continue;
+        }
+        v += src[j++];
+      }
+      x.raw += src.slice(i, j + 1);
+      x.value += v;
+      i = j + 1;
+      continue;
+    }
+    if (c === "$" && n === "{" && src[i + 2] === "{") {
+      const e = src.indexOf("}}", i + 3);
+      const end = e < 0 ? src.length : e + 2;
+      const x = word(); x.raw += src.slice(i, end); x.value += src.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (c === "$" && n === "{") {
+      const e = src.indexOf("}", i + 2);
+      const end = e < 0 ? src.length : e + 1;
+      const x = word(); x.raw += src.slice(i, end); x.value += src.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (c === "$" && n === "(") {
+      const e = matchParen(src, i + 1);
+      const x = word();
+      if (src[i + 2] !== "(") x.subs.push(src.slice(i + 2, e - 1)); // $(( ... )) is arithmetic
+      x.raw += src.slice(i, e);
+      x.value += src.slice(i, e);
+      i = e;
+      continue;
+    }
+    if (c === "`") {
+      const e = src.indexOf("`", i + 1);
+      const end = e < 0 ? src.length : e;
+      const x = word(); x.subs.push(src.slice(i + 1, end)); x.raw += src.slice(i, end + 1); x.value += src.slice(i, end + 1);
+      i = end + 1;
+      continue;
+    }
+    if (c === "<" && n === "<" && src[i + 2] === "<") { endWord(); hereString = true; i += 3; continue; }
+    if (c === "<" && n === "<") {
+      endWord();
+      i += 2;
+      if (src[i] === "-") i++;
+      while (src[i] === " " || src[i] === "\t") i++;
+      let delim = "";
+      while (i < src.length && !/[\s;&|()<>]/.test(src[i])) {
+        if (src[i] !== "'" && src[i] !== '"' && src[i] !== "\\") delim += src[i];
+        i++;
+      }
+      pending.push({ delim, seg: words });
+      continue;
+    }
+    if (c === "&" && (n === ">" || (w as ShWord | null)?.raw.endsWith(">"))) { const x = word(); x.raw += c; x.value += c; i++; continue; }
+    if (c === "(" && (w as ShWord | null)?.raw.endsWith("=")) {
+      // Array literal: arr=( a "b" ) is one assignment word.
+      const e = matchParen(src, i);
+      const x = word(); x.raw += src.slice(i, e); x.value += src.slice(i, e);
+      i = e;
+      continue;
+    }
+    if (dblBracket && (c === "&" || c === "|" || c === "(" || c === ")")) { const x = word(); x.raw += c; x.value += c; i++; continue; }
+    if (c === "\n" || c === ";" || c === "&" || c === "|" || c === "(" || c === ")") {
+      const two = c + (n ?? "");
+      const op = two === "&&" || two === "||" || two === ";;" || two === "|&" ? two : c;
+      endSeg(op === "|&" ? "|" : op);
+      i += op.length;
+      if (c === "\n" && pending.length) {
+        // Heredoc bodies follow the line that opened them, in order.
+        for (const h of pending.splice(0)) {
+          const body: string[] = [];
+          while (i < src.length) {
+            const nl = src.indexOf("\n", i);
+            const line = src.slice(i, nl < 0 ? src.length : nl);
+            i = nl < 0 ? src.length : nl + 1;
+            if (line.trim() === h.delim) break;
+            body.push(line);
+          }
+          const target = segs.find((s) => s.words === h.seg);
+          if (target) target.stdin = body.join("\n");
+        }
+      }
+      continue;
+    }
+    const x = word(); x.raw += c; x.value += c;
+    i++;
+  }
+  endSeg("");
+  return segs;
+}
+
+/** Index of the program word in a segment, past assignments and prefixes; -1 if none. */
+function commandIndex(words: ShWord[]): number {
+  let j = 0;
+  while (j < words.length) {
+    const w = words[j];
+    if (!w.quoted && BLOCK_KEYWORDS.has(w.value)) return -1;
+    if (!w.quoted && SKIP_KEYWORDS.has(w.value)) { j++; continue; }
+    if (!w.quoted && /^[A-Za-z_]\w*(\[[^\]]*\])?\+?=/.test(w.raw)) { j++; continue; }
+    if (!w.quoted && PREFIX_COMMANDS.has(w.value)) {
+      j++;
+      while (j < words.length && /^-/.test(words[j].value)) j++;
+      continue;
+    }
+    return j;
+  }
+  return -1;
+}
+
+function programName(w: ShWord): string {
+  return w.value.replace(/^.*\//, "");
+}
+
+export interface ShellAnalysis {
+  /** Extra command text for the detectors: unquoted, unwrapped, one command per line. */
+  lines: string[];
+  /** Commands whose program is chosen at run time, as written. */
+  dynamic: string[];
+}
+
+export function analyzeShell(src: string, depth = 0): ShellAnalysis {
+  const out: ShellAnalysis = { lines: [], dynamic: [] };
+  if (depth > MAX_SHELL_DEPTH) {
+    out.dynamic.push(`shell nesting deeper than ${MAX_SHELL_DEPTH}`);
+    return out;
+  }
+  const segs = lexShell(src);
+  const inner = (code: string, label: string) => {
+    const r = analyzeShell(code, depth + 1);
+    out.lines.push(...r.lines);
+    if (r.dynamic.length) out.dynamic.push(label);
+  };
+  segs.forEach((seg, k) => {
+    const words = seg.words;
+    const j = commandIndex(words);
+    const label = words.slice(Math.max(0, j)).map((w) => w.raw).join(" ").slice(0, 120);
+    for (const w of words) for (const sub of w.subs) inner(sub, label);
+    if (j < 0) return;
+    const cmd = words[j];
+    const args = words.slice(j + 1);
+    const name = programName(cmd);
+    if (name === "echo" || name === "printf") {
+      // Printed text is not run, unless it is piped into a shell.
+      const next = segs[k + 1];
+      const nj = next ? commandIndex(next.words) : -1;
+      const pipedToShell =
+        seg.op === "|" && next && nj >= 0 && SHELLS.has(programName(next.words[nj])) &&
+        !next.words.slice(nj + 1).some((w) => !/^-/.test(w.value));
+      if (pipedToShell) inner(args.map((w) => w.value).join(" "), `${label} | ${programName(next.words[nj])}`);
+      else out.lines.push([cmd.value, ...args.map((w) => (w.quoted ? '""' : w.value))].join(" "));
+      return;
+    }
+    out.lines.push(words.slice(j).map((w) => w.value).join(" "));
+    if (PURE_EXPANSION.test(cmd.raw)) {
+      out.dynamic.push(label);
+      return;
+    }
+    if (name === "eval") {
+      inner(args.map((w) => w.value).join(" "), label);
+      return;
+    }
+    if (SHELLS.has(name)) {
+      const c = args.findIndex((w) => !w.quoted && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(w.value));
+      if (c >= 0) {
+        const script = args[c + 1];
+        if (script) inner(script.value, label);
+        else out.dynamic.push(label);
+      } else if (seg.stdin !== undefined && !args.some((w) => !/^-/.test(w.value))) {
+        inner(seg.stdin, label);
+      }
+    }
+  });
+  return out;
+}
+
 interface Detection {
   category: Category;
   detected_by: string;
   confidence: "certain" | "possible";
 }
 
-export function detectStep(step: YMap, extraGates: string[] = []): Detection | null {
+/** True for the shells analyzeShell models; pwsh, cmd, python etc. are read literally only. */
+function posixShell(shell: string): boolean {
+  const name = shell.trim().split(/\s+/)[0] ?? "";
+  return name === "" || SHELLS.has(name.replace(/^.*\//, ""));
+}
+
+/**
+ * @param defaultShell the job's or workflow's `defaults.run.shell`, used when
+ *   the step sets no `shell:` of its own.
+ */
+export function detectStep(step: YMap, extraGates: string[] = [], defaultShell = ""): Detection | null {
   const uses = typeof step.uses === "string" ? step.uses : "";
-  const run = typeof step.run === "string" ? runWithoutComments(step.run) : "";
+  const stepShell = typeof step.shell === "string" ? step.shell : defaultShell;
+  const shell: ShellAnalysis =
+    typeof step.run === "string" && posixShell(stepShell) ? analyzeShell(step.run) : { lines: [], dynamic: [] };
+  // The literal text (as before) plus the unwrapped, unquoted commands, so a
+  // command handed to another shell is seen exactly as a direct one is.
+  const run = typeof step.run === "string" ? [runWithoutComments(step.run), ...shell.lines].join("\n") : "";
   const withMap = step.with && typeof step.with === "object" && !Array.isArray(step.with) ? (step.with as YMap) : {};
   if (uses && (isGateUses(uses) || extraGates.includes(uses))) return null;
   for (const d of USES_DETECTORS) {
@@ -373,6 +693,9 @@ export function detectStep(step: YMap, extraGates: string[] = []): Detection | n
     if (hint) {
       const cat: Category = /migrate/.test(hint) ? "migrate" : /publish|release/.test(hint) ? "publish" : "deploy";
       return { category: cat, detected_by: `script: ${hint}`, confidence: "possible" };
+    }
+    if (shell.dynamic.length > 0) {
+      return { category: "unknown", detected_by: `command built at run time: ${shell.dynamic[0]}`, confidence: "possible" };
     }
   }
   return null;
@@ -498,6 +821,15 @@ function gateInfo(step: YMap, index: number, extraGates: string[] = []): GateInf
   };
 }
 
+/** `defaults.run.shell`, when set. */
+function runShell(defaults: YValue | undefined): string | undefined {
+  if (!defaults || typeof defaults !== "object" || Array.isArray(defaults)) return undefined;
+  const run = (defaults as YMap).run;
+  if (!run || typeof run !== "object" || Array.isArray(run)) return undefined;
+  const sh = (run as YMap).shell;
+  return typeof sh === "string" ? sh : undefined;
+}
+
 function needsOf(job: YMap): string[] {
   const n = job.needs;
   if (typeof n === "string") return n.trim() === "" ? [] : [n.trim()];
@@ -580,6 +912,8 @@ const NOT_CHECKED = [
   "What a script such as ./deploy.sh does inside is not inspected; such steps are reported with confidence 'possible'.",
   "A 'gated' or 'bound' step has a gate in front of it. That is not proof your policy would allow it, or that the gate's API key is set.",
   "Reusable workflows called with `uses:` at job level are listed as their own job but not followed into the called file.",
+  "A command whose program is chosen at run time ($CMD, eval \"$x\", bash -c \"$VAR\", ${{ inputs.cmd }}) is reported as category 'unknown' with confidence 'possible'; what it runs is not known.",
+  "Code fetched or generated at run time and piped into a shell (for example curl ... | bash) is not followed.",
 ];
 
 function emptyCounts(): Record<GapStatus, number> {
@@ -816,6 +1150,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
       if (!jobVal || typeof jobVal !== "object" || Array.isArray(jobVal)) continue;
       const job = jobVal as YMap;
       const steps = stepsOf(job);
+      const defaultShell = runShell(job.defaults) ?? runShell((doc as YMap).defaults) ?? "";
       const gates: GateInfo[] = [];
       const usedIds = new Set(steps.map((st) => st.id).filter((x): x is string => typeof x === "string"));
       steps.forEach((s, i) => {
@@ -824,7 +1159,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
       });
 
       steps.forEach((step, i) => {
-        const det = detectStep(step, gateActions);
+        const det = detectStep(step, gateActions, defaultShell);
         if (!det) return;
         const earlier = gates.filter((g) => g.index < i);
         const stepIf = typeof step.if === "string" ? step.if : "";
