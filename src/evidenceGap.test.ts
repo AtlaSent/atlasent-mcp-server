@@ -56,6 +56,16 @@ describe("parseYamlSubset", () => {
     assert.deepEqual(doc.jobs.a.steps[1].with, { action: "production.deploy", list: ["x", ["y", "z"]], expr: "${{ inputs.a }}" });
   });
 
+  it("accepts a trailing comma in an inline map or list, as YAML does", () => {
+    const doc = parseYamlSubset("jobs:\n  a:\n    permissions: { contents: read, id-token: write, }\n    needs: [b, c, ]\n    steps:\n      - { run: npm publish, }\n") as YamlDoc;
+    assert.deepEqual(doc.jobs.a.permissions, { contents: "read", "id-token": "write" });
+    assert.deepEqual(doc.jobs.a.needs, ["b", "c"]);
+    assert.deepEqual(doc.jobs.a.steps[0], { run: "npm publish" });
+    // A comma with nothing before it is still malformed.
+    assert.throws(() => parseYamlSubset("jobs:\n  a:\n    env: { , }\n"), YamlSubsetError);
+    assert.throws(() => parseYamlSubset("jobs:\n  a:\n    needs: [b, , c]\n"), YamlSubsetError);
+  });
+
   it("joins a flow collection that spans lines", () => {
     const doc = parseYamlSubset("jobs:\n  a:\n    steps:\n      - { name: p,\n          run: npm publish }\n    needs: [\n      b,\n      c ]\n") as YamlDoc;
     assert.deepEqual(doc.jobs.a.steps[0], { name: "p", run: "npm publish" });

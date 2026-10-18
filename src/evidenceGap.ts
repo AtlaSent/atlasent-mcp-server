@@ -187,6 +187,12 @@ function parseFlow(src: string): YValue {
       ws();
       if (src[i] === ",") {
         i++;
+        ws();
+        // YAML allows a trailing comma before the closing brace.
+        if (src[i] === "}") {
+          i++;
+          return out;
+        }
         continue;
       }
       if (src[i] === "}") {
@@ -205,10 +211,18 @@ function parseFlow(src: string): YValue {
       return out;
     }
     for (;;) {
+      ws();
+      if (src[i] === "," || src[i] === "]") fail("empty item");
       out.push(value(",]"));
       ws();
       if (src[i] === ",") {
         i++;
+        ws();
+        // YAML allows a trailing comma before the closing bracket.
+        if (src[i] === "]") {
+          i++;
+          return out;
+        }
         continue;
       }
       if (src[i] === "]") {
