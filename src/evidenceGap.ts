@@ -86,12 +86,156 @@ function unquote(s: string): string {
 }
 
 function scalar(raw: string): YValue {
-  const t = raw.trim();
-  if (t.startsWith("[") && t.endsWith("]")) {
-    const inner = t.slice(1, -1).trim();
-    return inner === "" ? [] : inner.split(",").map((p) => unquote(p));
+  return unquote(raw.trim());
+}
+
+/** True when `[`/`{` outnumber `]`/`}` outside quotes and `${{ }}`: the collection continues on the next line. */
+function flowOpen(text: string): boolean {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (text.startsWith("${{", i)) {
+      const end = text.indexOf("}}", i + 3);
+      if (end < 0) return true;
+      i = end + 1;
+    } else if (c === "[" || c === "{") depth++;
+    else if (c === "]" || c === "}") depth--;
   }
-  return unquote(t);
+  return depth > 0 || quote !== null;
+}
+
+/**
+ * A YAML flow collection (`[a, b]`, `{ name: x, run: y }`, nested), as
+ * workflows write them: `branches: [main]`, `with: { action: x }`,
+ * `permissions: { id-token: write }`, or a whole step `- { run: npm publish }`.
+ * Scalars stay strings, as everywhere else in this subset. Anything it cannot
+ * read throws, so the file is reported unreadable instead of being misread.
+ */
+function parseFlow(src: string): YValue {
+  let i = 0;
+  const fail = (why: string): never => {
+    throw new Error(`flow collection: ${why}`);
+  };
+  const ws = () => {
+    while (i < src.length && /\s/.test(src[i])) i++;
+  };
+  function plain(stop: string): string {
+    const start = i;
+    while (i < src.length && !stop.includes(src[i])) {
+      // ": " is an indicator inside a flow collection; YAML rejects it in a plain value.
+      if (src[i] === ":" && (i + 1 >= src.length || /\s/.test(src[i + 1]))) fail('unexpected ": " in a value');
+      if (src.startsWith("${{", i)) {
+        const end = src.indexOf("}}", i + 3);
+        if (end < 0) fail("unterminated ${{ expression");
+        i = end + 2;
+      } else i++;
+    }
+    return src.slice(start, i).trim();
+  }
+  function quoted(): string {
+    const q = src[i++];
+    let out = "";
+    while (i < src.length) {
+      const c = src[i];
+      if (c === q) {
+        if (q === "'" && src[i + 1] === "'") {
+          out += "'";
+          i += 2;
+          continue;
+        }
+        i++;
+        return out;
+      }
+      if (q === '"' && c === "\\") {
+        out += src[i + 1] ?? "";
+        i += 2;
+        continue;
+      }
+      out += c;
+      i++;
+    }
+    return fail("unterminated quote");
+  }
+  function value(stop: string): YValue {
+    ws();
+    const c = src[i];
+    if (c === "{") return map();
+    if (c === "[") return seq();
+    if (c === '"' || c === "'") return quoted();
+    return plain(stop);
+  }
+  function map(): YMap {
+    i++;
+    const out: YMap = {};
+    ws();
+    if (src[i] === "}") {
+      i++;
+      return out;
+    }
+    for (;;) {
+      ws();
+      const key = src[i] === '"' || src[i] === "'" ? quoted() : plain(":,}");
+      if (typeof key !== "string" || key === "") fail("missing key");
+      ws();
+      if (src[i] !== ":") fail(`expected ":" after "${key}"`);
+      i++;
+      out[key] = value(",}");
+      ws();
+      if (src[i] === ",") {
+        i++;
+        ws();
+        // YAML allows a trailing comma before the closing brace.
+        if (src[i] === "}") {
+          i++;
+          return out;
+        }
+        continue;
+      }
+      if (src[i] === "}") {
+        i++;
+        return out;
+      }
+      return fail('expected "," or "}"');
+    }
+  }
+  function seq(): YValue[] {
+    i++;
+    const out: YValue[] = [];
+    ws();
+    if (src[i] === "]") {
+      i++;
+      return out;
+    }
+    for (;;) {
+      ws();
+      if (src[i] === "," || src[i] === "]") fail("empty item");
+      out.push(value(",]"));
+      ws();
+      if (src[i] === ",") {
+        i++;
+        ws();
+        // YAML allows a trailing comma before the closing bracket.
+        if (src[i] === "]") {
+          i++;
+          return out;
+        }
+        continue;
+      }
+      if (src[i] === "]") {
+        i++;
+        return out;
+      }
+      return fail('expected "," or "]"');
+    }
+  }
+  const v = value("");
+  ws();
+  if (i < src.length) fail("unexpected text after the collection");
+  return v;
 }
 
 /** Split `key: value` at the first `:` followed by space/end, outside quotes. */
@@ -153,7 +297,16 @@ export function parseYamlSubset(source: string): YValue {
 
   let pos = 0;
 
-  function parseScalarLiteral(v: string): YValue {
+  function parseScalarLiteral(v: string, no = 0): YValue {
+    if (v.startsWith("{") || v.startsWith("[")) {
+      try {
+        const flow = parseFlow(v);
+        if (flow && typeof flow === "object" && !Array.isArray(flow)) LINE_OF.set(flow, no);
+        return flow;
+      } catch (e) {
+        throw new YamlSubsetError(e instanceof Error ? e.message : String(e), no);
+      }
+    }
     if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) {
       try {
         return JSON.parse(v) as string;
@@ -171,8 +324,8 @@ export function parseYamlSubset(source: string): YValue {
     return parseMap(first.indent);
   }
 
-  function parseValueAfterKey(keyIndent: number, value: string): YValue {
-    if (value !== "") return parseScalarLiteral(value);
+  function parseValueAfterKey(keyIndent: number, value: string, no = 0): YValue {
+    if (value !== "") return parseScalarLiteral(value, no);
     const next = lines[pos];
     if (!next) return "";
     // A sequence may sit at the same indent as its key (`steps:\n- run: x`).
@@ -194,6 +347,13 @@ export function parseYamlSubset(source: string): YValue {
       if (!kv) throw new YamlSubsetError(`expected "key: value", got "${l.text.slice(0, 60)}"`, l.no);
       pos++;
       let value = kv[1];
+      // A flow collection may span lines: join until it closes.
+      if (/^[[{]/.test(value)) {
+        while (flowOpen(value) && pos < lines.length && lines[pos].indent > indent) {
+          value += " " + lines[pos].text;
+          pos++;
+        }
+      }
       // Multi-line plain scalar: more-indented lines continue the value
       // (`run: bash x.sh \` followed by indented flag lines).
       if (value !== "" && !/^["'[{]/.test(value)) {
@@ -202,7 +362,7 @@ export function parseYamlSubset(source: string): YValue {
           pos++;
         }
       }
-      map[kv[0]] = parseValueAfterKey(indent, value);
+      map[kv[0]] = parseValueAfterKey(indent, value, l.no);
     }
     return map;
   }
@@ -220,13 +380,22 @@ export function parseYamlSubset(source: string): YValue {
       if (rest === "") {
         pos++;
         seq.push(parseNode(indent + 1));
+      } else if (/^[[{]/.test(rest)) {
+        // A flow item, `- { run: npm publish }`; it may span lines.
+        pos++;
+        let text = rest;
+        while (flowOpen(text) && pos < lines.length && lines[pos].indent > indent) {
+          text += " " + lines[pos].text;
+          pos++;
+        }
+        seq.push(parseScalarLiteral(text, l.no));
       } else if (splitKey(rest) && !rest.startsWith('"') && !rest.startsWith("'")) {
         // `- key: value` opens a map whose keys sit at itemIndent.
         lines[pos] = { indent: itemIndent, text: rest, no: l.no };
         seq.push(parseMap(itemIndent));
       } else {
         pos++;
-        seq.push(parseScalarLiteral(rest));
+        seq.push(parseScalarLiteral(rest, l.no));
       }
     }
     return seq;

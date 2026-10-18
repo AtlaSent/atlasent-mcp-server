@@ -16,6 +16,15 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ### Fixed
 
+- Workflows written with inline YAML collections are analyzed instead of
+  misread. A step written as `- { name: Publish, run: npm publish }` was not
+  recognized at all, so its file could read as clean; inline `with:` maps did
+  not count as a gate; and `permissions: { id-token: write }` was reported as
+  missing. Inline maps and lists (nested, quoted, `${{ }}` expressions, spanning
+  lines) are now parsed, and a malformed one makes the file unreadable rather
+  than silently skipped.
+  A trailing comma (`{ a: b, }`, `[a, b, ]`) is accepted as YAML allows; an
+  empty list item (`[a, , b]`) is refused.
 - `atlasent-exposure-scan` and the evidence-gap report see through shell
   indirection (`bash -c`, `sh -lc`, `env … bash -c`, `eval`, `echo … | sh`,
   split quotes, line continuations). A command chosen at run time (`$CMD`,
@@ -517,6 +526,15 @@ stable and will not change without a major version bump.
   - Still not commercially ready until the live staging proof passes.
 - 0.2.7: the plugin and marketplace descriptions, and the top of the README,
   now state that Node.js 18 or later is required. Behavior is unchanged.
+
+### `@atlasent/mcp-gate` — Unreleased
+
+- New optional policy key `denialBudget: { "maxBlockedCalls": N }`. After N
+  blocked tool calls in a session, from any tool and whether blocked locally or
+  by the cloud, every further tool call is refused with
+  `denial_budget_exhausted`, including calls a rule would allow. Only a restart
+  resets it. Policies without the key behave as before; a gate older than this
+  release refuses a policy that uses it.
 
 ### `@atlasent/mcp-gate` 0.1.0 (tag `gate-v0.1.0`) — 2026-09-25
 
