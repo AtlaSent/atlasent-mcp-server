@@ -56,7 +56,7 @@ async function main() {
     try {
       if (!fstatSync(fd).isFile() || fstatSync(fd).size > 16 * 1024 * 1024) throw Error('Invalid audit file');
       const events = readFileSync(fd, 'utf8').trim().split('\n').filter(Boolean).map(x => JSON.parse(x));
-      const cols = ['time','invocation','status','kind','policy_rule_id','reason','approval_request_id','verified'];
+      const cols = ['time','invocation','status','kind','policy_rule_id','reason','approval_request_id','blocked_calls','verified'];
       const html = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'"><title>AtlaSent Gate activity</title><style>body{font:16px system-ui;margin:40px;background:#f4f7fa;color:#172b3a}table{border-collapse:collapse;width:100%;background:white}td,th{padding:12px;text-align:left;border-bottom:1px solid #ddd}h1{color:#174b54}</style><h1>AtlaSent Gate</h1><p>Local activity snapshot · No payloads captured · Server returned does not mean independently verified.</p><table><thead><tr>' + cols.map(c => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>' + events.map(e => '<tr>' + cols.map(c => '<td>' + escape(e[c] ?? '—') + '</td>').join('') + '</tr>').join('') + '</tbody></table></html>';
       writeFileSync(args[1], html, { flag: 'wx', mode: 0o600 });
       console.error('Created activity snapshot: ' + resolve(args[1]));

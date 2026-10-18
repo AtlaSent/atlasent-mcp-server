@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer, _resetRateLimitForTests } from "./server.js";
-import { analyzeWorkflows, detectStep, parseYamlSubset } from "./evidenceGap.js";
+import { analyzeWorkflows, detectStep, parseYamlSubset, YamlSubsetError } from "./evidenceGap.js";
 
 // Parsed YAML is read by deep property access in these assertions.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -46,6 +46,43 @@ jobs:
 `;
 
 describe("parseYamlSubset", () => {
+  it("reads flow collections: inline maps, nested lists, quotes and ${{ }} expressions", () => {
+    const doc = parseYamlSubset(
+      'on: [push, "pull_request"]\njobs:\n  a:\n    permissions: { contents: read, id-token: write }\n    steps:\n      - { name: "a, b", run: npm publish, if: "${{ github.ref == \'refs/heads/main\' }}" }\n      - with: { action: production.deploy, list: [x, [y, z]], expr: ${{ inputs.a }} }\n',
+    ) as YamlDoc;
+    assert.deepEqual(doc.on, ["push", "pull_request"]);
+    assert.deepEqual(doc.jobs.a.permissions, { contents: "read", "id-token": "write" });
+    assert.deepEqual(doc.jobs.a.steps[0], { name: "a, b", run: "npm publish", if: "${{ github.ref == 'refs/heads/main' }}" });
+    assert.deepEqual(doc.jobs.a.steps[1].with, { action: "production.deploy", list: ["x", ["y", "z"]], expr: "${{ inputs.a }}" });
+  });
+
+  it("accepts a trailing comma in an inline map or list, as YAML does", () => {
+    const doc = parseYamlSubset("jobs:\n  a:\n    permissions: { contents: read, id-token: write, }\n    needs: [b, c, ]\n    steps:\n      - { run: npm publish, }\n") as YamlDoc;
+    assert.deepEqual(doc.jobs.a.permissions, { contents: "read", "id-token": "write" });
+    assert.deepEqual(doc.jobs.a.needs, ["b", "c"]);
+    assert.deepEqual(doc.jobs.a.steps[0], { run: "npm publish" });
+    // A comma with nothing before it is still malformed.
+    assert.throws(() => parseYamlSubset("jobs:\n  a:\n    env: { , }\n"), YamlSubsetError);
+    assert.throws(() => parseYamlSubset("jobs:\n  a:\n    needs: [b, , c]\n"), YamlSubsetError);
+  });
+
+  it("joins a flow collection that spans lines", () => {
+    const doc = parseYamlSubset("jobs:\n  a:\n    steps:\n      - { name: p,\n          run: npm publish }\n    needs: [\n      b,\n      c ]\n") as YamlDoc;
+    assert.deepEqual(doc.jobs.a.steps[0], { name: "p", run: "npm publish" });
+    assert.deepEqual(doc.jobs.a.needs, ["b", "c"]);
+  });
+
+  it("refuses a malformed flow collection, with its line, instead of misreading it", () => {
+    for (const [src, line] of [
+      ["jobs:\n  a:\n    steps:\n      - { run: npm publish\n", 4],
+      ["jobs:\n  a:\n    env: { A: 1 B: 2 }\n", 3],
+      ['jobs:\n  a:\n    env: { "A: 1 }\n', 3],
+      ["jobs:\n  a:\n    env: { A: 1 } extra\n", 3],
+    ] as const) {
+      assert.throws(() => parseYamlSubset(src), (e: unknown) => e instanceof YamlSubsetError && e.line === line);
+    }
+  });
+
   it("parses maps, same-indent sequences, block scalars and flow lists", () => {
     const doc = parseYamlSubset(`
 jobs:
@@ -67,7 +104,7 @@ jobs:
       "jobs:\n  a:\n    steps:\n      - name: p\n        run: bash scripts/provision.sh \\\n          --org x\n        env: {}\n",
     ) as YamlDoc;
     assert.match(doc.jobs.a.steps[0].run, /provision\.sh .*--org x/);
-    assert.equal(doc.jobs.a.steps[0].env, "{}");
+    assert.deepEqual(doc.jobs.a.steps[0].env, {});
   });
 
   it("keeps '#' inside quotes", () => {
@@ -618,5 +655,39 @@ describe("shell indirection (#261)", () => {
     const bound = analyzeWorkflows(wf(BOUND.replace("run: terraform apply -auto-approve plan.tfplan", 'run: eval "$CMD"')));
     assert.equal(bound.findings[0].category, "unknown");
     assert.equal(bound.findings[0].status, "bound");
+  });
+});
+
+describe("flow-style workflows are analyzed, not skipped", () => {
+  const wf = (steps: string, perms = "") =>
+    `on: push\njobs:\n  ship:\n    runs-on: ubuntu-latest\n${perms}    steps:\n${steps}`;
+
+  it("a step written as an inline map is found", () => {
+    const r = analyzeWorkflows([{ path: "a.yml", content: wf("      - { name: Publish, run: npm publish }\n") }]);
+    assert.deepEqual(r.parse_errors, []);
+    assert.deepEqual(r.findings.map((f) => [f.step, f.category, f.status, f.line]), [["Publish", "publish", "ungoverned", 6]]);
+  });
+
+  it("a gate whose inputs are an inline map is recognized and binds the step", () => {
+    const r = analyzeWorkflows([{
+      path: "a.yml",
+      content: wf("      - { id: gate, uses: atlasent-systems-inc/atlasent-action@v1, with: { action: package.release } }\n      - { if: \"steps.gate.outputs.verified == 'true'\", run: npm publish }\n"),
+    }]);
+    assert.deepEqual(r.findings.map((f) => f.status), ["bound"]);
+  });
+
+  it("inline permissions with id-token: write are honoured", () => {
+    const content = wf("      - run: kubectl apply -f k8s/\n", "    permissions: { contents: read, id-token: write }\n");
+    const fix = analyzeWorkflows([{ path: "a.yml", content }]).findings[0].fix;
+    assert.equal(fix?.job_permissions, undefined);
+    const without = analyzeWorkflows([{ path: "a.yml", content: wf("      - run: kubectl apply -f k8s/\n", "    permissions: { contents: read }\n") }]).findings[0].fix;
+    assert.match(without?.job_permissions ?? "", /id-token: write/);
+  });
+
+  it("a malformed inline step makes the file unreadable, never clean", () => {
+    const r = analyzeWorkflows([{ path: "a.yml", content: wf("      - { name: Publish, run: npm publish\n") }]);
+    assert.equal(r.findings.length, 0);
+    assert.equal(r.parse_errors.length, 1);
+    assert.equal(r.summary.workflows_unreadable, 1);
   });
 });

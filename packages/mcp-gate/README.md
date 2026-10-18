@@ -129,6 +129,16 @@ Optional `argumentsEquals` matches the **entire** argument object, ignoring obje
 order but including extra keys and array order. Omitting it allows any arguments for
 that tool, so use this deliberately. Policy changes take effect on restart.
 No arbitrary plugin code, wildcards, dynamic rule downloads, or approval tokens.
+
+Optional `denialBudget: { "maxBlockedCalls": N }` (integer 1–10000) stops a session
+that keeps getting refused. Every blocked tool call counts, from any tool: a local
+policy deny, an invalid call, or a cloud deny or hold. Once N calls have been blocked,
+every further tool call is blocked with `denial_budget_exhausted` before policy
+matching or cloud authorization runs, including calls a rule would allow. The gate
+records one `budget_exhausted` activity entry when that happens. No MCP method resets
+the budget; restarting the gate starts a new session with a fresh count. This stops
+an agent from walking through tools, targets or credentials until one matches. It
+does not stop an agent from using a route outside the gate.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for a starter pack.
 
 ## Protection boundary
