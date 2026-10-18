@@ -29,14 +29,20 @@ The design adds **one trip condition and one counter**. It adds no engine, no ac
 
 ### 1. The runtime counts; the agent host does not
 
-A denial is counted when the runtime records a `deny` evaluation for a key-bound agent. The counter is written in the same transaction as the evaluation row: a trigger on `execution_evaluations` insert, or one SQL function called by `v1-evaluate` after the audit write. A trigger is preferred, because no code path that writes an evaluation can skip it.
+A denial is counted when the runtime decides `deny` for a bucket. **It is counted first, in its own committed transaction, before the evaluation row is written and before any response.** The policy decision is known in `v1-evaluate` before any database write, so the order is:
 
-**One locked row per bucket, not a count over the log.** A view or a `count(*)` over recent evaluations races: two gates committing the fourth and fifth denial at once each see only their own row, so neither trips. The counter is a `agent_denial_buckets` row per bucket, holding the window's denial times. Each evaluation for the bucket, allow or deny, takes that row with `SELECT … FOR UPDATE`, or with an `INSERT … ON CONFLICT DO UPDATE` upsert on first use. It then decides under the lock:
+1. Decide (allow, deny or hold).
+2. If deny: one SQL function takes the bucket lock, appends the denial, writes the E5 trip if the budget is now spent, and **commits**.
+3. Write the evaluation and audit rows, then respond.
+
+If step 2 fails, `v1-evaluate` returns an error and no deny is ever shown to the agent uncounted. If step 3 fails after step 2 committed, the denial stays counted. The error falls on the safe side: it can overcount, never undercount. An earlier revision counted in the evaluation's own transaction and needed a separate failure marker; both races Codex found on #278 came from that ordering, and counting first removes them.
+
+**One locked row per bucket, not a count over the log.** A view or a `count(*)` over recent evaluations races: two gates committing the fourth and fifth denial at once each see only their own row, so neither trips. The counter is a `agent_denial_buckets` row per bucket, holding the window's denial times. A deny's counting step (step 2 above) takes that row with `SELECT … FOR UPDATE`, or with an `INSERT … ON CONFLICT DO UPDATE` upsert on first use. It then decides under the lock:
 - whether to append the denial;
 - whether the budget is now spent;
 - whether to write the E5 trip.
 
-So two concurrent evaluations of one bucket serialise, and the N-th denial always trips (Codex review on #278).
+An allow reads the trip state under `FOR SHARE` on the same row, in its own transaction, before it issues a permit. A share lock waits for any counting step that holds the row and then sees what it committed. So two concurrent denials of one bucket serialise and the N-th always trips, and an allow queued behind the N-th denial sees the trip and is refused (Codex review on #278).
 
 Because the agent comes from the key and the count comes from the runtime's own record, the agent cannot under-report, and two gates cannot each see half.
 
@@ -76,7 +82,7 @@ The runtime records an `agent_circuit_trips` row:
 
 From then on, two refusals apply:
 
-1. **Verify.** `v1-verify-permit` already refuses the agent's permits while the trip is open. No change is needed there.
+1. **Verify.** For a key-bound agent, `v1-verify-permit` already refuses the agent's permits while the trip is open, with no change. For an unbound key counted under D5, it does **not** today: it looks trips up by agent only. Counting unbound keys therefore also requires a key-scoped trip lookup in `v1-verify-permit` (see Tenancy and unbound keys); without it, a tripped unbound key's permits would still verify (Codex review on #278).
 2. **Evaluate (proposed).** `v1-evaluate` also denies early, with `AGENT_DENIAL_BUDGET_EXHAUSTED`, so the agent learns why instead of collecting allows it cannot use. The early deny is itself an evaluation, so it must not count again (no feedback loop).
 
 ### 6. Reset and override
@@ -94,13 +100,8 @@ Whether a trip also clears itself when the window passes is decision D4. The pro
 
 This follows CLAUDE.md rule 2 ("call failed" must never mean "nothing to enforce"):
 
-- **The counter write fails.** The counter shares the evaluation's transaction, so the evaluation row rolls back with it, and that denial would otherwise vanish from every later count. So the failure is the evaluation's failure:
-  - `v1-evaluate` returns an error and issues no permit, which is a refusal.
-  - It logs and alerts the failure distinctly from a policy deny.
-  - Because allows also take the bucket lock, **every** evaluation for that bucket fails the same way until accounting recovers. An agent cannot keep retrying below N while the counter is broken, and no allow can be issued in that state (Codex review on #278).
-  - **The failed denial is not forgotten.** Rolling back the evaluation also rolls back that denial, so on the failure path `v1-evaluate` writes an `accounting_failed` entry to the bucket in a **separate** transaction. That entry counts as one denial toward N, and it is never written for an allow-shaped request. Without it, a denial-specific failure (one that hits only the deny branch) would roll back, and the next allow would succeed with the attempt uncounted (Codex review on #278).
-  - **If the marker write also fails,** the bucket row cannot be written at all. Every evaluation for the bucket then fails the same way, allows included, because they take the same lock.
-  - **Recovery needs no reset.** Once the bucket can be written again, evaluations proceed, with the marker counted.
+- **The counting step fails.** No deny is returned: `v1-evaluate` returns an error and issues no permit, and it logs and alerts the failure distinctly from a policy deny. Nothing is lost, because a denial the agent never received was never made. A retry is a fresh evaluation; if it is denied, it is counted, or it fails the same way. No failure marker is needed (Codex review on #278).
+- **The allow's trip read fails, or the row is unreadable.** It refuses, and issues no permit. An unreadable bucket is never read as "not tripped".
 - **The trip lookup fails.** It refuses, as `checkAgentCircuitTrip` already does.
 - **Never a grant.** A rate limit can never grant authority. An agent under budget still needs an allow and a verified permit for every action.
 
@@ -130,12 +131,13 @@ These are synthetic, against staging, matching the #274 matrix:
 4. A different agent in the same org, and the same agent id in another org, are unaffected.
 5. An API key, including an owner-scoped one, cannot reset. A person can, the reset is recorded, and the next evaluation is evaluated normally.
 6. A policy change does not reset the count.
-7. Counter-write and lookup failures are injected: the evaluation still denies, the failure is logged distinctly, and no permit verifies on a lookup failure.
+7. Counting-step and lookup failures are injected: the agent gets an error or a refusal, never a permit; the failure is logged distinctly from a policy deny; and no permit verifies on a lookup failure.
 8. The evidence row holds no argument or credential text.
 9. Two gates submit the (N-1)-th and N-th denials at the same moment, with N-2 already counted: exactly one E5 trip is recorded. Repeat many times to show it is not timing luck.
-10. With the counter write failing (injected), an allow-shaped request for that bucket is refused, not allowed.
+10. With the counting step failing (injected), the agent receives an error, not a deny, and no permit; with the allow's trip read failing (injected), an allow-shaped request is refused.
 11. If unbound keys are counted (D5): two unbound keys in one org have separate buckets. One key tripping does not stop the other.
-12. A failure is injected only on the deny branch's counter write, and the next request is an allow: the separate `accounting_failed` entry exists, counts toward N, and a run of such failures trips E5 like ordinary denials.
+12. With N-1 already counted, the N-th denial and an allow-shaped request for one bucket arrive together. E5 is recorded. If the allow read the bucket after the denial committed, evaluate refuses it; if it read first, its permit is refused at `v1-verify-permit` once E5 exists. No run ends with a permit that verifies after the trip. Repeat many times.
+13. If unbound keys are counted (D5): after a key trips, a permit issued to that key **before** the trip is refused at `v1-verify-permit`.
 
 Report the results as "resistant to these specific defects", not as coverage.
 
@@ -154,10 +156,11 @@ Report the results as "resistant to these specific defects", not as coverage.
 - **atlasent-api**, one migration:
   - the `'E5'` condition;
   - the `agent_denial_buckets` counter table (locked per bucket, section 1; a view or count over `execution_evaluations` races and is not an option);
-  - the trigger;
+  - the counting function (one call, its own transaction);
   - the org setting and its audit;
   - a verifier registry entry.
-- **atlasent-api** `v1-evaluate`: the early deny.
+- **atlasent-api** `v1-evaluate`: count first on deny, read the trip under `FOR SHARE` on allow, and the early deny.
+- **atlasent-api** `v1-verify-permit`: a key-scoped trip lookup, only if D5 counts unbound keys.
 - **atlasent-console**: show E5 trips beside E2 and E3, plus the org setting.
 - **This repo**: surface `AGENT_DENIAL_BUDGET_EXHAUSTED` readably in the gate and the adapters. No new local logic.
 
