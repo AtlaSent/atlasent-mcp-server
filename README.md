@@ -19,6 +19,8 @@ This MCP server brings it to AI agents (Claude, Cursor, Windsurf, any MCP host).
 
 Try it in 60 seconds with no account: `npx -y @atlasent/mcp-server` (local mode, a demo that protects nothing).
 
+**Free, no account:** paste your MCP server's tool list into [AI Permission Check](https://www.atlasent.io/ai-permission-check?utm_source=mcp&utm_medium=readme) to see which tools could change real systems and who should approve them. It runs in your browser.
+
 **Local blocking is free.** To actually block on your own machine without an account, use [MCP Gate](./packages/mcp-gate) or the [Claude Code agent guard](./packages/agent-hooks). Both are part of the free Community plan. Hosted decisions, shared policies and approvals for a team are on the [AtlaSent plans](https://www.atlasent.io/pricing?utm_source=mcp&utm_medium=readme).
 
 ### For engineers
