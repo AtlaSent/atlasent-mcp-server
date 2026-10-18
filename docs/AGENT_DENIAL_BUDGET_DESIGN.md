@@ -29,20 +29,16 @@ The design adds **one trip condition and one counter**. It adds no engine, no ac
 
 ### 1. The runtime counts; the agent host does not
 
-A denial is counted when the runtime decides `deny` for a bucket. **It is counted first, in its own committed transaction, before the evaluation row is written and before any response.** The policy decision is known in `v1-evaluate` before any database write, so the order is:
+**Every evaluation reserves before it decides.** The counter is one `agent_denial_buckets` row per bucket, holding the window's entries. A view or a `count(*)` over recent evaluations races (two gates committing the fourth and fifth denial at once each see only their own row), so neither is an option. `v1-evaluate` runs in this order:
 
-1. Decide (allow, deny or hold).
-2. If deny: one SQL function takes the bucket lock, appends the denial, writes the E5 trip if the budget is now spent, and **commits**.
-3. Write the evaluation and audit rows, then respond.
+1. **Reserve.** One SQL function takes the bucket row `FOR UPDATE` (or upserts it on first use), checks the budget against the org's *current* setting, and appends a **reservation** entry for this evaluation, then **commits**. If the bucket is already tripped or spent, it refuses here with `AGENT_DENIAL_BUDGET_EXHAUSTED` and appends nothing, so the early deny never counts again. If this step fails for any reason, `v1-evaluate` returns an error and **makes no policy decision**, so no permit can be issued while the bucket cannot be written.
+2. **Decide** (allow, deny or hold).
+3. **Settle.** Under the same lock: a deny turns its reservation into a denial and writes the E5 trip if the budget is now spent; an allow or hold releases its reservation. Commit.
+4. Write the evaluation and audit rows, then respond. An allow's permit is issued only after step 3 committed.
 
-If step 2 fails, `v1-evaluate` returns an error and no deny is ever shown to the agent uncounted. If step 3 fails after step 2 committed, the denial stays counted. The error falls on the safe side: it can overcount, never undercount. An earlier revision counted in the evaluation's own transaction and needed a separate failure marker; both races Codex found on #278 came from that ordering, and counting first removes them.
+**An unsettled reservation counts as a denial.** If step 3 never commits (a crash, a timeout, a lost connection), the reservation stays and counts toward N once it is older than the evaluate timeout. Live reservations younger than that do not count, so concurrent allows in flight cannot trip a bucket by themselves. Every failure therefore lands on the safe side: it can overcount, never undercount, and this holds whatever a client does with the error. Today `authorize()` (`src/engine.ts`) and the gate's cloud authorizer both render a request failure as a deny, so a client-side distinction cannot be relied on, and the design does not rely on one (Codex review on #278).
 
-**One locked row per bucket, not a count over the log.** A view or a `count(*)` over recent evaluations races: two gates committing the fourth and fifth denial at once each see only their own row, so neither trips. The counter is a `agent_denial_buckets` row per bucket, holding the window's denial times. A deny's counting step (step 2 above) takes that row with `SELECT … FOR UPDATE`, or with an `INSERT … ON CONFLICT DO UPDATE` upsert on first use. It then decides under the lock:
-- whether to append the denial;
-- whether the budget is now spent;
-- whether to write the E5 trip.
-
-An allow reads the trip state under `FOR SHARE` on the same row, in its own transaction, before it issues a permit. A share lock waits for any counting step that holds the row and then sees what it committed. So two concurrent denials of one bucket serialise and the N-th always trips, and an allow queued behind the N-th denial sees the trip and is refused (Codex review on #278).
+Two concurrent evaluations of one bucket serialise on the row, so the N-th denial always trips, and an evaluation that reserves after it is refused at step 1. Earlier revisions counted inside the evaluation's transaction or only on the deny path; the races Codex found on #278 came from that, and reserving first removes them.
 
 Because the agent comes from the key and the count comes from the runtime's own record, the agent cannot under-report, and two gates cannot each see half.
 
@@ -69,6 +65,7 @@ The budget is a sliding window: **N denials within T minutes**. Proposed default
 
 - **Per-org setting.** The setting lives on the org, bounded (N 1–1000, T 1–1440).
 - **Who can change it.** Lowering N or raising T only removes authority, so any admin may do it. Raising N or shortening T needs an owner session.
+- **A tightened setting applies at once.** The setting change locks every bucket of the org and writes E5 for any bucket already at or over the new budget, in the same transaction. Step 1 also checks against the current setting, so a bucket over the new N is refused even before any further denial (Codex review on #278).
 - **Every change is audited.** It is an `org.*` audit event, like `fail_mode`.
 - **On by default.** An org with no setting has the default budget (D1) enabled, so every existing org is covered on the day it ships. There is no setting that turns the budget off.
 
@@ -100,8 +97,8 @@ Whether a trip also clears itself when the window passes is decision D4. The pro
 
 This follows CLAUDE.md rule 2 ("call failed" must never mean "nothing to enforce"):
 
-- **The counting step fails.** No deny is returned: `v1-evaluate` returns an error and issues no permit, and it logs and alerts the failure distinctly from a policy deny. Nothing is lost, because a denial the agent never received was never made. A retry is a fresh evaluation; if it is denied, it is counted, or it fails the same way. No failure marker is needed (Codex review on #278).
-- **The allow's trip read fails, or the row is unreadable.** It refuses, and issues no permit. An unreadable bucket is never read as "not tripped".
+- **The reservation fails.** No decision is made and no permit is issued, for allow and deny alike. `v1-evaluate` returns an error, logged and alerted distinctly from a policy deny. While the bucket cannot be written, the agent can learn nothing about what policy would allow, so probing during an outage is not free. An unreadable bucket is never read as "not tripped".
+- **The settle step fails.** The reservation stays, and counts as a denial once it is stale. No permit is issued for an allow whose settle did not commit.
 - **The trip lookup fails.** It refuses, as `checkAgentCircuitTrip` already does.
 - **Never a grant.** A rate limit can never grant authority. An agent under budget still needs an allow and a verified permit for every action.
 
@@ -116,7 +113,12 @@ mcp-gate's `denialBudget` stays as an offline, first-line stop with no account, 
 ## Tenancy and unbound keys
 
 - **Per org and per agent identity.** One org's denials never count against another's.
-- **A key with no bound agent** (`agent_identity_id IS NULL`) is decision D5. If it is counted, its bucket is the key id, and its trip is recorded against that key. `agent_circuit_trips.agent_identity_id` is `NOT NULL` today, and `v1-verify-permit` looks trips up by agent. So counting unbound keys also needs a key-scoped trip column and lookup, or the third option below. Options:
+- **A key with no bound agent** (`agent_identity_id IS NULL`) is decision D5. If it is counted, its bucket is the key id, and its trip is recorded against that key. `agent_circuit_trips.agent_identity_id` is `NOT NULL` today, and `v1-verify-permit` looks trips up by agent. So counting unbound keys also needs, in the same migration:
+  - `agent_circuit_trips.agent_identity_id` made nullable, a new `api_key_id` column, and a `CHECK` that exactly one of the two is set;
+  - the reset path and the console view handling key trips;
+  - a key-scoped lookup in `v1-verify-permit`.
+
+  Without the schema change, no unbound-key trip can be written at all (Codex review on #278). Options:
   - count per key;
   - do not count, and document it;
   - require agent binding for `agent.*` actions, which incident defense already largely does.
@@ -134,10 +136,12 @@ These are synthetic, against staging, matching the #274 matrix:
 7. Counting-step and lookup failures are injected: the agent gets an error or a refusal, never a permit; the failure is logged distinctly from a policy deny; and no permit verifies on a lookup failure.
 8. The evidence row holds no argument or credential text.
 9. Two gates submit the (N-1)-th and N-th denials at the same moment, with N-2 already counted: exactly one E5 trip is recorded. Repeat many times to show it is not timing luck.
-10. With the counting step failing (injected), the agent receives an error, not a deny, and no permit; with the allow's trip read failing (injected), an allow-shaped request is refused.
+10. With the reserve step failing (injected), both an allow-shaped and a deny-shaped request get an error and no permit, and no policy decision is recorded. With the settle step failing after a deny, the stale reservation counts toward N.
 11. If unbound keys are counted (D5): two unbound keys in one org have separate buckets. One key tripping does not stop the other.
-12. With N-1 already counted, the N-th denial and an allow-shaped request for one bucket arrive together. E5 is recorded. If the allow read the bucket after the denial committed, evaluate refuses it; if it read first, its permit is refused at `v1-verify-permit` once E5 exists. No run ends with a permit that verifies after the trip. Repeat many times.
+12. With N-1 already counted, the N-th denial and an allow-shaped request for one bucket arrive together. Exactly one E5 trip is recorded, and no permit issued after the trip verifies. Repeat many times.
 13. If unbound keys are counted (D5): after a key trips, a permit issued to that key **before** the trip is refused at `v1-verify-permit`.
+14. After four denials under N=5, an admin lowers N to 3: E5 is recorded in the same change, and the next allow-shaped request is refused.
+15. Through the real MCP client and the gate, a counter outage (injected) yields no permit for any request, whatever the client shows the agent.
 
 Report the results as "resistant to these specific defects", not as coverage.
 
@@ -155,11 +159,13 @@ Report the results as "resistant to these specific defects", not as coverage.
 
 - **atlasent-api**, one migration:
   - the `'E5'` condition;
+  - if D5 counts unbound keys: `agent_circuit_trips.api_key_id`, `agent_identity_id` nullable, and an exactly-one `CHECK`;
   - the `agent_denial_buckets` counter table (locked per bucket, section 1; a view or count over `execution_evaluations` races and is not an option);
-  - the counting function (one call, its own transaction);
+  - the reserve and settle functions (each its own transaction);
+  - the setting-change function that trips buckets already over a tightened budget;
   - the org setting and its audit;
   - a verifier registry entry.
-- **atlasent-api** `v1-evaluate`: count first on deny, read the trip under `FOR SHARE` on allow, and the early deny.
+- **atlasent-api** `v1-evaluate`: reserve before deciding, settle after, issue a permit only after settling, and the early deny.
 - **atlasent-api** `v1-verify-permit`: a key-scoped trip lookup, only if D5 counts unbound keys.
 - **atlasent-console**: show E5 trips beside E2 and E3, plus the org setting.
 - **This repo**: surface `AGENT_DENIAL_BUDGET_EXHAUSTED` readably in the gate and the adapters. No new local logic.
