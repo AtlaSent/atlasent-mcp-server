@@ -98,7 +98,9 @@ This follows CLAUDE.md rule 2 ("call failed" must never mean "nothing to enforce
   - `v1-evaluate` returns an error and issues no permit, which is a refusal.
   - It logs and alerts the failure distinctly from a policy deny.
   - Because allows also take the bucket lock, **every** evaluation for that bucket fails the same way until accounting recovers. An agent cannot keep retrying below N while the counter is broken, and no allow can be issued in that state (Codex review on #278).
-  - Recovery needs no reset: the next evaluation that can write the bucket proceeds normally.
+  - **The failed denial is not forgotten.** Rolling back the evaluation also rolls back that denial, so on the failure path `v1-evaluate` writes an `accounting_failed` entry to the bucket in a **separate** transaction. That entry counts as one denial toward N, and it is never written for an allow-shaped request. Without it, a denial-specific failure (one that hits only the deny branch) would roll back, and the next allow would succeed with the attempt uncounted (Codex review on #278).
+  - **If the marker write also fails,** the bucket row cannot be written at all. Every evaluation for the bucket then fails the same way, allows included, because they take the same lock.
+  - **Recovery needs no reset.** Once the bucket can be written again, evaluations proceed, with the marker counted.
 - **The trip lookup fails.** It refuses, as `checkAgentCircuitTrip` already does.
 - **Never a grant.** A rate limit can never grant authority. An agent under budget still needs an allow and a verified permit for every action.
 
@@ -133,6 +135,7 @@ These are synthetic, against staging, matching the #274 matrix:
 9. Two gates submit the (N-1)-th and N-th denials at the same moment, with N-2 already counted: exactly one E5 trip is recorded. Repeat many times to show it is not timing luck.
 10. With the counter write failing (injected), an allow-shaped request for that bucket is refused, not allowed.
 11. If unbound keys are counted (D5): two unbound keys in one org have separate buckets. One key tripping does not stop the other.
+12. A failure is injected only on the deny branch's counter write, and the next request is an allow: the separate `accounting_failed` entry exists, counts toward N, and a run of such failures trips E5 like ordinary denials.
 
 Report the results as "resistant to these specific defects", not as coverage.
 
@@ -150,7 +153,7 @@ Report the results as "resistant to these specific defects", not as coverage.
 
 - **atlasent-api**, one migration:
   - the `'E5'` condition;
-  - a counter table or a view over `execution_evaluations`;
+  - the `agent_denial_buckets` counter table (locked per bucket, section 1; a view or count over `execution_evaluations` races and is not an option);
   - the trigger;
   - the org setting and its audit;
   - a verifier registry entry.
