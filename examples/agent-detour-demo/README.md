@@ -26,7 +26,8 @@ The test reads an independent upstream trace to prove only the two permitted cal
 ## The boundary we do—and do not—prove
 
 - **Proven by this test if it passes:** deny-by-default MCP proxy behavior for the covered tool path; exact argument matching; denied detours not dispatched through this proxy.
-- **Not proven:** preventing an agent from invoking a different MCP server, shell, browser, outbound network path or credential outside the proxy; a cross-tool retry budget; genuine human approval; hosted signed permits; independent execution/effect proof; any cloud deployment or external customer result.
+- **Also proven** (second test): with `denialBudget: { "maxBlockedCalls": 3 }`, three refusals across three different tools spend the budget. The fourth detour and even the explicitly permitted fallback are then refused with `denial_budget_exhausted`, and nothing more reaches the upstream. This covers only calls through this proxy.
+- **Not proven:** preventing an agent from invoking a different MCP server, shell, browser, outbound network path or credential outside the proxy; a retry budget shared across separate gates or sessions; genuine human approval; hosted signed permits; independent execution/effect proof; any cloud deployment or external customer result.
 - The local `allow` is an **operator rule**, not organizational authorization. Cloud-backed authorization and verified, single-use permits require the separately configured and accepted execution path. See [MCP Gate](../../packages/mcp-gate/README.md) and [live staging reference acceptance issue #209](https://github.com/AtlaSent/atlasent-mcp-server/issues/209).
 
 For production use, separately restrict credentials, tool launching, sandbox policy, egress and native execution routes. A prompt asking the model to call AtlaSent does not secure any bypass route.

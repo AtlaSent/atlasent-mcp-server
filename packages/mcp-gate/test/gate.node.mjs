@@ -23,6 +23,11 @@ test('exact full arguments required; unknown tools and deny precedence', () => {
 test('policy typos and unsafe defaults fail closed', () => {
   for (const p of [{...policy,default:'allow'},{...policy,rules:[{...policy.rules[0],argumentEquals:{}}]},{...policy,rules:[policy.rules[0],policy.rules[0]]}]) assert.throws(()=>validatePolicy(p));
 });
+test('denial budget is optional, bounded and typo-proof', () => {
+  validatePolicy({...policy,denialBudget:{maxBlockedCalls:3}});
+  for (const b of [0,-1,1.5,10001,'3',null]) assert.throws(()=>validatePolicy({...policy,denialBudget:{maxBlockedCalls:b}}));
+  for (const d of [{},{maxBlockedCalls:3,reset:true},{maxBlockedCall:3},[3],3]) assert.throws(()=>validatePolicy({...policy,denialBudget:d}));
+});
 test('bounded framing rejects oversized and truncated messages', async () => {
   for (const body of ['x'.repeat(1024*1024+1),'{"jsonrpc":"2.0"}']) await assert.rejects(async()=>{for await (const m of frames(Readable.from([body]))) void m;});
 });

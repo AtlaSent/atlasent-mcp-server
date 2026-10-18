@@ -527,6 +527,15 @@ stable and will not change without a major version bump.
 - 0.2.7: the plugin and marketplace descriptions, and the top of the README,
   now state that Node.js 18 or later is required. Behavior is unchanged.
 
+### `@atlasent/mcp-gate` — Unreleased
+
+- New optional policy key `denialBudget: { "maxBlockedCalls": N }`. After N
+  blocked tool calls in a session, from any tool and whether blocked locally or
+  by the cloud, every further tool call is refused with
+  `denial_budget_exhausted`, including calls a rule would allow. Only a restart
+  resets it. Policies without the key behave as before; a gate older than this
+  release refuses a policy that uses it.
+
 ### `@atlasent/mcp-gate` 0.1.0 (tag `gate-v0.1.0`) — 2026-09-25
 
 - First release. A local, fail-closed MCP stdio gate that blocks every tool
