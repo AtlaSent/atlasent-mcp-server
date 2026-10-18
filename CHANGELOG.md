@@ -16,6 +16,13 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ### Fixed
 
+- Workflows written with inline YAML collections are analyzed instead of
+  misread. A step written as `- { name: Publish, run: npm publish }` was not
+  recognized at all, so its file could read as clean; inline `with:` maps did
+  not count as a gate; and `permissions: { id-token: write }` was reported as
+  missing. Inline maps and lists (nested, quoted, `${{ }}` expressions, spanning
+  lines) are now parsed, and a malformed one makes the file unreadable rather
+  than silently skipped.
 - `atlasent-exposure-scan` and the evidence-gap report see through shell
   indirection (`bash -c`, `sh -lc`, `env … bash -c`, `eval`, `echo … | sh`,
   split quotes, line continuations). A command chosen at run time (`$CMD`,
