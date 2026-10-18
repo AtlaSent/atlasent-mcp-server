@@ -31,6 +31,13 @@ The design adds **one trip condition and one counter**. It adds no engine, no ac
 
 A denial is counted when the runtime records a `deny` evaluation for a key-bound agent. The counter is written in the same transaction as the evaluation row: a trigger on `execution_evaluations` insert, or one SQL function called by `v1-evaluate` after the audit write. A trigger is preferred, because no code path that writes an evaluation can skip it.
 
+**One locked row per bucket, not a count over the log.** A view or a `count(*)` over recent evaluations races: two gates committing the fourth and fifth denial at once each see only their own row, so neither trips. The counter is a `agent_denial_buckets` row per bucket, holding the window's denial times. Each evaluation for the bucket, allow or deny, takes that row with `SELECT … FOR UPDATE`, or with an `INSERT … ON CONFLICT DO UPDATE` upsert on first use. It then decides under the lock:
+- whether to append the denial;
+- whether the budget is now spent;
+- whether to write the E5 trip.
+
+So two concurrent evaluations of one bucket serialise, and the N-th denial always trips (Codex review on #278).
+
 Because the agent comes from the key and the count comes from the runtime's own record, the agent cannot under-report, and two gates cannot each see half.
 
 ### 2. What counts
@@ -45,7 +52,7 @@ Because the agent comes from the key and the count comes from the runtime's own 
 
 ### 3. What is one bucket (the "alias" question)
 
-The correlation key is **(org, agent identity, scope)**, and it holds no arguments, destinations or credentials. Scope is decision D2:
+The correlation key is **(org, bucket identity, scope)**, and it holds no arguments, destinations or credentials. The bucket identity is the key-bound agent (`key_agent_identity_id`), or the API key id when the key has no bound agent (D5). It is never a shared null bucket. Scope is decision D2:
 
 - **Per agent (proposed default).** Every denial counts, whatever the tool. This is the strictest option and needs no equivalence table, so it cannot be dodged by finding a tool name the table lacks.
 - **Per protected effect.** Denials are grouped by the Canon action class (`action_type`) the request named. This is narrower, but an agent that moves to a *different* action class to reach the same effect escapes it. It would need the existing authority-surface equivalence (`_shared/authority-surface-equivalence.ts`), not a new alias list.
@@ -57,7 +64,7 @@ The budget is a sliding window: **N denials within T minutes**. Proposed default
 - **Per-org setting.** The setting lives on the org, bounded (N 1–1000, T 1–1440).
 - **Who can change it.** Lowering N or raising T only removes authority, so any admin may do it. Raising N or shortening T needs an owner session.
 - **Every change is audited.** It is an `org.*` audit event, like `fail_mode`.
-- **No budget by default.** An org with no setting gets the default. "No budget" is not a value.
+- **On by default.** An org with no setting has the default budget (D1) enabled, so every existing org is covered on the day it ships. There is no setting that turns the budget off.
 
 ### 5. When the budget runs out
 
@@ -87,7 +94,11 @@ Whether a trip also clears itself when the window passes is decision D4. The pro
 
 This follows CLAUDE.md rule 2 ("call failed" must never mean "nothing to enforce"):
 
-- **The counter write fails.** The evaluation is still denied, as it already was. The failure is logged and alerted distinctly. It is not treated as "no trip": the next evaluation re-reads the count.
+- **The counter write fails.** The counter shares the evaluation's transaction, so the evaluation row rolls back with it, and that denial would otherwise vanish from every later count. So the failure is the evaluation's failure:
+  - `v1-evaluate` returns an error and issues no permit, which is a refusal.
+  - It logs and alerts the failure distinctly from a policy deny.
+  - Because allows also take the bucket lock, **every** evaluation for that bucket fails the same way until accounting recovers. An agent cannot keep retrying below N while the counter is broken, and no allow can be issued in that state (Codex review on #278).
+  - Recovery needs no reset: the next evaluation that can write the bucket proceeds normally.
 - **The trip lookup fails.** It refuses, as `checkAgentCircuitTrip` already does.
 - **Never a grant.** A rate limit can never grant authority. An agent under budget still needs an allow and a verified permit for every action.
 
@@ -102,7 +113,7 @@ mcp-gate's `denialBudget` stays as an offline, first-line stop with no account, 
 ## Tenancy and unbound keys
 
 - **Per org and per agent identity.** One org's denials never count against another's.
-- **A key with no bound agent** (`agent_identity_id IS NULL`) is decision D5. Options:
+- **A key with no bound agent** (`agent_identity_id IS NULL`) is decision D5. If it is counted, its bucket is the key id, and its trip is recorded against that key. `agent_circuit_trips.agent_identity_id` is `NOT NULL` today, and `v1-verify-permit` looks trips up by agent. So counting unbound keys also needs a key-scoped trip column and lookup, or the third option below. Options:
   - count per key;
   - do not count, and document it;
   - require agent binding for `agent.*` actions, which incident defense already largely does.
@@ -119,6 +130,9 @@ These are synthetic, against staging, matching the #274 matrix:
 6. A policy change does not reset the count.
 7. Counter-write and lookup failures are injected: the evaluation still denies, the failure is logged distinctly, and no permit verifies on a lookup failure.
 8. The evidence row holds no argument or credential text.
+9. Two gates submit the (N-1)-th and N-th denials at the same moment, with N-2 already counted: exactly one E5 trip is recorded. Repeat many times to show it is not timing luck.
+10. With the counter write failing (injected), an allow-shaped request for that bucket is refused, not allowed.
+11. If unbound keys are counted (D5): two unbound keys in one org have separate buckets. One key tripping does not stop the other.
 
 Report the results as "resistant to these specific defects", not as coverage.
 
