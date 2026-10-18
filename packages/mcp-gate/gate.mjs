@@ -9,7 +9,10 @@ const idOK = x => typeof x === 'string' || (typeof x === 'number' && Number.isSa
 const key = x => JSON.stringify(x);
 const error = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
 export function validatePolicy(p) {
-  if (!object(p) || p.version !== 1 || p.default !== 'deny' || !Array.isArray(p.rules) || Object.keys(p).some(k => !['version','default','rules'].includes(k))) throw Error('Invalid policy');
+  if (!object(p) || p.version !== 1 || p.default !== 'deny' || !Array.isArray(p.rules) || Object.keys(p).some(k => !['version','default','rules','denialBudget'].includes(k))) throw Error('Invalid policy');
+  // Optional session-wide stop: after this many blocked tool calls, from any
+  // tool, every further call is blocked. Only a restart resets it.
+  if ('denialBudget' in p && (!object(p.denialBudget) || Object.keys(p.denialBudget).some(k => k !== 'maxBlockedCalls') || !Number.isSafeInteger(p.denialBudget.maxBlockedCalls) || p.denialBudget.maxBlockedCalls < 1 || p.denialBudget.maxBlockedCalls > 10000)) throw Error('Invalid denial budget');
   const ids = new Set();
   for (const r of p.rules) {
     if (!object(r) || !nameOK(r.id) || ids.has(r.id) || !nameOK(r.tool) || !['allow','deny'].includes(r.effect) || !['read','write','delete','export'].includes(r.kind) || Object.keys(r).some(k => !['id','tool','effect','kind','argumentsEquals'].includes(k)) || ('argumentsEquals' in r && !object(r.argumentsEquals))) throw Error('Invalid policy rule');
@@ -47,6 +50,9 @@ export async function runGate({ policy, command, args = [], input = process.stdi
   validatePolicy(policy);
   const session = randomUUID();
   const pending = new Map();
+  const maxBlocked = policy.denialBudget?.maxBlockedCalls;
+  let blockedCalls = 0;
+  let budgetExhausted = false;
   const childEnv = { ...process.env };
   delete childEnv.ATLASENT_GATE_API_KEY;
   const child = spawn(command, args, { stdio: ['pipe','pipe','pipe'], shell: false, env: childEnv });
@@ -90,6 +96,14 @@ export async function runGate({ policy, command, args = [], input = process.stdi
       const invocation = randomUUID();
       const item = { started: Date.now(), invocation, method: msg.method };
       if (msg.method === 'tools/call') {
+        // A spent budget refuses before policy or cloud authorization runs: an
+        // agent that keeps changing tool, target or credential after refusals
+        // is stopped, not re-evaluated until something matches.
+        if (budgetExhausted) {
+          log({ invocation, status: 'blocked', kind: 'unclassified', reason: 'denial_budget_exhausted' });
+          await send(output, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ type: 'text', text: 'Blocked by AtlaSent Gate: denial_budget_exhausted' }] } });
+          continue;
+        }
         let decision = decide(policy, msg.params);
         const policyRuleId = decision.policy_rule_id;
         // MCP request metadata is not tool input or authorization context.
@@ -109,6 +123,11 @@ export async function runGate({ policy, command, args = [], input = process.stdi
         item.policyRuleId = policyRuleId;
         log({ invocation, status: decision.effect === 'allow' ? 'allowed' : 'blocked', kind: decision.kind, reason: decision.reason, policy_rule_id: policyRuleId });
         if (decision.effect !== 'allow') {
+          blockedCalls++;
+          if (maxBlocked !== undefined && blockedCalls >= maxBlocked) {
+            budgetExhausted = true;
+            log({ status: 'budget_exhausted', reason: 'denial_budget_exhausted', blocked_calls: blockedCalls });
+          }
           await send(output, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ type: 'text', text: 'Blocked by AtlaSent Gate: ' + decision.reason }] } });
           continue;
         }

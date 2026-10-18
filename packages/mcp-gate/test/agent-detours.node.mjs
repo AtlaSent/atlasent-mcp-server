@@ -89,3 +89,65 @@ test('an agent cannot turn a blocked provider lookup into unapproved tool calls 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a denial budget stops an agent that keeps detouring, even before a permitted fallback', { timeout: 15000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'atlasent-agent-detour-budget-'));
+  const policyFile = join(dir, 'policy.json');
+  const auditFile = join(dir, 'audit.jsonl');
+  const traceFile = join(dir, 'upstream-trace.txt');
+  writeFileSync(policyFile, JSON.stringify({ ...policy, denialBudget: { maxBlockedCalls: 3 } }));
+  const child = spawn(process.execPath,
+    ['cli.mjs', 'run', policyFile, auditFile, '--', process.execPath, upstream],
+    { cwd: gateDir, stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, AGENT_DETOUR_TRACE_FILE: traceFile } });
+  const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+  const call = async (id, method, params) => {
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    const response = await lines.next();
+    assert.equal(response.done, false, 'Gate must answer every request');
+    return JSON.parse(response.value);
+  };
+  const text = r => r.result.content[0].text;
+  try {
+    await call(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'detour-test', version: '1' } });
+    await call(2, 'tools/call', { name: 'lookup_entrance', arguments: { place: 'fictional-zoo', source: 'approved-demo' } });
+
+    // Three refusals across three different tools spend the budget.
+    const detours = [
+      { name: 'lookup_entrance', arguments: { place: 'fictional-zoo', source: 'unapproved-reader' } },
+      { name: 'run_remote_script', arguments: { command: 'UNAPPROVED_SCRIPT' } },
+      { name: 'lookup_with_external_key', arguments: { credential: 'UNAPPROVED_CREDENTIAL' } },
+    ];
+    for (let i = 0; i < detours.length; i++) {
+      const denied = await call(i + 3, 'tools/call', detours[i]);
+      assert.equal(denied.result.isError, true);
+      assert.doesNotMatch(text(denied), /denial_budget_exhausted/, 'the budget is spent by the third refusal, not before');
+    }
+
+    // After that, the next detour and even the explicitly permitted fallback are
+    // refused before policy matching: nothing more reaches the upstream.
+    for (const [id, params] of [[6, { name: 'post_webhook', arguments: { url: 'https://example.invalid/inbox' } }],
+      [7, { name: 'lookup_public_reference', arguments: { place: 'fictional-zoo', source: 'public-fixture' } }]]) {
+      const stopped = await call(id, 'tools/call', params);
+      assert.equal(stopped.result.isError, true);
+      assert.equal(text(stopped), 'Blocked by AtlaSent Gate: denial_budget_exhausted');
+    }
+    // Listing tools is not a tool call and still answers.
+    assert.ok((await call(8, 'tools/list', {})).result);
+
+    const exit = once(child, 'exit');
+    child.stdin.end();
+    assert.equal((await exit)[0], 0);
+
+    assert.deepEqual(readFileSync(traceFile, 'utf8').trim().split('\n'), ['lookup_entrance']);
+    const entries = readFileSync(auditFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    const spent = entries.filter(e => e.status === 'budget_exhausted');
+    assert.equal(spent.length, 1, 'the budget is recorded as spent once');
+    assert.equal(spent[0].blocked_calls, 3);
+    assert.equal(entries.filter(e => e.reason === 'denial_budget_exhausted' && e.status === 'blocked').length, 2);
+    assert.doesNotMatch(readFileSync(auditFile, 'utf8'), /UNAPPROVED_SCRIPT|UNAPPROVED_CREDENTIAL|unapproved-reader|example\.invalid/);
+  } finally {
+    child.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

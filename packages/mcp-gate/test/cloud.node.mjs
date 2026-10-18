@@ -140,6 +140,18 @@ test('real subprocess is not called on cloud hold and runs only after verified c
  assert.equal(events.filter(e=>e.status==='server_returned').length,1);assert.ok(!JSON.stringify(events).includes('fixture-permit'));
 });
 
+test('cloud denials spend the denial budget; once spent, the authorizer is not asked again', {timeout:10000}, async()=>{
+ const input=new PassThrough(),output=new PassThrough(),events=[];let asked=0;
+ const task=runGate({policy:{version:1,default:'deny',denialBudget:{maxBlockedCalls:2},rules:[{id:'demo',tool:'set_status',kind:'write',effect:'allow'}]},command:process.execPath,args:[fileURLToPath(new URL('../demo-server.mjs',import.meta.url))],input,output,audit:e=>events.push(e),authorize:async()=>{asked++;return asked<=2?{effect:'deny',reason:'cloud_deny'}:{effect:'allow',reason:'cloud_permit_consumed'};}});
+ const lines=createInterface({input:output})[Symbol.asyncIterator]();
+ const texts=[];
+ for (const id of [1,2,3]) {input.write(JSON.stringify({jsonrpc:'2.0',id,method:'tools/call',params:params()})+'\n');texts.push(JSON.parse((await lines.next()).value).result.content[0].text);}
+ input.end();await task;output.end();
+ assert.deepEqual(texts,['Blocked by AtlaSent Gate: cloud_deny','Blocked by AtlaSent Gate: cloud_deny','Blocked by AtlaSent Gate: denial_budget_exhausted']);
+ assert.equal(asked,2,'a would-be cloud allow after the budget is spent is never requested');
+ assert.equal(events.filter(e=>e.status==='server_returned').length,0);
+});
+
 test('approval waiting does not consume the upstream response timeout', {timeout:10000}, async()=>{
  const input=new PassThrough(),output=new PassThrough(),events=[];
  const upstream="require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);setTimeout(()=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{content:[{type:'text',text:'ready'}]}})+'\\n'),30);});";
