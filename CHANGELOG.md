@@ -23,6 +23,8 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
   missing. Inline maps and lists (nested, quoted, `${{ }}` expressions, spanning
   lines) are now parsed, and a malformed one makes the file unreadable rather
   than silently skipped.
+  A trailing comma (`{ a: b, }`, `[a, b, ]`) is accepted as YAML allows; an
+  empty list item (`[a, , b]`) is refused.
 - `atlasent-exposure-scan` and the evidence-gap report see through shell
   indirection (`bash -c`, `sh -lc`, `env … bash -c`, `eval`, `echo … | sh`,
   split quotes, line continuations). A command chosen at run time (`$CMD`,
