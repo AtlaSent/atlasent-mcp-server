@@ -29,7 +29,7 @@ The design adds **one trip condition and one counter**. It adds no engine, no ac
 
 ### 1. The runtime counts; the agent host does not
 
-**Every evaluation reserves before it decides.** The counter is one `agent_denial_buckets` row per bucket, holding the window's entries. A view or a `count(*)` over recent evaluations races (two gates committing the fourth and fifth denial at once each see only their own row), so neither is an option. `v1-evaluate` runs in this order:
+**Every evaluation reserves before it decides.** The counter is one `agent_denial_buckets` row per bucket. It keeps entries for the **maximum** configurable window (1440 minutes), not just the current one, so a widened window can be enforced retroactively (Codex review on #278). A view or a `count(*)` over recent evaluations races (two gates committing the fourth and fifth denial at once each see only their own row), so neither is an option. `v1-evaluate` runs in this order:
 
 1. **Reserve.** One SQL function takes the bucket row `FOR UPDATE` (or upserts it on first use), checks the budget against the org's *current* setting, and appends a **reservation** entry for this evaluation, then **commits**. If the bucket is already tripped or spent, it refuses here with `AGENT_DENIAL_BUDGET_EXHAUSTED` and appends nothing, so the early deny never counts again. The refusal is still an evaluation: the same transaction writes its evaluation and audit rows (decision `deny`, code `AGENT_DENIAL_BUDGET_EXHAUSTED`), so every post-exhaustion attempt is in the audit trail (Codex review on #278). If the bucket is spent but has no open E5 trip (for example, the N-th entry was a reservation that went stale), this step writes the E5 trip in the same transaction before refusing, so a spent bucket always has a trip and earlier permits stop verifying. If this step fails for any reason, `v1-evaluate` returns an error and **makes no policy decision**, so no permit can be issued while the bucket cannot be written.
 2. **Decide** (allow, deny or hold).
@@ -58,7 +58,7 @@ Because the agent comes from the key and the count comes from the runtime's own 
 The correlation key is **(org, bucket identity, scope)**, and it holds no arguments, destinations or credentials. The bucket identity is the key-bound agent (`key_agent_identity_id`), or the API key id when the key has no bound agent (D5). It is never a shared null bucket. Scope is decision D2:
 
 - **Per agent (proposed default).** Every denial counts, whatever the tool. This is the strictest option and needs no equivalence table, so it cannot be dodged by finding a tool name the table lacks.
-- **Per protected effect.** Denials are grouped by the Canon action class (`action_type`) the request named. This is narrower, but an agent that moves to a *different* action class to reach the same effect escapes it. It would need the existing authority-surface equivalence (`_shared/authority-surface-equivalence.ts`), not a new alias list.
+- **Per protected effect.** Denials are grouped by the Canon action class (`action_type`) the request named. Its E5 trip then carries that action class as its target, and `v1-verify-permit` must refuse only permits for that class (a lookup change); otherwise one class's budget would block every class (Codex review on #278). This is narrower, but an agent that moves to a *different* action class to reach the same effect escapes it. It would need the existing authority-surface equivalence (`_shared/authority-surface-equivalence.ts`), not a new alias list.
 
 ### 4. Window and threshold
 
@@ -80,7 +80,7 @@ The runtime records an `agent_circuit_trips` row:
 
 From then on, two refusals apply:
 
-1. **Verify.** For a key-bound agent, `v1-verify-permit` already refuses the agent's permits while the trip is open, with no change. For an unbound key counted under D5, it does **not** today: it looks trips up by agent only. Counting unbound keys therefore also requires a key-scoped trip lookup in `v1-verify-permit` (see Tenancy and unbound keys); without it, a tripped unbound key's permits would still verify (Codex review on #278).
+1. **Verify.** For a key-bound agent, `v1-verify-permit` already refuses the agent's permits while the trip is open. It also reads the agent's bucket, under the same shared per-org lock: if the bucket is spent (stale reservations included) with no open trip, verify writes E5 in that transaction and refuses. So a budget spent by a reservation that went stale stops permits at verify without waiting for another evaluation (Codex review on #278). That read is a change to `v1-verify-permit`. For an unbound key counted under D5, it does **not** today: it looks trips up by agent only. Counting unbound keys therefore also requires a key-scoped trip lookup in `v1-verify-permit` (see Tenancy and unbound keys); without it, a tripped unbound key's permits would still verify (Codex review on #278).
 2. **Evaluate (proposed).** `v1-evaluate` also denies early, with `AGENT_DENIAL_BUDGET_EXHAUSTED`, so the agent learns why instead of collecting allows it cannot use. The early deny is itself an evaluation, so it must not count again (no feedback loop).
 
 ### 6. Reset and override
@@ -100,6 +100,7 @@ This follows CLAUDE.md rule 2 ("call failed" must never mean "nothing to enforce
 
 - **The reservation fails.** No decision is made and no permit is issued, for allow and deny alike. `v1-evaluate` returns an error, logged and alerted distinctly from a policy deny. While the bucket cannot be written, the agent can learn nothing about what policy would allow, so probing during an outage is not free. An unreadable bucket is never read as "not tripped".
 - **The settle step fails.** The reservation stays, and counts as a denial once it is stale. No permit is issued for an allow whose settle did not commit.
+- **A reservation's deadline is terminal.** Each reservation carries a deadline (the evaluate timeout). A settle that arrives after it is refused: the entry stays counted, and no permit is issued. So the count never depends on which request saw the reservation first (Codex review on #278).
 - **The trip lookup fails.** It refuses, as `checkAgentCircuitTrip` already does.
 - **Never a grant.** A rate limit can never grant authority. An agent under budget still needs an allow and a verified permit for every action.
 
@@ -148,6 +149,9 @@ These are synthetic, against staging, matching the #274 matrix:
 18. The N-th entry is a reservation whose settle never commits: once it is stale, the next evaluation writes E5 and is refused, and a permit issued earlier is refused at verify.
 19. The evaluation/audit write fails (injected) on a deny: the settle rolls back with it, no orphan evaluation id appears in any trip evidence, and the stale reservation is shown as `unsettled`.
 20. After E5, three more attempts: each writes an evaluation and audit row with `AGENT_DENIAL_BUDGET_EXHAUSTED`, and none adds a counted entry.
+21. The N-th entry is a reservation that passes its deadline with no further evaluation: the next `v1-verify-permit` of an earlier permit writes E5 and refuses. A late settle for that reservation is refused and issues no permit.
+22. Denials 30 minutes old under T=15, then T is raised to 60: they count, and the bucket trips if they reach N.
+23. If D2 is per effect: exhausting one action class refuses that class's permits only.
 
 Report the results as "resistant to these specific defects", not as coverage.
 
@@ -172,7 +176,7 @@ Report the results as "resistant to these specific defects", not as coverage.
   - the org setting and its audit;
   - a verifier registry entry.
 - **atlasent-api** `v1-evaluate`: reserve before deciding, settle after, issue a permit only after settling, and the early deny.
-- **atlasent-api** `v1-verify-permit`: a key-scoped trip lookup, only if D5 counts unbound keys.
+- **atlasent-api** `v1-verify-permit`: the bucket read that writes E5 for a spent bucket; a key-scoped trip lookup if D5 counts unbound keys; an action-class trip target if D2 is per effect.
 - **atlasent-console**: show E5 trips beside E2 and E3, plus the org setting.
 - **This repo**: surface `AGENT_DENIAL_BUDGET_EXHAUSTED` readably in the gate and the adapters. No new local logic.
 
