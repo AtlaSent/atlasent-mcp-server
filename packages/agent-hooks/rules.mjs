@@ -228,6 +228,16 @@ const RESEND_SEND_URL = /api\.resend\.com\/emails(\/batch)?(?=[\s"'?#]|$)/i;
 const RESEND_SEND_URLS = new RegExp(RESEND_SEND_URL.source, 'gi');
 const HTTP_READ_CALL = /\b(requests|httpx|axios|got|ky|session|client)\.(get|head)\s*\(|\bmethod\s*[:=]\s*["'](GET|HEAD)["']|\b(https?|xh)\s+(GET|HEAD)\b/i;
 const HTTP_WRITE_CALL = /\.(post|put|patch)\s*\(|\bmethod\s*[:=]\s*["'](POST|PUT|PATCH)["']|\b(https?|xh)\s+(POST|PUT|PATCH)\b/i;
+// One curl can run several transfers: `--next` (or `-:`) resets every option, so each
+// transfer is judged on its own options.
+function curlTransfers(a) {
+  const transfers = [[a[0]]];
+  for (const x of a.slice(1)) {
+    if (x === '--next' || x === '-:') transfers.push([a[0]]);
+    else transfers[transfers.length - 1].push(x);
+  }
+  return transfers;
+}
 // curl uses the LAST -X/--request it is given (`curl -X GET -X POST` sends a POST).
 function curlMethod(a) {
   let method = null;
@@ -246,7 +256,7 @@ function curlMethod(a) {
 function resendSend(t, segs) {
   const total = (t.match(RESEND_SEND_URLS) ?? []).length;
   if (!total) return false;
-  const curls = segs.filter(a => a[0] === 'curl' && a.some(x => RESEND_SEND_URL.test(x)));
+  const curls = segs.filter(a => a[0] === 'curl').flatMap(curlTransfers).filter(a => a.some(x => RESEND_SEND_URL.test(x)));
   if (curls.some(a => !['GET', 'HEAD'].includes(curlMethod(a)))) return true;
   const inCurl = curls.reduce((n, a) => n + a.filter(x => RESEND_SEND_URL.test(x)).length, 0);
   if (total <= inCurl) return false;

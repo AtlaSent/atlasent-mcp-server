@@ -163,6 +163,9 @@ const FLAGGED = [
   // (Codex review, #281).
   ['curl -X GET -X POST https://api.resend.com/emails', 'ask', 'mail.send'],
   ['curl --request GET --request POST https://api.resend.com/emails', 'ask', 'mail.send'],
+  // --next starts a transfer with fresh options (Codex review, #283).
+  ['curl -X POST https://api.resend.com/emails --next -X GET https://example.com', 'ask', 'mail.send'],
+  ['curl -X POST https://api.resend.com/emails -: -X GET https://example.com', 'ask', 'mail.send'],
   ['python3 -c "import requests; requests.get(\'https://example.com\'); requests.post(\'https://api.resend.com/emails\', json=m)"', 'ask', 'mail.send'],
   ['curl -X GET https://api.resend.com/emails && python3 -c "import requests; requests.post(\'https://api.resend.com/emails\', json=m)"', 'ask', 'mail.send'],
   // A recipient need not contain @: a local user or an alias, which can forward
@@ -201,6 +204,7 @@ const SAFE = [
   'curl https://api.mailgun.net/v3/domains/mg.example.com/messages/KEY',
   'curl https://api.resend.com/emails', 'curl -X GET https://api.resend.com/emails', 'curl -G https://api.resend.com/emails -d limit=10',
   'curl -X POST -X GET https://api.resend.com/emails', 'bash -c "curl -X GET https://api.resend.com/emails"',
+  'curl -X POST -d x https://example.com/hook --next https://api.resend.com/emails',
   'curl -H "Authorization: Bearer $K" https://api.resend.com/emails/4ef9a417',
   'curl -X POST https://api.resend.com/emails/4ef9a417/cancel',
   'python3 -c "import requests; requests.get(\'https://api.resend.com/emails\', headers=h)"',
