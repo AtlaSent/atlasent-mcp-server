@@ -177,6 +177,69 @@ const MCP_DESTRUCTIVE = /(^|[_\-.])(delete|drop|destroy|remove|truncate|purge|te
 const MCP_READ_VERB = /^(list|get|read|search|describe|fetch|view|show|query|find|count|check|preview|diff|dry[_-]?run)([_\-.]|$)/i;
 const CONFIG_PATH = /(^|[\/\\])(\.atlasent[\/\\](hooks|credentials|pending)\.json|\.claude[\/\\]settings(\.local)?\.json|\.cursor[\/\\]hooks\.json)$/;
 
+// Email leaves the account. An agent told to "draft this, do not send" that holds a raw
+// send tool can send anyway, repeatedly, and at 11:30 PM; a sent message cannot be
+// recalled. MCP tool names are split into lowercase words (snake, kebab, dotted and
+// camelCase), so `sendEmail`, `send_email` and `messages.send` read the same.
+const nameWords = s => s.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+// The server is a mail service, so its plain `send_message` or `reply` sends email.
+const MAIL_SERVER_WORD = w => w.includes('mail') || ['outlook', 'smtp', 'sendgrid', 'postmark', 'resend', 'sparkpost', 'mandrill', 'ses', 'sesv2'].includes(w);
+// The tool name itself says email, whatever server it is on (`gmail_send`, `send_mail`).
+const MAIL_TOOL_WORD = w => w.includes('mail') || ['outlook', 'smtp'].includes(w);
+const MAIL_SEND_WORD = new Set(['send', 'reply', 'replyall', 'forward', 'fwd', 'resend']);
+// Settings that make mail leave on its own later: auto-forwarding, an auto-reply.
+const MAIL_AUTO_WORD = new Set(['forwarding', 'autoforward', 'autoforwarding', 'vacation', 'autoreply', 'autoresponder', 'responder']);
+// Undoing or cancelling a send stops mail; it does not send any.
+const MAIL_UNDO_WORD = new Set(['undo', 'cancel', 'unschedule', 'unsend']);
+function mailSendTool(name) {
+  const m = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (!m || MCP_READ_VERB.test(m[2])) return false;
+  const words = nameWords(m[2]);
+  if (!words.length || MAIL_UNDO_WORD.has(words[0])) return false;
+  const mail = nameWords(m[1]).some(MAIL_SERVER_WORD) || words.some(MAIL_TOOL_WORD);
+  if (!mail) return false;
+  // Writing or editing a draft sends nothing (`create_draft`, `draft_reply`); sending
+  // one does (`send_draft`, `drafts.send`).
+  if (words.some(w => w === 'draft' || w === 'drafts')) return words.includes('send');
+  return words.some(w => MAIL_SEND_WORD.has(w) || MAIL_AUTO_WORD.has(w));
+}
+// Mail-send endpoints of the common email APIs: Gmail, Microsoft Graph, SendGrid,
+// Mailgun, Postmark, Resend, Amazon SES (v2 path; the v1 query API is matched below),
+// Mandrill and SparkPost.
+const MAIL_SEND_URL = new RegExp([
+  String.raw`gmail\/v1\/users\/[^\/\s"']+\/(messages|drafts)\/send\b`,
+  String.raw`graph\.microsoft\.com\/[^\s"']*?\/(sendMail\b|messages\/[^\/\s"']+\/(send|reply|replyAll|forward)\b)`,
+  String.raw`api\.sendgrid\.com\/v3\/mail\/send\b`,
+  String.raw`api\.(eu\.)?mailgun\.net\/v3\/[^\s"']+\/messages(\.mime)?(?=[\s"'?]|$)`,
+  String.raw`api\.postmarkapp\.com\/email\b`,
+  String.raw`api\.resend\.com\/emails\b`,
+  String.raw`email\.[a-z0-9-]+\.amazonaws\.com\/v2\/email\/outbound-(bulk-)?emails\b`,
+  String.raw`mandrillapp\.com\/api\/1\.0\/messages\/send`,
+  String.raw`api\.(eu\.)?sparkpost\.com\/api\/v1\/transmissions\b`,
+].join('|'), 'i');
+// `mail`, `mailx` and `mutt` with no subject, attachment or recipient open a mailbox to
+// read; with one of those they send.
+// The flags differ: `mailx -H` only prints headers, while `mutt -H file` sends a draft.
+const MAIL_READERS = new Set(['mail', 'mailx', 's-nail', 'nail', 'mutt', 'neomutt']);
+const MAIL_COMPOSE_FLAGS = ['-s', '-a', '-c', '-b', '-t', '--subject', '--attach'];
+const MUTT_COMPOSE_FLAGS = ['-H', '-i'];
+// These always send, except for their informational modes. The flags are per tool:
+// `msmtp -S` prints server details, while `swaks -S` is --silent and still sends.
+const SMTP_CLIENT_INFO_FLAGS = { msmtp: ['-S', '--serverinfo', '-P', '--pretend', '--version', '--help'], ssmtp: ['--help', '--version'], swaks: ['--help', '--version'] };
+function mailSendArgv(a) {
+  if (MAIL_READERS.has(a[0])) {
+    const compose = /mutt$/.test(a[0]) ? [...MAIL_COMPOSE_FLAGS, ...MUTT_COMPOSE_FLAGS] : MAIL_COMPOSE_FLAGS;
+    return hasFlag(a, ...compose) || a.slice(1).some(x => !x.startsWith('-') && /[^@\s]@[^@\s]/.test(x));
+  }
+  // `sendmail -bp` lists the queue and `-bv` verifies an address; everything else sends.
+  if (a[0] === 'sendmail') return !hasFlag(a, '-bp', '-bv', '-bt', '-bi', '--help', '--version');
+  if (Object.hasOwn(SMTP_CLIENT_INFO_FLAGS, a[0])) return !hasFlag(a, ...SMTP_CLIENT_INFO_FLAGS[a[0]]);
+  if (a[0] === 'aws') { const p = positional(a); return ['ses', 'sesv2'].includes(p[0]) && /^send-/.test(p[1] ?? ''); }
+  // curl speaks SMTP: `curl smtp://host --mail-rcpt a@b.c -T message.txt`.
+  if (a[0] === 'curl') return hasFlag(a, '--mail-rcpt') || a.some(x => /^smtps?:\/\//i.test(x));
+  return false;
+}
+
 // Commands that only search, read or print. When every segment is one of these, SQL or
 // a GraphQL mutation appearing in the text is being looked at, not executed.
 const INERT = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'cat', 'less', 'more', 'head', 'tail', 'echo', 'printf', 'wc', 'find', 'ls', 'git-grep']);
@@ -274,6 +337,13 @@ export const RULES = [
       || (['kubectl', 'oc'].includes(a[0]) && ['apply', 'replace', 'rollout'].includes(positional(a)[0]) && a.some(x => /prod/i.test(x)))
       || (a[0] === 'helm' && ['upgrade', 'install', 'rollback'].includes(positional(a)[0]) && a.some(x => /prod/i.test(x)))
       || (git(a, 'push') && positional(a).slice(1).some(x => /^heroku$|^dokku$|^production$|^prod$/.test(x))) },
+  { id: 'mail.send', effect: 'ask', kind: 'ship', description: 'Sending, replying to or forwarding email, or setting mail to forward or auto-reply on its own (a sent message cannot be recalled)',
+    text: (t, segs) => !inert(segs, t) && (MAIL_SEND_URL.test(t)
+      || (/\bemail\.[a-z0-9-]+\.amazonaws\.com\b/i.test(t) && /\bAction=Send(Raw|Templated|BulkTemplated)?Email\b/.test(t))
+      || (/\bsmtplib\b/.test(t) && /\.(sendmail|send_message)\s*\(/.test(t))
+      || (/\bnodemailer\b/.test(t) && /\.sendMail\s*\(/.test(t))),
+    argv: mailSendArgv,
+    tool: mailSendTool },
   { id: 'guard.self-edit', effect: 'ask', kind: 'tamper', description: 'Changing the guard\'s own configuration or the agent\'s hook settings',
     text: t => /(\.atlasent[\/\\](hooks|credentials|pending)\.json|\.claude[\/\\]settings(\.local)?\.json|\.cursor[\/\\]hooks\.json)/.test(t) && /(>|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\bchmod\b|\btruncate\b|\bln\b|\bperl\s+-[a-z]*i|\bpython|\bnode\s+-e)/.test(t),
     path: p => CONFIG_PATH.test(p) },
