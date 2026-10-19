@@ -56,7 +56,7 @@ instead of a teardown.
 | `git.discard-work` | ask | `git reset --hard`, `git clean -f`, `git branch -D`, `git checkout -- .`, `git filter-repo` |
 | `deploy.release` | ask | `vercel --prod`, `fly deploy`, `railway up`, `terraform apply`, `npm publish`, `gh release create`, `supabase db push`, `wrangler deploy` |
 | `mcp.destructive` | ask | any MCP tool named like `delete_*`, `*_drop`, `reset_*`, `deploy_*`, `publish_*` |
-| `mail.send` | ask | an MCP mail tool that sends, replies or forwards (`mcp__Gmail__send_message`, `send_draft`, `outlook__send_mail`), or turns on auto-forwarding or an auto-reply; `sendmail`, `mail -s … to@x`, `aws ses send-email`, `curl` to the Gmail, Microsoft Graph, SendGrid, Mailgun, Postmark, Resend or SES send endpoint, `smtplib`/`nodemailer` sends (not `create_draft`, `update_draft`, reading or searching mail) |
+| `mail.send` | ask | an MCP mail tool that sends, replies or forwards (`mcp__Gmail__send_message`, `send_draft`, `outlook__send_mail`), or turns on auto-forwarding or an auto-reply; `sendmail`, `mail board` or `mail -s … to@x` (any recipient, including a local user or alias), `aws ses send-email`, `curl` to the Gmail, Microsoft Graph, SendGrid, Mailgun, Postmark, Resend (POST only) or SES send endpoint, `smtplib`/`nodemailer` sends (not `create_draft`, `update_draft`, reading or searching mail) |
 | `guard.self-edit` | ask | the agent editing `.atlasent/hooks.json` or `.claude/settings.json` |
 
 It unwraps `sudo`, `env`, `timeout`, `npx`, `VAR=value`, chains (`&&`, `;`, `|`),

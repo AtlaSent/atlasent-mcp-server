@@ -204,32 +204,76 @@ function mailSendTool(name) {
   return words.some(w => MAIL_SEND_WORD.has(w) || MAIL_AUTO_WORD.has(w));
 }
 // Mail-send endpoints of the common email APIs: Gmail, Microsoft Graph, SendGrid,
-// Mailgun, Postmark, Resend, Amazon SES (v2 path; the v1 query API is matched below),
-// Mandrill and SparkPost.
+// Mailgun, Postmark, Amazon SES (v2 path; the v1 query API is matched below), Mandrill
+// and SparkPost. Each is POST-only, so the URL alone says send. Resend is not: see
+// resendSend below.
 const MAIL_SEND_URL = new RegExp([
   String.raw`gmail\/v1\/users\/[^\/\s"']+\/(messages|drafts)\/send\b`,
   String.raw`graph\.microsoft\.com\/[^\s"']*?\/(sendMail\b|messages\/[^\/\s"']+\/(send|reply|replyAll|forward)\b)`,
   String.raw`api\.sendgrid\.com\/v3\/mail\/send\b`,
   String.raw`api\.(eu\.)?mailgun\.net\/v3\/[^\s"']+\/messages(\.mime)?(?=[\s"'?]|$)`,
   String.raw`api\.postmarkapp\.com\/email\b`,
-  String.raw`api\.resend\.com\/emails\b`,
   String.raw`email\.[a-z0-9-]+\.amazonaws\.com\/v2\/email\/outbound-(bulk-)?emails\b`,
   String.raw`mandrillapp\.com\/api\/1\.0\/messages\/send`,
   String.raw`api\.(eu\.)?sparkpost\.com\/api\/v1\/transmissions\b`,
 ].join('|'), 'i');
+// Resend's `/emails` lists messages on GET and sends on POST (`/emails/batch` likewise);
+// `/emails/<id>` reads or updates one. So the method decides. curl's is read from its
+// flags; anywhere else, only an explicit GET passes, so an unknown method still asks.
+const RESEND_SEND_URL = /api\.resend\.com\/emails(\/batch)?(?=[\s"'?#]|$)/i;
+function curlMethod(a) {
+  for (let i = 1; i < a.length; i++) {
+    const x = a[i];
+    if (x === '--request') return (a[i + 1] ?? '').toUpperCase();
+    const req = /^--request=(.*)$/.exec(x); if (req) return req[1].toUpperCase();
+    const short = /^-[A-Za-z]*X(.*)$/.exec(x); if (short) return (short[1] || a[i + 1] || '').toUpperCase();
+  }
+  if (a.some(x => x === '-I' || x === '--head')) return 'HEAD';
+  if (a.some(x => x === '-G' || x === '--get')) return 'GET';
+  const sends = a.slice(1).some(x => /^--(data(-raw|-binary|-urlencode|-ascii)?|form(-string)?|json|upload-file)(=|$)/.test(x) || /^-[A-Za-z]*[dFT]/.test(x));
+  return sends ? 'POST' : 'GET';
+}
+function resendSend(t, segs) {
+  if (!RESEND_SEND_URL.test(t)) return false;
+  const curls = segs.filter(a => a[0] === 'curl' && a.some(x => RESEND_SEND_URL.test(x)));
+  if (curls.length) return curls.some(a => !['GET', 'HEAD'].includes(curlMethod(a)));
+  return !/\b(requests|httpx|axios|got|ky|session|client)\.(get|head)\s*\(|\bmethod\s*[:=]\s*["'](GET|HEAD)["']|\b(https?|xh)\s+(GET|HEAD)\b/i.test(t);
+}
 // `mail`, `mailx` and `mutt` with no subject, attachment or recipient open a mailbox to
 // read; with one of those they send.
 // The flags differ: `mailx -H` only prints headers, while `mutt -H file` sends a draft.
 const MAIL_READERS = new Set(['mail', 'mailx', 's-nail', 'nail', 'mutt', 'neomutt']);
 const MAIL_COMPOSE_FLAGS = ['-s', '-a', '-c', '-b', '-t', '--subject', '--attach'];
 const MUTT_COMPOSE_FLAGS = ['-H', '-i'];
+// A recipient is any operand, not only an Internet address: `mail board` mails a local
+// user or an alias, and an alias can forward anywhere. Operands are what is left after
+// the values of options that take one. An option that takes a value in one
+// implementation and not another (`-q`) is left out, so the doubt flags rather than
+// passes. `-u user` and the s-nail/GNU settings, account and command options are here
+// because they appear when reading mail too.
+const MAILX_VALUE_OPTS = new Set(['-u', '-A', '-S', '-L', '-X', '-Y', '-E', '-s', '-c', '-b', '-r', '-a', '-C', '-T', '-O', '-M', '-m',
+  '--user', '--exec', '--subject', '--attach', '--append', '--return-address', '--content-type', '--encoding', '--content-filename']);
+const MUTT_VALUE_OPTS = new Set(['-e', '-F', '-m', '-f', '-H', '-i', '-s', '-b', '-c', '-Q', '-A', '-d', '-a']);
+function mailOperands(a, valueOpts) {
+  const out = [];
+  for (let i = 1; i < a.length; i++) {
+    const x = a[i];
+    if (x.startsWith('-') && x.length > 1) { if (!x.includes('=') && valueOpts.has(x)) i++; continue; }
+    out.push(x);
+  }
+  return out;
+}
 // These always send, except for their informational modes. The flags are per tool:
 // `msmtp -S` prints server details, while `swaks -S` is --silent and still sends.
 const SMTP_CLIENT_INFO_FLAGS = { msmtp: ['-S', '--serverinfo', '-P', '--pretend', '--version', '--help'], ssmtp: ['--help', '--version'], swaks: ['--help', '--version'] };
 function mailSendArgv(a) {
   if (MAIL_READERS.has(a[0])) {
-    const compose = /mutt$/.test(a[0]) ? [...MAIL_COMPOSE_FLAGS, ...MUTT_COMPOSE_FLAGS] : MAIL_COMPOSE_FLAGS;
-    return hasFlag(a, ...compose) || a.slice(1).some(x => !x.startsWith('-') && /[^@\s]@[^@\s]/.test(x));
+    const mutt = /mutt$/.test(a[0]);
+    if (hasFlag(a, ...(mutt ? [...MAIL_COMPOSE_FLAGS, ...MUTT_COMPOSE_FLAGS] : MAIL_COMPOSE_FLAGS))) return true;
+    // `-f` opens a mailbox to read (`mail -f mbox`, `mutt -f =INBOX`); its operand is a
+    // folder, not a recipient.
+    if (a.slice(1).some(x => /^(-f|--file(=|$))/.test(x))) return false;
+    return mailOperands(a, mutt ? MUTT_VALUE_OPTS : MAILX_VALUE_OPTS).length > 0;
   }
   // `sendmail -bp` lists the queue and `-bv` verifies an address; everything else sends.
   if (a[0] === 'sendmail') return !hasFlag(a, '-bp', '-bv', '-bt', '-bi', '--help', '--version');
@@ -338,7 +382,7 @@ export const RULES = [
       || (a[0] === 'helm' && ['upgrade', 'install', 'rollback'].includes(positional(a)[0]) && a.some(x => /prod/i.test(x)))
       || (git(a, 'push') && positional(a).slice(1).some(x => /^heroku$|^dokku$|^production$|^prod$/.test(x))) },
   { id: 'mail.send', effect: 'ask', kind: 'ship', description: 'Sending, replying to or forwarding email, or setting mail to forward or auto-reply on its own (a sent message cannot be recalled)',
-    text: (t, segs) => !inert(segs, t) && (MAIL_SEND_URL.test(t)
+    text: (t, segs) => !inert(segs, t) && (MAIL_SEND_URL.test(t) || resendSend(t, segs)
       || (/\bemail\.[a-z0-9-]+\.amazonaws\.com\b/i.test(t) && /\bAction=Send(Raw|Templated|BulkTemplated)?Email\b/.test(t))
       || (/\bsmtplib\b/.test(t) && /\.(sendmail|send_message)\s*\(/.test(t))
       || (/\bnodemailer\b/.test(t) && /\.sendMail\s*\(/.test(t))),
