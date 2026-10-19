@@ -14,6 +14,18 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+### Changed
+
+- Tools the hosted AtlaSent API does not serve are no longer listed when the
+  server targets it. 26 tools still call slash-form `/v1/*` paths that
+  `api.atlasent.io` answers with 404 (single-policy CRUD, permit get/check/
+  revoke/issue, v1 permit verify, get decision, record execution evaluation,
+  webhook create/delete, SCIM, SIEM, evidence-export list/create, VQP reports).
+  They are registered when `ATLASENT_BASE_URL` points at a self-hosted runtime,
+  or with `ATLASENT_MCP_ENABLE_GATEWAY_TOOLS=1`. `evaluate`, `verify_permit`
+  and the other authorization tools are unchanged. Agent guidance now names
+  `verify_permit` as the verifier. See README "Hosted vs self-hosted tools".
+
 ### Fixed
 
 - Workflows written with inline YAML collections are analyzed instead of

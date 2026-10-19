@@ -316,6 +316,8 @@ Protected deployment demonstration. It performs the necessary Authorization and 
 
 Hosted V1 API-facing tools. Use the richer remote evaluation path when you need additional context beyond the small `evaluate` demo envelope. Verification remains an execution-boundary operation.
 
+`atlasent_verify_permit` calls `POST /v1/permits/verify`, which the hosted API does not serve, so it is registered only against a self-hosted gateway (see [Hosted vs self-hosted tools](#hosted-vs-self-hosted-tools)). Against the hosted API, verify with `verify_permit`.
+
 For `agent.*` actions (e.g. `agent.tool.invoke`) `atlasent_evaluate` seals source provenance before evaluating, as `evaluate` does, and the result may carry `bound_payload_hash` and `bound_actor_id`. The permit is bound to those values, so present them to `verify_permit` as `payload_hash` and `actor_id`.
 
 ### `atlasent_lookup_action`
@@ -409,7 +411,7 @@ Read `summary.audited_scope` before concluding anything from an empty `findings`
 
 ### `atlasent_get_permit` / `atlasent_check_permit` / `atlasent_get_decision`
 
-Read-only lookups of a single record. Hosted mode only.
+Read-only lookups of a single record. Self-hosted `/v1/*` gateway only for now: they are not registered against the hosted API (see [Hosted vs self-hosted tools](#hosted-vs-self-hosted-tools)). `atlasent_get_permit` and `atlasent_check_permit` can come back on the hosted API once atlasent-api#4522 is in production.
 
 ```text
 atlasent_get_permit    { permit_id }                     -> the permit record (status, actor, action, times, decision_id)
@@ -417,11 +419,11 @@ atlasent_check_permit  { permit_id }                     -> { valid, status: act
 atlasent_get_decision  { evaluation_id, include_trace? } -> { evaluation, trace?: { approvals, permit_uses, webhooks } }
 ```
 
-`atlasent_check_permit` reads status without consuming the permit. Use it before a deferred action to catch a revocation, but it is **not** authorization: execute only after `atlasent_verify_permit`. `atlasent_get_decision` requires the `audit:read` scope; a permit's `decision_id` is the id to pass.
+`atlasent_check_permit` reads status without consuming the permit. Use it before a deferred action to catch a revocation, but it is **not** authorization: execute only after `verify_permit`. `atlasent_get_decision` requires the `audit:read` scope; a permit's `decision_id` is the id to pass.
 
 Permit tools never return the permit's `token` (its bearer credential) or `signature`. Anything a tool returns lands in the agent's context and transcript, so both fields are stripped client-side as well as by the API.
 
-The server also exposes policy, permit, approval, evidence, compliance, and VQP tools. Use MCP `tools/list` for the exact tool inventory supported by the installed version.
+The server also exposes policy, permit, approval, evidence, compliance, and VQP tools. Which of them are registered depends on whether the server targets the hosted API or a self-hosted gateway (see [Hosted vs self-hosted tools](#hosted-vs-self-hosted-tools)). Use MCP `tools/list` for the exact tool inventory of your configuration.
 
 ## Prompts
 
@@ -448,7 +450,7 @@ Approval / Assertion collected
   → native effect
 ```
 
-Approvals are made by a person in the AtlaSent console, never by an agent: this server deliberately has no tool that creates or resolves an approval. When an action is held for a person, the result carries an `approval_request_id`; call `atlasent_await_approval` with it to wait while the person decides in the console. On approval it returns a permit that must still pass `atlasent_verify_permit`; a rejection, expiry or timeout returns no permit and the action does not run. (Remote mode only; local mode never approves.) The protected Action must still satisfy the current authorization path and execution-boundary Verification before proceeding.
+Approvals are made by a person in the AtlaSent console, never by an agent: this server deliberately has no tool that creates or resolves an approval. When an action is held for a person, the result carries an `approval_request_id`; call `atlasent_await_approval` with it to wait while the person decides in the console. On approval it returns a permit that must still pass `verify_permit`; a rejection, expiry or timeout returns no permit and the action does not run. (Remote mode only; local mode never approves.) The protected Action must still satisfy the current authorization path and execution-boundary Verification before proceeding.
 
 **Change plans and plan changes.** `production.deploy`, `infrastructure.change`, `production.rollback` and `secret.configuration.change` need a `change_plan` (`{ operation, revision?, artifact_ref? }`, with a revision and/or artifact ref). Pass it to `deploy_service`, `evaluate` or `atlasent_evaluate`. The server first creates a Change Brief recording exactly that plan, then evaluates with the brief id and the same plan. When the key cannot create briefs (HTTP 403) or the runtime has none (HTTP 404), the server evaluates with the plan alone and adds a `notes` entry. Any other brief failure blocks the evaluation. On claim, the server presents the same plan again, so a mismatch means the plan really changed. If your plan changed while you waited, pass the new plan to `atlasent_await_approval` as `change_plan`. By default the server files **one** linked re-request for the new plan (`supersedes_approval_id` set to the old approval), then waits for a person to decide it. The result shows the steps in `summary`, for example "plan changed from X to Y → re-request sent (approval …) → waiting → approved". With `on_plan_mismatch: "use_approved"`, the server claims the approved plan and returns it as `approved_plan`; run exactly that plan. A second mismatch, a revoked or suspicious approval, or an organization policy with `auto_rerequest_on_mismatch: false` stops the wait with no permit. The result includes the diff and what to do next.
 
@@ -471,7 +473,7 @@ used to decide anything.
 
 ## Execution evidence
 
-`atlasent_record_execution_evaluation` records an observed execution outcome after the native effect. That evidence function does **not** replace pre-execution Permit Verification.
+`atlasent_record_execution_evaluation` records an observed execution outcome after the native effect. That evidence function does **not** replace pre-execution Permit Verification. It is registered only against a self-hosted `/v1/*` gateway (see [Hosted vs self-hosted tools](#hosted-vs-self-hosted-tools)).
 
 Keep these statements distinct:
 
@@ -527,20 +529,43 @@ deployed name: `/v1-evaluate`, `/v1-verify-permit`, `/v1-approvals/...`,
 The organization always comes from the API key; the `org_id` argument does not
 select another one.
 
-**These tools do not work against the hosted API yet:** `atlasent_get_policy`,
-`atlasent_create_policy`, `atlasent_update_policy`, `atlasent_delete_policy`,
-`atlasent_get_permit`, `atlasent_check_permit`, `atlasent_revoke_permit`,
-`atlasent_get_decision`, `atlasent_permit`, `atlasent_verify_permit`,
-`atlasent_record_execution_evaluation`, `atlasent_create_webhook`,
-`atlasent_delete_webhook`, the SCIM tools, the SIEM tools,
-`atlasent_list_evidence_exports` and `atlasent_create_evidence_export`. They
-still call the slash-form `/v1/<resource>` paths at the domain root (the server
-strips `/functions/v1` for them), and `api.atlasent.io` does not serve that
-shape: those requests return 404 and the tool returns an error. Each one is
-waiting on a runtime handler that routes its deployed path, a route that does
-not exist yet, or a different request shape or credential; the reason is noted
-at its call site in `src/engine.ts`. A self-hosted deployment that runs its own
-`/v1/*` gateway at the domain root can still use them.
+### Hosted vs self-hosted tools
+
+Some tools still call slash-form `/v1/<resource>` paths at the domain root (the
+server strips `/functions/v1` for them), and `api.atlasent.io` does not serve
+that shape: those requests return 404. So that agents only see tools that work,
+**these tools are not registered when the server targets the hosted API**:
+
+| Group | Tools |
+|---|---|
+| Policies | `atlasent_get_policy`, `atlasent_create_policy`, `atlasent_update_policy`, `atlasent_delete_policy` |
+| Permits | `atlasent_get_permit`, `atlasent_check_permit`, `atlasent_revoke_permit`, `atlasent_permit` (issue), `atlasent_verify_permit` (v1 verify) |
+| Decisions and evidence | `atlasent_get_decision`, `atlasent_record_execution_evaluation` |
+| Webhooks | `atlasent_create_webhook`, `atlasent_delete_webhook` |
+| SCIM | `atlasent_list_scim_users`, `atlasent_get_scim_user`, `atlasent_create_scim_user`, `atlasent_patch_scim_user`, `atlasent_delete_scim_user`, `atlasent_list_scim_groups` |
+| SIEM | `atlasent_get_siem_config`, `atlasent_upsert_siem_config`, `atlasent_test_siem_delivery` |
+| Evidence exports | `atlasent_list_evidence_exports`, `atlasent_create_evidence_export` |
+| VQP reports | `atlasent_vqp_audit_summary`, `atlasent_vqp_drift_events` |
+
+"Targets the hosted API" means `ATLASENT_BASE_URL` is unset or blank (the
+default), unparseable, or on `api.atlasent.io` or one of AtlaSent's hosted
+Supabase projects. They are also hidden in local mode: they never use the local
+engine and only make remote calls, so none of them works there either.
+
+They are registered, unchanged, when either:
+
+- the server is in remote mode and `ATLASENT_BASE_URL` points at any other host
+  (a self-hosted runtime that runs its own `/v1/*` gateway), or
+- `ATLASENT_MCP_ENABLE_GATEWAY_TOOLS=1` (or `true`) is set, whatever the target.
+
+Each one is waiting on a runtime handler that routes its deployed path, a route
+that does not exist yet, or a different request shape or credential; the reason
+is noted at its call site in `src/engine.ts`. `atlasent_get_permit` and
+`atlasent_check_permit` can return on the hosted API once atlasent-api#4522 is
+in production. Hiding changes `tools/list` only: `evaluate`, `verify_permit`,
+`atlasent_evaluate`, `deploy_service` and approval waiting are always
+registered and behave the same either way. `ATLASENT_MCP_READONLY=1` still
+removes the mutating ones when they are registered.
 
 `ATLASENT_FUNCTION_REGION` controls where the runtime's edge functions execute.
 Unset, calls to the hosted runtime run in `us-west-1`, next to its database. A

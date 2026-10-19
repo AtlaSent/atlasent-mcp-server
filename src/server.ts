@@ -52,6 +52,7 @@ import { registerEvidenceGapTool } from "./evidenceGap.js";
 import { registerExposureReviewTool } from "./exposureReview.js";
 import { registerPrompts } from "./prompts.js";
 import { aiActionConfigFromEnv, registerAiActionTools } from "./aiActionTools.js";
+import { applyGatewayToolGate, GATEWAY_TOOLS_ENV } from "./gatewayTools.js";
 import { CANON_ACT_CATALOG, type ActSpecEntry } from "./canonCatalog.js";
 import { CANON_ACTION_GRAPH } from "./canonGraph.js";
 import { NO_MATCH_HINT, rankActions, type RetrievalResult } from "./actionRetrieval.js";
@@ -398,6 +399,17 @@ export function createServer(): McpServer {
     },
     { instructions: serverInstructions() },
   );
+
+  // Gateway-only tools (src/gatewayTools.ts) are dropped as they register
+  // unless the configuration targets a self-hosted `/v1/*` gateway or opts in
+  // with ATLASENT_MCP_ENABLE_GATEWAY_TOOLS. This changes tools/list only.
+  const hiddenGatewayTools = applyGatewayToolGate(server);
+  if (hiddenGatewayTools.length > 0) {
+    log("server.gateway_tools_hidden", {
+      hidden_tools: hiddenGatewayTools,
+      enable_with: GATEWAY_TOOLS_ENV,
+    });
+  }
 
   if (
     process.env.ATLASENT_MCP_READONLY === "1" ||
@@ -1639,7 +1651,7 @@ export function createServer(): McpServer {
   // WAITS for a person's decision on a held action. It cannot approve: there
   // is no decision/resolution input, and a person approves only in the
   // AtlaSent console. On approval it claims the single permit the runtime
-  // minted; that permit must still go through atlasent_verify_permit before
+  // minted; that permit must still go through verify_permit before
   // anything runs. Every other outcome is no permit (fail-closed).
   server.registerTool(
     "atlasent_await_approval",
@@ -1649,7 +1661,7 @@ export function createServer(): McpServer {
         "Wait for a person to approve or reject a held action in the AtlaSent console. " +
         "Use the approval_request_id from a 'hold' result. This tool cannot approve anything; " +
         "it only waits. If approved, it returns a permit_token that you MUST verify with " +
-        "atlasent_verify_permit before running the action. Any other outcome (rejected, expired, " +
+        "verify_permit before running the action. Any other outcome (rejected, expired, " +
         "timed out) means the action must not run.",
       inputSchema: z.object({
         approval_request_id: z
@@ -1708,7 +1720,7 @@ export function createServer(): McpServer {
             ...result,
             ...summary,
             next_step:
-              "Call atlasent_verify_permit with this permit_token before running the action" +
+              "Call verify_permit with this permit_token before running the action" +
               (result.approved_plan ? ", and run exactly approved_plan." : "."),
           });
         }
