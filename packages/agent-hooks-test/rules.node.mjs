@@ -133,6 +133,30 @@ const FLAGGED = [
   ['find -D stat . -delete', 'ask', 'fs.rm-broad'],
   ['find / -name keep -o -delete', 'deny', 'fs.rm-root'],
   ['find . -name keep -or -exec rm -rf {} +', 'ask', 'fs.rm-broad'],
+  // Email leaves the account and cannot be recalled.
+  ['echo "see attached" | mail -s "Q3 numbers" cfo@example.com', 'ask', 'mail.send'],
+  ['mutt -s hi -a report.pdf -- ops@example.com < body.txt', 'ask', 'mail.send'],
+  ['neomutt -H draft.eml', 'ask', 'mail.send'],
+  ['sendmail -t < message.eml', 'ask', 'mail.send'],
+  ['msmtp -a work board@example.com < message.eml', 'ask', 'mail.send'],
+  ['swaks --to a@example.com --server smtp.example.com', 'ask', 'mail.send'],
+  ['swaks -S --to a@example.com --server smtp.example.com', 'ask', 'mail.send'],
+  ['xargs -I{} mail -s hi {} < customers.txt', 'ask', 'mail.send'],
+  ['aws ses send-email --from a@example.com --destination ToAddresses=b@example.com', 'ask', 'mail.send'],
+  ['aws --region us-east-1 sesv2 send-email --content file://m.json', 'ask', 'mail.send'],
+  ['curl smtp://smtp.gmail.com:587 --mail-from a@example.com --mail-rcpt b@example.com -T m.txt', 'ask', 'mail.send'],
+  ['curl -X POST -H "Authorization: Bearer $T" https://gmail.googleapis.com/gmail/v1/users/me/messages/send -d @msg.json', 'ask', 'mail.send'],
+  ['curl -X POST https://gmail.googleapis.com/gmail/v1/users/me/drafts/send -d \'{"id":"r1"}\'', 'ask', 'mail.send'],
+  ['curl "https://www.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media" --data-binary @m.eml', 'ask', 'mail.send'],
+  ['curl -X POST https://graph.microsoft.com/v1.0/me/sendMail -d @m.json', 'ask', 'mail.send'],
+  ['curl -X POST https://graph.microsoft.com/v1.0/me/messages/AAMk=/forward -d @to.json', 'ask', 'mail.send'],
+  ['curl https://api.sendgrid.com/v3/mail/send -H "Authorization: Bearer $K" -d @m.json', 'ask', 'mail.send'],
+  ['curl -s --user "api:$K" https://api.mailgun.net/v3/mg.example.com/messages -F to=a@example.com', 'ask', 'mail.send'],
+  ['curl https://api.postmarkapp.com/email -d @m.json', 'ask', 'mail.send'],
+  ['curl https://api.resend.com/emails -d @m.json', 'ask', 'mail.send'],
+  ['curl https://email.us-east-1.amazonaws.com/ -d "Action=SendRawEmail&RawMessage.Data=x"', 'ask', 'mail.send'],
+  ['python3 - <<PY\nimport smtplib\ns = smtplib.SMTP("smtp.example.com")\ns.send_message(msg)\nPY', 'ask', 'mail.send'],
+  ['node -e "require(\'nodemailer\').createTransport(cfg).sendMail(msg)"', 'ask', 'mail.send'],
 ];
 
 const SAFE = [
@@ -151,6 +175,17 @@ const SAFE = [
   // Prose that mentions SQL or an API call is not running it.
   'git commit -m "fix: drop table handling in migration"', 'git commit -m "remove DELETE FROM sessions;"',
   'gh pr create --title "x" --body "handles TRUNCATE TABLE and curl -X DELETE"',
+  // Reading mail, and reading about sending it, sends nothing.
+  'mail', 'mail -f ~/mbox', 'mailx -H', 'mutt', 'mutt -f =INBOX', 'sendmail -bp', 'msmtp --version', 'msmtp --serverinfo --host=smtp.example.com',
+  'which sendmail', 'ls -l /usr/sbin/sendmail', 'aws ses get-send-quota', 'aws ses list-identities',
+  'curl https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread',
+  'curl -X POST https://gmail.googleapis.com/gmail/v1/users/me/drafts -d @draft.json',
+  'curl -X POST https://graph.microsoft.com/v1.0/me/messages/AAMk=/createReply',
+  'curl https://api.mailgun.net/v3/domains/mg.example.com/messages/KEY',
+  'python3 -c "import smtplib; print(smtplib.__file__)"',
+  'grep -rn "messages/send" src/', 'rg sendMail src', 'cat docs/smtp.md',
+  'git commit -m "call https://api.sendgrid.com/v3/mail/send from the mailer"',
+  'echo "remember to mail -s report bob@example.com"',
 ];
 
 test('flags destructive and shipping commands with the expected rule', () => {
@@ -188,6 +223,24 @@ test('MCP tools: destructive names and destructive SQL arguments', () => {
   assert.equal(t('mcp__github__list_releases'), null);
   assert.equal(t('mcp__vercel__get_deployment'), null);
   assert.equal(t('mcp__github__create_release'), 'mcp.destructive');
+});
+
+test('MCP tools: sending email asks, drafting and reading do not', () => {
+  const t = name => decisionOf(classify({ kind: 'tool', name, input: {} })).rule?.id ?? null;
+  // The founder incident: the session held a raw Gmail send tool, and "draft this, do
+  // not send" was not a control.
+  for (const name of ['mcp__Gmail__send_message', 'mcp__claude_ai_Gmail__send_message', 'mcp__Gmail__reply', 'mcp__Gmail__forward',
+    'mcp__gmail__send_draft', 'mcp__gmail__drafts.send', 'mcp__gmail__users_messages_send', 'mcp__gmail__schedule_send',
+    'mcp__outlook__send_mail', 'mcp__ms365__sendMail', 'mcp__ms365__reply_to_mail_message', 'mcp__resend__send-email', 'mcp__sendgrid__send',
+    'mcp__mailchimp__send_campaign', 'mcp__zapier__gmail_send_email', 'mcp__crm__send_notification_email',
+    'mcp__gmail__update_vacation_responder', 'mcp__gmail__create_forwarding_address']) assert.equal(t(name), 'mail.send', name);
+  for (const name of ['mcp__Gmail__create_draft', 'mcp__Gmail__update_draft', 'mcp__Gmail__list_drafts', 'mcp__Gmail__get_draft',
+    'mcp__Gmail__get_message', 'mcp__Gmail__get_thread', 'mcp__Gmail__search_threads', 'mcp__Gmail__label_message',
+    'mcp__Gmail__trash_thread', 'mcp__Gmail__mark_message_spam', 'mcp__gws__gmail_draft_reply', 'mcp__gmail__get_vacation_settings',
+    'mcp__gmail__list_send_as', 'mcp__gmail__check_send_quota', 'mcp__gmail__undo_send', 'mcp__gmail__cancel_scheduled_send',
+    'mcp__email__validate_address', 'mcp__k8s__port_forward', 'mcp__Google_Calendar__respond_to_event']) assert.equal(t(name), null, name);
+  // Deleting a draft is still a deletion.
+  assert.equal(t('mcp__Gmail__delete_draft'), 'mcp.destructive');
 });
 
 test('writes to the guard or agent hook configuration need approval', () => {

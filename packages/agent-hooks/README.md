@@ -56,6 +56,7 @@ instead of a teardown.
 | `git.discard-work` | ask | `git reset --hard`, `git clean -f`, `git branch -D`, `git checkout -- .`, `git filter-repo` |
 | `deploy.release` | ask | `vercel --prod`, `fly deploy`, `railway up`, `terraform apply`, `npm publish`, `gh release create`, `supabase db push`, `wrangler deploy` |
 | `mcp.destructive` | ask | any MCP tool named like `delete_*`, `*_drop`, `reset_*`, `deploy_*`, `publish_*` |
+| `mail.send` | ask | an MCP mail tool that sends, replies or forwards (`mcp__Gmail__send_message`, `send_draft`, `outlook__send_mail`), or turns on auto-forwarding or an auto-reply; `sendmail`, `mail -s … to@x`, `aws ses send-email`, `curl` to the Gmail, Microsoft Graph, SendGrid, Mailgun, Postmark, Resend or SES send endpoint, `smtplib`/`nodemailer` sends (not `create_draft`, `update_draft`, reading or searching mail) |
 | `guard.self-edit` | ask | the agent editing `.atlasent/hooks.json` or `.claude/settings.json` |
 
 It unwraps `sudo`, `env`, `timeout`, `npx`, `VAR=value`, chains (`&&`, `;`, `|`),
@@ -72,6 +73,10 @@ To see what it would do with any command, from a checkout of this repository:
 If Claude Code runs with `--dangerously-skip-permissions` (`bypassPermissions`) or
 `dontAsk`, there is no one to answer a prompt. In those modes every "ask" becomes a
 **deny**. Unattended agents are exactly where the incidents happen.
+
+That includes email. An assistant told "draft this, do not send" that holds a raw send
+tool can send anyway; with this plugin the send prompts you, and when nobody is there to
+answer, at 11:30 PM say, it does not go out. Writing the draft is not affected.
 
 ## Configure
 
@@ -117,6 +122,12 @@ Be clear-eyed about this; a guard that overclaims is worse than none.
   the risk. Scope your tokens.
 - **It only sees Claude Code.** The same agent using the same credentials elsewhere is
   outside it.
+- **Email coverage goes by tool and endpoint names.** A mail tool whose name does not say
+  it sends (or a mail server whose name does not say mail), a browser click on "Send",
+  or a chat or SMS message is not seen. A
+  `custom` rule with `"tool": true` adds a tool name it misses. The sender's own
+  account remains the only real boundary: an agent that should only draft should hold a
+  credential that can only draft.
 
 ## From your laptop to your organization
 

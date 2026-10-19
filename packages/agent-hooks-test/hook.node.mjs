@@ -43,6 +43,23 @@ test('with nobody to ask (bypassPermissions), an ask becomes a deny', () => {
   assert.match(out.hookSpecificOutput.permissionDecisionReason, /Nobody is available to approve/);
 });
 
+test('an MCP email send asks when attended and is refused when nobody is watching', () => {
+  const send = extra => ({ hook_event_name: 'PreToolUse', session_id: 's1', cwd: tmpdir(), permission_mode: 'default', tool_name: 'mcp__Gmail__send_message',
+    tool_input: { to: ['board@example.com'], subject: 'Draft only', body: 'Not for sending' }, ...extra });
+  const attended = run(send());
+  assert.equal(decision(attended.out), 'ask');
+  assert.match(attended.out.hookSpecificOutput.permissionDecisionReason, /mail\.send/);
+  // 11:30 PM, no one at the keyboard: the send does not happen.
+  const unattended = run(send({ permission_mode: 'bypassPermissions' }));
+  assert.equal(decision(unattended.out), 'deny');
+  assert.match(unattended.out.hookSpecificOutput.permissionDecisionReason, /Nobody is available to approve/);
+  const log = readFileSync(join(unattended.home, 'agent-hooks-activity.jsonl'), 'utf8');
+  assert.match(log, /"rule":"mail\.send"/);
+  assert.doesNotMatch(log, /board@example\.com|Not for sending/, 'the activity log never holds the message');
+  // Writing the draft is what was asked for, and is untouched.
+  assert.equal(run(send({ tool_name: 'mcp__Gmail__create_draft' })).out, null);
+});
+
 test('unreadable input fails closed', () => {
   assert.equal(decision(run(null, { raw: 'not json' }).out), 'deny');
   assert.equal(decision(run({ tool_name: 'Bash', tool_input: {} }).out), 'deny');
