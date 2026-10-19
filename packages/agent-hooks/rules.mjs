@@ -218,51 +218,58 @@ const MAIL_SEND_URL = new RegExp([
   String.raw`api\.(eu\.)?sparkpost\.com\/api\/v1\/transmissions\b`,
 ].join('|'), 'i');
 // Resend's `/emails` lists messages on GET and sends on POST (`/emails/batch` likewise);
-// `/emails/<id>` reads or updates one. So the method decides, and it is judged
-// conservatively: a command passes only if it shows a read and no sign of a write.
-// - curl: no method other than GET or HEAD, and no body, form, upload or config flag,
-//   anywhere in the invocation. Reading curl's options exactly has been wrong three
-//   ways (the last -X wins; --next resets options; an option's value can look like
-//   --next), so no attempt is made: an argument that only looks like an option can
-//   add a reason to ask, never remove one. A read written with -G -d, or a POST
-//   elsewhere in the same curl, asks too.
-// - Elsewhere a method cannot be tied to its call, so the command needs an explicit
-//   read and no write anywhere: `requests.get(a); requests.post(resend)` asks. Any
-//   occurrence of the endpoint that is not a curl argument is judged this way, even
-//   beside a curl read.
+// `/emails/<id>` reads or updates one. So the method decides, and only a KNOWN read
+// passes. Looking for signs of a write missed something five times (the last -X wins,
+// --next resets options, an option value can look like --next, --expand-data,
+// requests.request('POST', ...)), so the check is an allowlist instead:
+// - curl passes only when every option it is given is one this list knows to shape a
+//   read: headers, output, auth, timeouts, -X GET or HEAD. An option it does not know
+//   asks. The values of known options are skipped the way curl skips them, so
+//   `-H --next` is a header, not a separator.
+// - Anywhere else (a script, httpie, wget) the method cannot be read reliably, so any
+//   occurrence of the endpoint that is not a curl argument asks, even beside a curl read.
 const RESEND_SEND_URL = /api\.resend\.com\/emails(\/batch)?(?=[\s"'?#]|$)/i;
 const RESEND_SEND_URLS = new RegExp(RESEND_SEND_URL.source, 'gi');
-const HTTP_READ_CALL = /\b(requests|httpx|axios|got|ky|session|client)\.(get|head)\s*\(|\bmethod\s*[:=]\s*["'](GET|HEAD)["']|\b(https?|xh)\s+(GET|HEAD)\b/i;
-const HTTP_WRITE_CALL = /\.(post|put|patch)\s*\(|\bmethod\s*[:=]\s*["'](POST|PUT|PATCH)["']|\b(https?|xh)\s+(POST|PUT|PATCH)\b/i;
-const CURL_BODY_LONG = /^--(data(-raw|-binary|-urlencode|-ascii)?|form(-string)?|json|upload-file|config)(=|$)/;
-const CURL_BODY_SHORT = /[dFTK]/;
-function curlMayWrite(a) {
+const CURL_READ_LONG_FLAGS = new Set(['--silent', '--show-error', '--location', '--fail', '--fail-with-body', '--include', '--verbose',
+  '--insecure', '--head', '--compressed', '--globoff', '--no-progress-meter', '--http1.1', '--http2', '--next']);
+const CURL_READ_LONG_VALUES = new Set(['--header', '--output', '--user', '--user-agent', '--referer', '--max-time', '--connect-timeout',
+  '--write-out', '--cookie', '--range', '--proxy', '--url', '--oauth2-bearer', '--retry', '--retry-delay', '--cacert', '--cert', '--key']);
+const CURL_READ_SHORT_FLAGS = 'sSLfivkIg';
+const CURL_READ_SHORT_VALUES = 'HouAemwbrxX';
+const READ_METHOD = /^(GET|HEAD)$/i;
+function curlIsPlainRead(a) {
   for (let i = 1; i < a.length; i++) {
     const x = a[i];
-    if (CURL_BODY_LONG.test(x)) return true;
-    let method = null;
-    if (x === '--request') method = a[i + 1] ?? '';
-    else if (x.startsWith('--request=')) method = x.slice('--request='.length);
-    else if (/^-[A-Za-z]/.test(x)) {
-      // A short cluster: `-sd`, `-XPOST`, `-sX POST`. Letters before an X are flags;
-      // what follows the X is the method.
-      const m = /^-([A-Za-z]*?)X(.*)$/.exec(x);
-      const flags = m ? m[1] : x.slice(1);
-      if (CURL_BODY_SHORT.test(flags)) return true;
-      if (m) method = m[2] || (a[i + 1] ?? '');
+    if (!x.startsWith('-') || x === '-' || x === '-:') continue;
+    if (x.startsWith('--')) {
+      const eq = x.indexOf('=');
+      const name = eq === -1 ? x : x.slice(0, eq);
+      const inline = eq === -1 ? null : x.slice(eq + 1);
+      if (name === '--request') { if (!READ_METHOD.test(inline ?? a[++i] ?? '')) return false; continue; }
+      if (CURL_READ_LONG_FLAGS.has(name) && inline === null) continue;
+      if (CURL_READ_LONG_VALUES.has(name)) { if (inline === null) i++; continue; }
+      return false;
     }
-    if (method !== null && !/^(GET|HEAD)$/i.test(method)) return true;
+    // A short cluster: flag letters, optionally ending in one letter that takes a value,
+    // attached (`-XGET`, `-sHfoo`) or as the next argument (`-sX GET`).
+    for (let j = 1; j < x.length; j++) {
+      const c = x[j];
+      if (CURL_READ_SHORT_FLAGS.includes(c)) continue;
+      if (!CURL_READ_SHORT_VALUES.includes(c)) return false;
+      const value = j + 1 < x.length ? x.slice(j + 1) : a[++i];
+      if (c === 'X' && !READ_METHOD.test(value ?? '')) return false;
+      break;
+    }
   }
-  return false;
+  return true;
 }
 function resendSend(t, segs) {
   const total = (t.match(RESEND_SEND_URLS) ?? []).length;
   if (!total) return false;
   const curls = segs.filter(a => a[0] === 'curl' && a.some(x => RESEND_SEND_URL.test(x)));
-  if (curls.some(curlMayWrite)) return true;
+  if (!curls.every(curlIsPlainRead)) return true;
   const inCurl = curls.reduce((n, a) => n + a.filter(x => RESEND_SEND_URL.test(x)).length, 0);
-  if (total <= inCurl) return false;
-  return !(HTTP_READ_CALL.test(t) && !HTTP_WRITE_CALL.test(t));
+  return total > inCurl;
 }
 // `mail`, `mailx` and `mutt` with no subject, attachment or recipient open a mailbox to
 // read; with one of those they send.

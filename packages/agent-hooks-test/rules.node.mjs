@@ -174,6 +174,13 @@ const FLAGGED = [
   ['curl -G https://api.resend.com/emails -d limit=10', 'ask', 'mail.send'],
   ['curl -X POST -X GET https://api.resend.com/emails', 'ask', 'mail.send'],
   ['curl -X POST -d x https://example.com/hook --next https://api.resend.com/emails', 'ask', 'mail.send'],
+  // Only a known read passes: an option the guard does not know asks, and so does any
+  // use of the endpoint outside a curl argument (Codex review, #283).
+  ["curl --variable body=@m.json --expand-data '{{body}}' https://api.resend.com/emails", 'ask', 'mail.send'],
+  ['curl --request=POST https://api.resend.com/emails', 'ask', 'mail.send'],
+  ['curl -c jar.txt https://api.resend.com/emails', 'ask', 'mail.send'],
+  ['python3 -c "import requests; requests.get(\'https://example.com\'); requests.request(\'POST\', \'https://api.resend.com/emails\', json=m)"', 'ask', 'mail.send'],
+  ['python3 -c "import requests; requests.get(\'https://api.resend.com/emails\', headers=h)"', 'ask', 'mail.send'],
   ['python3 -c "import requests; requests.get(\'https://example.com\'); requests.post(\'https://api.resend.com/emails\', json=m)"', 'ask', 'mail.send'],
   ['curl -X GET https://api.resend.com/emails && python3 -c "import requests; requests.post(\'https://api.resend.com/emails\', json=m)"', 'ask', 'mail.send'],
   // A recipient need not contain @: a local user or an alias, which can forward
@@ -215,7 +222,10 @@ const SAFE = [
   'curl -sSL -H "Authorization: Bearer $K" https://api.resend.com/emails', 'bash -c "curl -X GET https://api.resend.com/emails"',
   'curl -H "Authorization: Bearer $K" https://api.resend.com/emails/4ef9a417',
   'curl -X POST https://api.resend.com/emails/4ef9a417/cancel',
-  'python3 -c "import requests; requests.get(\'https://api.resend.com/emails\', headers=h)"',
+  'curl -sS -o out.json -w "%{http_code}" -H "Authorization: Bearer $K" https://api.resend.com/emails',
+  'curl -u key: --max-time=10 https://api.resend.com/emails', 'curl -X HEAD https://api.resend.com/emails',
+  // A known option's value is skipped the way curl skips it, even when it looks like a flag.
+  'curl -H -d https://api.resend.com/emails', 'curl --header --json https://api.resend.com/emails',
   'mail -u alice', 'mail -e', 'mail --version', 'mail -S folder=~/Mail', 'mail -fmbox', 'mutt -A team', 'mutt -Q editor',
   'python3 -c "import smtplib; print(smtplib.__file__)"',
   'grep -rn "messages/send" src/', 'rg sendMail src', 'cat docs/smtp.md',
