@@ -512,15 +512,35 @@ ATLASENT_MCP_READONLY=1 \
 npx @atlasent/mcp-server
 ```
 
-`ATLASENT_BASE_URL` defaults to `https://api.atlasent.io/functions/v1` — this is the
-correct base for the core `evaluate` / `verify_permit` / `atlasent_evaluate` path and
-for other dash-form direct endpoints (`/v1-evaluate`, `/v1-verify-permit`,
-`/v1-authority-intelligence/...`). The generic REST tools (policies, permits, audit
-events, webhooks, SCIM, SIEM, evidence exports, approval requests) are served at the
-gateway/API domain root under slash-form paths (`/v1/policies`, `/v1/permits`, ...);
-the server automatically strips the `/functions/v1` suffix for those calls, so a
-single `ATLASENT_BASE_URL` value works for both families — no separate configuration
-needed.
+`ATLASENT_BASE_URL` defaults to `https://api.atlasent.io/functions/v1`. Every call
+that works against the hosted API goes to a function under that base, by its
+deployed name: `/v1-evaluate`, `/v1-verify-permit`, `/v1-approvals/...`,
+`/v1-authority-intelligence/...`, and for the REST-style tools:
+
+| Tool | Request |
+|---|---|
+| `atlasent_list_policies` | `GET {base}/v1-policies/` |
+| `atlasent_list_permits` | `GET {base}/v1-permits` |
+| `atlasent_list_audit_events` | `GET {base}/v1-audit/events` (refuses `evaluation_id`: the endpoint has no such filter) |
+| `atlasent_get_evidence_export` | `GET {base}/v1-evidence-exports/{id}` |
+
+The organization always comes from the API key; the `org_id` argument does not
+select another one.
+
+**These tools do not work against the hosted API yet:** `atlasent_get_policy`,
+`atlasent_create_policy`, `atlasent_update_policy`, `atlasent_delete_policy`,
+`atlasent_get_permit`, `atlasent_check_permit`, `atlasent_revoke_permit`,
+`atlasent_get_decision`, `atlasent_permit`, `atlasent_verify_permit`,
+`atlasent_record_execution_evaluation`, `atlasent_create_webhook`,
+`atlasent_delete_webhook`, the SCIM tools, the SIEM tools,
+`atlasent_list_evidence_exports` and `atlasent_create_evidence_export`. They
+still call the slash-form `/v1/<resource>` paths at the domain root (the server
+strips `/functions/v1` for them), and `api.atlasent.io` does not serve that
+shape: those requests return 404 and the tool returns an error. Each one is
+waiting on a runtime handler that routes its deployed path, a route that does
+not exist yet, or a different request shape or credential; the reason is noted
+at its call site in `src/engine.ts`. A self-hosted deployment that runs its own
+`/v1/*` gateway at the domain root can still use them.
 
 `ATLASENT_FUNCTION_REGION` controls where the runtime's edge functions execute.
 Unset, calls to the hosted runtime run in `us-west-1`, next to its database. A
