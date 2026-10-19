@@ -77,58 +77,78 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("tools/list", () => {
-  it("exposes evaluate, verify_permit, deploy_service, all write tools, v2 tools, and compliance tools", async () => {
-    const { client } = await setup();
-    const { tools } = await client.listTools();
-    const names = tools.map((t) => t.name).sort();
-    assert.deepEqual(names, [
+  // The 26 gateway-only tools (src/gatewayTools.ts) are absent by default:
+  // the hosted runtime does not serve their `/v1/*` paths. 46 tools with the
+  // opt-in or a self-hosted base URL, 20 without (no AI Action tool configured).
+  const SERVED_EVERYWHERE = [
       "atlasent_atlas_lookup",
       "atlasent_await_approval",
-      "atlasent_check_permit",
-          "atlasent_create_evidence_export",
-      "atlasent_create_policy",
-      "atlasent_create_scim_user",
-      "atlasent_create_webhook",
-      "atlasent_delete_policy",
-      "atlasent_delete_scim_user",
-      "atlasent_delete_webhook",
       "atlasent_evaluate",
       "atlasent_evaluate_many",
       "atlasent_evaluate_stream",
       "atlasent_evidence_gap_report",
       "atlasent_explain_authority",
       "atlasent_exposure_review",
-      "atlasent_get_decision",
       "atlasent_get_evidence_export",
+      "atlasent_integrity_audit",
+      "atlasent_list_audit_events",
+      "atlasent_list_permits",
+      "atlasent_list_policies",
+      "atlasent_lookup_action",
+      "atlasent_query",
+      "atlasent_vqp_generate",
+      "atlasent_vqp_verify",
+      "deploy_service",
+      "evaluate",
+      "verify_permit",
+  ];
+  const GATEWAY_ONLY = [
+      "atlasent_check_permit",
+      "atlasent_create_evidence_export",
+      "atlasent_create_policy",
+      "atlasent_create_scim_user",
+      "atlasent_create_webhook",
+      "atlasent_delete_policy",
+      "atlasent_delete_scim_user",
+      "atlasent_delete_webhook",
+      "atlasent_get_decision",
       "atlasent_get_permit",
       "atlasent_get_policy",
       "atlasent_get_scim_user",
       "atlasent_get_siem_config",
-      "atlasent_integrity_audit",
-      "atlasent_list_audit_events",
       "atlasent_list_evidence_exports",
-      "atlasent_list_permits",
-      "atlasent_list_policies",
       "atlasent_list_scim_groups",
       "atlasent_list_scim_users",
-      "atlasent_lookup_action",
       "atlasent_patch_scim_user",
       "atlasent_permit",
-      "atlasent_query",
       "atlasent_record_execution_evaluation",
-          "atlasent_revoke_permit",
+      "atlasent_revoke_permit",
       "atlasent_test_siem_delivery",
       "atlasent_update_policy",
       "atlasent_upsert_siem_config",
       "atlasent_verify_permit",
       "atlasent_vqp_audit_summary",
       "atlasent_vqp_drift_events",
-      "atlasent_vqp_generate",
-      "atlasent_vqp_verify",
-      "deploy_service",
-      "evaluate",
-      "verify_permit",
-    ]);
+  ];
+
+  it("exposes only the tools the hosted runtime serves by default (20 tools)", async () => {
+    const { client } = await setup();
+    const { tools } = await client.listTools();
+    const names = tools.map((t) => t.name).sort();
+    assert.deepEqual(names, SERVED_EVERYWHERE);
+  });
+
+  it("exposes evaluate, verify_permit, deploy_service, all write tools, v2 tools, and compliance tools with ATLASENT_MCP_ENABLE_GATEWAY_TOOLS=1 (46 tools)", async () => {
+    process.env.ATLASENT_MCP_ENABLE_GATEWAY_TOOLS = "1";
+    try {
+      const { client } = await setup();
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name).sort();
+      assert.deepEqual(names, [...SERVED_EVERYWHERE, ...GATEWAY_ONLY].sort());
+      assert.equal(names.length, 46);
+    } finally {
+      delete process.env.ATLASENT_MCP_ENABLE_GATEWAY_TOOLS;
+    }
   });
 
   it("deploy_service requires service_name, environment, actor_id", async () => {
@@ -1614,6 +1634,15 @@ describe("atlasent_verify_permit (v1)", () => {
 // ---------------------------------------------------------------------------
 
 describe("REST base URL resolution (functions/v1 stripping)", () => {
+  // atlasent_verify_permit is gateway-only (src/gatewayTools.ts): against the
+  // hosted host it registers only with the explicit opt-in.
+  beforeEach(() => {
+    process.env.ATLASENT_MCP_ENABLE_GATEWAY_TOOLS = "1";
+  });
+  afterEach(() => {
+    delete process.env.ATLASENT_MCP_ENABLE_GATEWAY_TOOLS;
+  });
+
   it("strips /functions/v1 for slash-form /v1/<resource> calls", async () => {
     forceRemoteMode();
     process.env.ATLASENT_BASE_URL = "https://api.atlasent.io/functions/v1";

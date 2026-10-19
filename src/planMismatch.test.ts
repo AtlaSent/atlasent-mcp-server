@@ -551,7 +551,7 @@ describe("deploy_service → atlasent_await_approval (tools)", () => {
     assert.equal(out.outcome, "approved");
     assert.equal(out.approval_request_id, "apr_2");
     assert.match(out.summary, /plan changed from deploy, revision aaa111 to deploy, revision bbb222 → re-request sent \(approval apr_2\) → waiting → approved/);
-    assert.match(out.next_step, /atlasent_verify_permit/);
+    assert.match(out.next_step, /\bverify_permit\b/);
   });
 });
 

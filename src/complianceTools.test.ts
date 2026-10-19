@@ -2,7 +2,10 @@
  * Unit tests for compliance MCP tools (SCIM, SIEM, evidence exports).
  *
  * Tests verify:
- * - All 12 tools are registered in normal mode (via MCP client listTools)
+ * - All 12 tools are registered in normal mode with the gateway opt-in
+ *   (ATLASENT_MCP_ENABLE_GATEWAY_TOOLS=1; without it only
+ *   atlasent_get_evidence_export is served by the hosted runtime, see
+ *   src/gatewayTools.test.ts)
  * - Mutating tools are absent when ATLASENT_MCP_READONLY=1
  * - Read-only tools remain available in readonly mode
  */
@@ -47,11 +50,13 @@ describe("compliance tools — normal mode", () => {
 
   before(async () => {
     delete process.env.ATLASENT_MCP_READONLY;
+    process.env.ATLASENT_MCP_ENABLE_GATEWAY_TOOLS = "1";
     names = await listToolNames();
   });
 
   after(() => {
     delete process.env.ATLASENT_MCP_READONLY;
+    delete process.env.ATLASENT_MCP_ENABLE_GATEWAY_TOOLS;
   });
 
   for (const tool of ALL_COMPLIANCE_TOOLS) {
@@ -86,11 +91,13 @@ describe("compliance tools — readonly mode", () => {
 
   before(async () => {
     process.env.ATLASENT_MCP_READONLY = "1";
+    process.env.ATLASENT_MCP_ENABLE_GATEWAY_TOOLS = "1";
     names = await listToolNames();
   });
 
   after(() => {
     delete process.env.ATLASENT_MCP_READONLY;
+    delete process.env.ATLASENT_MCP_ENABLE_GATEWAY_TOOLS;
   });
 
   for (const tool of MUTATING) {

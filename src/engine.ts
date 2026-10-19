@@ -92,20 +92,29 @@ function emitBaseUrlWarning(): void {
   );
 }
 
+/**
+ * The mode the environment asks for, with no side effects and no production
+ * refusal. getMode() is the only caller that may act on it for authorize() /
+ * verify(); this pure form exists so tool registration can ask "which runtime
+ * does this configuration target?" without emitting warnings or throwing.
+ */
+export function requestedMode(env: NodeJS.ProcessEnv = process.env): Mode {
+  const explicit = env.ATLASENT_MODE?.toLowerCase();
+  return explicit === "remote"
+    ? "remote"
+    : explicit === "local"
+      ? "local"
+      : // An API key alone means remote: ATLASENT_BASE_URL is optional and
+        // defaults to the hosted endpoint (see baseUrl(), README, server.json).
+        // Falling back to local here would silently hand a user who configured
+        // a real key unsigned, forgeable local-mode permits.
+        env.ATLASENT_API_KEY
+        ? "remote"
+        : "local";
+}
+
 export function getMode(): Mode {
-  const explicit = process.env.ATLASENT_MODE?.toLowerCase();
-  const requested: Mode =
-    explicit === "remote"
-      ? "remote"
-      : explicit === "local"
-        ? "local"
-        : // An API key alone means remote: ATLASENT_BASE_URL is optional and
-          // defaults to the hosted endpoint (see baseUrl(), README, server.json).
-          // Falling back to local here would silently hand a user who configured
-          // a real key unsigned, forgeable local-mode permits.
-          process.env.ATLASENT_API_KEY
-          ? "remote"
-          : "local";
+  const requested: Mode = requestedMode(process.env);
 
   // Production safeguard (security): local-mode permits are unsigned
   // and forgeable (Date.now() + UUID slice, no HMAC; see
@@ -211,7 +220,10 @@ function baseUrl(): string {
 //    request shape or credential (see each call site). They stay slash-form,
 //    so a self-hosted operator who really runs a `/v1/*` gateway at the
 //    domain root keeps working, and on the hosted API they fail with an error
-//    rather than reaching a handler that would misread the path.
+//    rather than reaching a handler that would misread the path. The tools
+//    behind them are not registered against the hosted API at all unless the
+//    operator opts in (src/gatewayTools.ts); add a new tool on this family to
+//    GATEWAY_ONLY_TOOLS there.
 //
 // Do not move a call from family 2 to family 1 without reading its handler:
 // a handler that parses `pathname.split('/')` as ['v1', 'foo', id, verb]
@@ -1321,7 +1333,8 @@ export async function listAuditEvents(params: ListAuditEventsParams): Promise<un
   if (params.evaluation_id !== undefined && params.evaluation_id !== "") {
     throw new Error(
       "evaluation_id is not a filter the AtlaSent audit-events endpoint supports; " +
-        "omit it, or use atlasent_get_decision with include_trace for one evaluation",
+        "omit it; to read one evaluation's trail, use atlasent_get_decision with include_trace " +
+        "(registered only against a self-hosted /v1/* gateway)",
     );
   }
   return get("/v1-audit/events", {

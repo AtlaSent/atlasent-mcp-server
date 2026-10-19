@@ -34,7 +34,7 @@ export function serverInstructions(): string {
     "AtlaSent decides whether a consequential action (a production deploy, a data " +
       "export, a secret rotation) is authorized before it runs.",
     "Before such an action, call atlasent_evaluate (or evaluate). Only proceed on " +
-      "decision=allow, and verify the permit with atlasent_verify_permit immediately " +
+      "decision=allow, and verify the permit with verify_permit immediately " +
       "before acting. On deny, stop and tell the person why. On hold, the action is " +
       "waiting for a person to approve it: use atlasent_await_approval, do not retry " +
       "or work around it.",

@@ -140,6 +140,15 @@ describe("REST-style tools routed to deployed function names", () => {
 describe("REST-style tools still on slash-form (blocked on atlasent-api)", () => {
   // Pinned so nobody moves one to the function-name form without its handler
   // routing that shape. See the call sites in src/engine.ts for each reason.
+  // These tools are hidden against the hosted runtime (src/gatewayTools.ts),
+  // so the explicit opt-in registers them here to pin the URL they request.
+  beforeEach(() => {
+    process.env.ATLASENT_MCP_ENABLE_GATEWAY_TOOLS = "1";
+  });
+  afterEach(() => {
+    delete process.env.ATLASENT_MCP_ENABLE_GATEWAY_TOOLS;
+  });
+
   it("atlasent_get_permit stays at {root}/v1/permits/{id} until atlasent-api#4522 is in production", async () => {
     await call("atlasent_get_permit", { permit_id: PERMIT_ID });
     assert.equal(onlyRequest().url, `https://api.atlasent.io/v1/permits/${PERMIT_ID}`);
@@ -158,5 +167,19 @@ describe("REST-style tools still on slash-form (blocked on atlasent-api)", () =>
   it("atlasent_list_evidence_exports stays at {root}/v1/orgs/{org}/evidence-exports", async () => {
     await call("atlasent_list_evidence_exports", { org_id: "org_1" });
     assert.equal(onlyRequest().url, "https://api.atlasent.io/v1/orgs/org_1/evidence-exports");
+  });
+});
+
+describe("gateway-only tools against the hosted runtime (no opt-in)", () => {
+  it("are not registered, so calling one runs nothing and requests nothing", async () => {
+    for (const [name, args] of [
+      ["atlasent_get_permit", { permit_id: PERMIT_ID }],
+      ["atlasent_get_decision", { evaluation_id: EVAL_ID }],
+      ["atlasent_list_evidence_exports", { org_id: "org_1" }],
+    ] as const) {
+      const res = await call(name, args).catch((e: unknown) => ({ isError: true, thrown: e }));
+      assert.equal(res.isError, true, `${name} must not succeed when hidden`);
+    }
+    assert.equal(captured.length, 0, "a hidden tool must not reach the network");
   });
 });
