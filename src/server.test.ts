@@ -1079,7 +1079,7 @@ describe("atlasent_list_permits", () => {
     assert.equal(captured.length, 1);
     assert.equal(captured[0].method, "GET");
     const u = new URL(captured[0].url);
-    assert.equal(u.pathname, "/v1/permits");
+    assert.equal(u.pathname, "/v1-permits");
     assert.equal(u.searchParams.get("org_id"), "org_1");
     assert.equal(u.searchParams.get("status"), "issued");
     assert.equal(u.searchParams.get("actor_id"), "agent-7");

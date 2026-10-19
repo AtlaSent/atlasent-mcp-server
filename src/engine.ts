@@ -188,29 +188,39 @@ function baseUrl(): string {
   return (process.env.ATLASENT_BASE_URL ?? "https://api.atlasent.io/functions/v1").replace(/\/+$/, "");
 }
 
-// The generic REST family documented in atlasent-api's openapi.yaml — e.g.
-// /v1/policies, /v1/permits, /v1/audit/events, /v1/webhooks, /v1/orgs/... —
-// is served at the AtlaSent gateway/API DOMAIN ROOT, not under the Supabase
-// "/functions/v1" invocation base. Confirmed against atlasent-api's own
-// documented, working curl examples (docs/runbooks/PILOT_TROUBLESHOOTING.md,
-// docs/runbooks/PILOT_CUSTOMER_ACTIVATION.md):
-//   curl https://api.atlasent.io/v1/api-keys
-//   curl https://api.atlasent.io/v1/audit/events
-// and atlasent-control-plane's gateway (gateway/src/plugin.ts upstreamUrlFor):
-// it proxies incoming "/v1/*" requests verbatim onto the runtime base with no
-// path rewriting, so the caller must already address the gateway root, not
-// "/functions/v1". This is a DIFFERENT base than the dash-form direct
-// Supabase-function invocation used by /v1-evaluate, /v1-verify-permit, and
-// /v1-authority-intelligence/* (those live at
-// https://api.atlasent.io/functions/v1/v1-evaluate etc. and must keep using
-// baseUrl() unchanged).
+// Two path families, two bases.
 //
-// README documents ATLASENT_BASE_URL as the "/functions/v1" form (matching
-// the dash-form calls), so when it carries that suffix we strip it to
-// recover the gateway root for the slash-form REST family below. An
-// operator who has already pointed ATLASENT_BASE_URL at the gateway root
-// (no "/functions/v1" suffix — as this repo's own tests do) is passed
-// through unchanged.
+// 1. Dash-form `/v1-<function>[/...]` paths go to baseUrl() unchanged. A
+//    Supabase edge function deployed as `v1-foo` is invoked at
+//    `<base>/v1-foo/...` and its handler receives the pathname `/v1-foo/...`.
+//    This is what https://api.atlasent.io/functions/v1 serves today: on
+//    2026-10-19 unauthenticated probes of /functions/v1/v1-policies,
+//    /v1-webhooks and /v1-permits answered 401 and /v1-audit-events 405 (a
+//    GET on a POST-only function), i.e. real functions answered.
+//
+// 2. Slash-form `/v1/<resource>` paths (the openapi.yaml shape) go to
+//    restBaseUrl(). The same probes found NO gateway serving that shape on the
+//    hosted API: GET https://api.atlasent.io/v1/api-keys, /v1/audit/events,
+//    /v1/policies, /v1/webhooks and /v1/permits all returned 404
+//    `{"error":"requested path is invalid"}` (the Supabase gateway's
+//    no-such-path answer). An earlier version of this comment said a
+//    control-plane gateway proxies `/v1/*` at the domain root; that is not
+//    what api.atlasent.io serves. Every call still on this family is one
+//    whose owning atlasent-api handler does NOT yet route the deployed
+//    `/v1-<function>/...` shape, has no route at all, or takes a different
+//    request shape or credential (see each call site). They stay slash-form,
+//    so a self-hosted operator who really runs a `/v1/*` gateway at the
+//    domain root keeps working, and on the hosted API they fail with an error
+//    rather than reaching a handler that would misread the path.
+//
+// Do not move a call from family 2 to family 1 without reading its handler:
+// a handler that parses `pathname.split('/')` as ['v1', 'foo', id, verb]
+// misreads `/v1-foo/<id>/<verb>` (atlasent-api#4522 was exactly that, for
+// v1-permits).
+//
+// restBaseUrl(): README documents ATLASENT_BASE_URL in the "/functions/v1"
+// form, so when it carries that suffix it is stripped to recover the domain
+// root for family 2. A base without the suffix is passed through unchanged.
 function restBaseUrl(): string {
   const b = baseUrl();
   const suffix = "/functions/v1";
@@ -1266,8 +1276,12 @@ export interface ListPoliciesParams {
   status?: string;
 }
 
+// GET /v1-policies/ (v1-policies/index.ts). The TRAILING SLASH is load-bearing:
+// the handler strips "/v1-policies" and lists only when the remainder is
+// exactly "/", so a bare "/v1-policies" falls through to its 404. The org comes
+// from the API key; org_id is sent for gateways that read it, ignored there.
 export async function listPolicies(params: ListPoliciesParams): Promise<unknown> {
-  return get("/v1/policies", {
+  return get("/v1-policies/", {
     org_id: params.org_id,
     status: params.status,
   });
@@ -1278,6 +1292,9 @@ export interface GetPolicyParams {
   org_id: string;
 }
 
+// Still slash-form: v1-policies serves no GET-by-id route (only list,
+// /review-due, /:id/publish, /:id/acknowledge, /:id/coverage). Same for
+// create, update and delete below.
 export async function getPolicy(params: GetPolicyParams): Promise<unknown> {
   return get(`/v1/policies/${encodeURIComponent(params.policy_id)}`, {
     org_id: params.org_id,
@@ -1292,10 +1309,23 @@ export interface ListAuditEventsParams {
   limit?: number;
 }
 
+// GET /v1-audit/events: the v1-audit function, which answers every GET with
+// the audit-events list (v1-audit/routing.ts auditRoute) and reads from, to,
+// limit, actor_id, types and cursor. The org comes from the API key.
+//
+// It has NO evaluation_id filter. Sending one would return the org's
+// unfiltered events to a caller who asked for one evaluation's, so a supplied
+// evaluation_id is refused before any request instead (fail closed). Use
+// atlasent_get_decision with include_trace for one evaluation's trail.
 export async function listAuditEvents(params: ListAuditEventsParams): Promise<unknown> {
-  return get("/v1/audit/events", {
+  if (params.evaluation_id !== undefined && params.evaluation_id !== "") {
+    throw new Error(
+      "evaluation_id is not a filter the AtlaSent audit-events endpoint supports; " +
+        "omit it, or use atlasent_get_decision with include_trace for one evaluation",
+    );
+  }
+  return get("/v1-audit/events", {
     org_id: params.org_id,
-    evaluation_id: params.evaluation_id,
     from: params.from,
     to: params.to,
     limit: params.limit !== undefined ? String(params.limit) : undefined,
@@ -1348,6 +1378,9 @@ export interface RevokePermitParams {
   reasons?: string[];
 }
 
+// Still slash-form: both runtime revoke routes (v1-permits :id/revoke and
+// v1-permits-revoke) take a permit UUID and a single `reason` string; this tool
+// takes a permit TOKEN and `reasons[]`. Fixing it is a tool redesign, not a path.
 export async function revokePermit(params: RevokePermitParams): Promise<unknown> {
   return post(`/v1/permits/${encodeURIComponent(params.permitToken)}/revoke`, {
     org_id: params.org_id,
@@ -1366,8 +1399,10 @@ export interface ListPermitsParams {
   cursor?: string;
 }
 
+// GET /v1-permits: the bare function path is the list route both in the
+// handler deployed today and in atlasent-api#4522's parsePermitsPath.
 export async function listPermits(params: ListPermitsParams): Promise<unknown> {
-  return redactPermitSecrets(await get("/v1/permits", {
+  return redactPermitSecrets(await get("/v1-permits", {
     org_id: params.org_id,
     status: params.status,
     actor_id: params.actor_id,
@@ -1400,6 +1435,10 @@ export function redactPermitSecrets<T>(value: T): T {
   return value;
 }
 
+// getPermit / checkPermit stay slash-form until atlasent-api#4522 reaches
+// production. The handler deployed before it reads `/v1-permits/<id>` as the
+// LIST route (permitId = parts[2]) and `/v1-permits/<id>/valid` as a permit
+// whose id is "valid": the first would hand back the wrong object.
 export async function getPermit(permitId: string): Promise<unknown> {
   return redactPermitSecrets(await get(`/v1/permits/${encodeURIComponent(permitId)}`));
 }
@@ -1413,6 +1452,9 @@ export async function checkPermit(permitId: string): Promise<unknown> {
 
 // GET /v1/execution-evaluations/:id (scope audit:read). `include_trace` adds
 // the approval events, permit uses and webhook deliveries for the decision.
+// Still slash-form: v1-execution-evaluations/index.ts strips only
+// "^/v1/execution-evaluations/?", so the deployed "/v1-execution-evaluations/<id>"
+// would be read as an evaluation whose id is "v1-execution-evaluations".
 export async function getDecision(evaluationId: string, includeTrace?: boolean): Promise<unknown> {
   return get(`/v1/execution-evaluations/${encodeURIComponent(evaluationId)}`, {
     include: includeTrace ? "trace" : undefined,
@@ -1432,6 +1474,9 @@ export interface IssuePermitParams {
   context?: Record<string, unknown>;
 }
 
+// issuePermit / verifyPermitV1 stay slash-form: no runtime function serves
+// permits/issue or permits/verify (v1-permits reads "verify" in the id
+// position as an invalid route). Permits are minted by /v1-evaluate.
 export async function issuePermit(params: IssuePermitParams): Promise<unknown> {
   const body: Record<string, unknown> = {
     subject: params.subject,
@@ -2152,6 +2197,7 @@ export interface RecordExecutionEvaluationParams {
   details?: Record<string, unknown>;
 }
 
+// Still slash-form: no runtime function serves evaluations/:id/execution.
 export async function recordExecutionEvaluation(
   params: RecordExecutionEvaluationParams,
 ): Promise<unknown> {
@@ -2179,6 +2225,10 @@ export interface CreateWebhookParams {
   secret?: string;
 }
 
+// createWebhook / deleteWebhook stay slash-form: v1-webhooks ignores the path
+// and dispatches on a POST body `action` ("create" needs `name`, takes
+// `event_types`; "delete" takes `id`). This tool's shape differs, so fixing it
+// is a tool redesign, not a path change.
 export async function createWebhook(params: CreateWebhookParams): Promise<unknown> {
   const body: Record<string, unknown> = {
     org_id: params.org_id,
@@ -2223,6 +2273,10 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 // SCIM 2.0 provisioning
 // ---------------------------------------------------------------------------
 
+// SCIM stays slash-form: every runtime SCIM function (v1-scim, scim-v2-users,
+// scim-v2-groups) authenticates a SCIM bearer token from scim_tokens, not an
+// AtlaSent API key, and derives the org from that token. Moving the path alone
+// would only trade a 404 for a 401.
 export async function listScimUsers(
   orgId: string,
   filter?: string,
@@ -2289,6 +2343,9 @@ export async function listScimGroups(
 // SIEM export configuration
 // ---------------------------------------------------------------------------
 
+// SIEM config stays slash-form: no runtime function serves siem-config or
+// siem-exports/test (v1-siem-export is a worker-secret job; v1-siem-exports
+// manages export jobs).
 export async function getSiemConfig(orgId: string): Promise<unknown> {
   return get(`/v1/orgs/${encodeURIComponent(orgId)}/siem-config`);
 }
@@ -2308,16 +2365,22 @@ export async function testSiemDelivery(orgId: string): Promise<unknown> {
 // Evidence exports (compliance bundles)
 // ---------------------------------------------------------------------------
 
+// list and create stay slash-form. List: the handler reads the last segment as
+// an export id unless it is "exports", so the bare "/v1-evidence-exports" is a
+// lookup of an export named "v1-evidence-exports". Create: the handler takes
+// `window: {from, to}`, not date_from/date_to, so only moving the path would
+// silently export the default 90-day window instead of the one asked for.
 export async function listEvidenceExports(orgId: string, regime?: string): Promise<unknown> {
   return get(`/v1/orgs/${encodeURIComponent(orgId)}/evidence-exports`, {
     regime,
   });
 }
 
-export async function getEvidenceExport(orgId: string, exportId: string): Promise<unknown> {
-  return get(
-    `/v1/orgs/${encodeURIComponent(orgId)}/evidence-exports/${encodeURIComponent(exportId)}`,
-  );
+// GET /v1-evidence-exports/<id>: v1-evidence-exports/handler.ts treats the
+// last path segment as the export id. The org comes from the API key, so
+// orgId is not part of this path.
+export async function getEvidenceExport(_orgId: string, exportId: string): Promise<unknown> {
+  return get(`/v1-evidence-exports/${encodeURIComponent(exportId)}`);
 }
 
 export async function createEvidenceExport(
