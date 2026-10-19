@@ -31,12 +31,14 @@ The design adds **one trip condition and one counter**. It adds no engine, no ac
 
 **Every evaluation reserves before it decides.** The counter is one `agent_denial_buckets` row per bucket, holding the window's entries. A view or a `count(*)` over recent evaluations races (two gates committing the fourth and fifth denial at once each see only their own row), so neither is an option. `v1-evaluate` runs in this order:
 
-1. **Reserve.** One SQL function takes the bucket row `FOR UPDATE` (or upserts it on first use), checks the budget against the org's *current* setting, and appends a **reservation** entry for this evaluation, then **commits**. If the bucket is already tripped or spent, it refuses here with `AGENT_DENIAL_BUDGET_EXHAUSTED` and appends nothing, so the early deny never counts again. If this step fails for any reason, `v1-evaluate` returns an error and **makes no policy decision**, so no permit can be issued while the bucket cannot be written.
+1. **Reserve.** One SQL function takes the bucket row `FOR UPDATE` (or upserts it on first use), checks the budget against the org's *current* setting, and appends a **reservation** entry for this evaluation, then **commits**. If the bucket is already tripped or spent, it refuses here with `AGENT_DENIAL_BUDGET_EXHAUSTED` and appends nothing, so the early deny never counts again. If the bucket is spent but has no open E5 trip (for example, the N-th entry was a reservation that went stale), this step writes the E5 trip in the same transaction before refusing, so a spent bucket always has a trip and earlier permits stop verifying. If this step fails for any reason, `v1-evaluate` returns an error and **makes no policy decision**, so no permit can be issued while the bucket cannot be written.
 2. **Decide** (allow, deny or hold).
 3. **Settle.** Under the same lock: a deny turns its reservation into a denial and writes the E5 trip if the budget is now spent; an allow or hold releases its reservation. Commit.
 4. Write the evaluation and audit rows, then respond. An allow's permit is issued only after step 3 committed.
 
 **An unsettled reservation counts as a denial.** If step 3 never commits (a crash, a timeout, a lost connection), the reservation stays and counts toward N once it is older than the evaluate timeout. Live reservations younger than that do not count, so concurrent allows in flight cannot trip a bucket by themselves. Every failure therefore lands on the safe side: it can overcount, never undercount, and this holds whatever a client does with the error. Today `authorize()` (`src/engine.ts`) and the gate's cloud authorizer both render a request failure as a deny, so a client-side distinction cannot be relied on, and the design does not rely on one (Codex review on #278).
+
+**One per-org lock orders reserve, settle and setting changes.** Reserve and settle take a per-org advisory lock in shared mode before touching a bucket, including before creating one on first use. A setting change takes the same lock in exclusive mode. So no bucket can be created or settled under the old setting while a tightening runs (Codex review on #278).
 
 Two concurrent evaluations of one bucket serialise on the row, so the N-th denial always trips, and an evaluation that reserves after it is refused at step 1. Earlier revisions counted inside the evaluation's transaction or only on the deny path; the races Codex found on #278 came from that, and reserving first removes them.
 
@@ -49,7 +51,7 @@ Because the agent comes from the key and the count comes from the runtime's own 
 | `deny` on a policy decision | Yes | The agent asked for something it may not do |
 | `hold` / `escalate` | **No** | Waiting for a person is not misbehaviour (#274: "held work avoids consuming attempts") |
 | A later approval or a denied approval | No | That is a person's decision, not an attempt |
-| Infrastructure failure (timeout, signer error, malformed request) | **Decision D3** | The agent may not be at fault |
+| Infrastructure failure (timeout, signer error, malformed request) | **Decision D3** | The agent may not be at fault. Exception: an unsettled reservation counts (section 1) |
 | Verify refused (replay, mismatch, expired) | Decision D3 | Same question |
 
 ### 3. What is one bucket (the "alias" question)
@@ -65,7 +67,7 @@ The budget is a sliding window: **N denials within T minutes**. Proposed default
 
 - **Per-org setting.** The setting lives on the org, bounded (N 1–1000, T 1–1440).
 - **Who can change it.** Lowering N or raising T only removes authority, so any admin may do it. Raising N or shortening T needs an owner session.
-- **A tightened setting applies at once.** The setting change locks every bucket of the org and writes E5 for any bucket already at or over the new budget, in the same transaction. Step 1 also checks against the current setting, so a bucket over the new N is refused even before any further denial (Codex review on #278).
+- **A tightened setting applies at once.** Under the exclusive per-org lock (section 1), the setting change writes E5 for any bucket already at or over the new budget, in the same transaction. Step 1 also checks against the current setting, so a bucket over the new N is refused even before any further denial (Codex review on #278).
 - **Every change is audited.** It is an `org.*` audit event, like `fail_mode`.
 - **On by default.** An org with no setting has the default budget (D1) enabled, so every existing org is covered on the day it ships. There is no setting that turns the budget off.
 
@@ -84,7 +86,7 @@ From then on, two refusals apply:
 
 ### 6. Reset and override
 
-The existing reset path is reused unchanged: an owner/admin person with a reason. No key can reset, and no MCP tool exposes a reset.
+The existing reset path is reused: an owner/admin person with a reason. No key can reset, and no MCP tool exposes a reset. **An E5 reset also starts a new counting epoch for that bucket, in the same transaction:** entries from before the reset no longer count, so the next evaluation is not refused by, or re-tripped on, the denials that caused the trip (Codex review on #278). The old entries stay readable as evidence.
 
 Whether a trip also clears itself when the window passes is decision D4. The proposal is **no**. That is consistent with every other trip, and an agent that tried five ways around a refusal warrants a person looking.
 
@@ -142,6 +144,9 @@ These are synthetic, against staging, matching the #274 matrix:
 13. If unbound keys are counted (D5): after a key trips, a permit issued to that key **before** the trip is refused at `v1-verify-permit`.
 14. After four denials under N=5, an admin lowers N to 3: E5 is recorded in the same change, and the next allow-shaped request is refused.
 15. Through the real MCP client and the gate, a counter outage (injected) yields no permit for any request, whatever the client shows the agent.
+16. A tightening and a first-use evaluation of a new bucket run concurrently: the new bucket is judged under the new setting.
+17. After an E5 trip, a person resets it within the window: the next allow-shaped evaluation is evaluated normally and does not re-trip on pre-reset entries.
+18. The N-th entry is a reservation whose settle never commits: once it is stale, the next evaluation writes E5 and is refused, and a permit issued earlier is refused at verify.
 
 Report the results as "resistant to these specific defects", not as coverage.
 
@@ -151,7 +156,7 @@ Report the results as "resistant to these specific defects", not as coverage.
 |---|---|---|
 | D1 | Default threshold | 5 denials in 15 minutes, per org, bounded |
 | D2 | Bucket scope | Per agent (all tools), not per action class |
-| D3 | Do infrastructure failures and verify refusals count? | No: only policy `deny`; the others are alerted separately |
+| D3 | Do infrastructure failures and verify refusals count? | Policy `deny` counts. Verify refusals and infrastructure errors do not, with one fail-closed exception: a reservation whose settle never committed counts as a denial, because the runtime cannot tell it from an uncounted deny. Repeated settle failures can therefore trip an agent that saw no policy deny; the trip evidence marks those entries `unsettled`, so a person can see it at reset. |
 | D4 | Does a trip clear when the window passes? | No: a person resets it |
 | D5 | Keys with no bound agent | Count per key until agent binding is required for `agent.*` |
 
