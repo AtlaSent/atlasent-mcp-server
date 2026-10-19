@@ -219,25 +219,38 @@ const MAIL_SEND_URL = new RegExp([
 ].join('|'), 'i');
 // Resend's `/emails` lists messages on GET and sends on POST (`/emails/batch` likewise);
 // `/emails/<id>` reads or updates one. So the method decides. curl's is read from its
-// flags; anywhere else, only an explicit GET passes, so an unknown method still asks.
+// own flags. Outside curl a method cannot be tied to the call it belongs to, so such a
+// command passes only when it shows an explicit read and no write anywhere: with
+// `requests.get(a); requests.post(resend)` in one command, the GET must not excuse the
+// POST. Any occurrence of the endpoint that is not a curl argument is judged that way,
+// even when a curl in the same command is a plain read.
 const RESEND_SEND_URL = /api\.resend\.com\/emails(\/batch)?(?=[\s"'?#]|$)/i;
+const RESEND_SEND_URLS = new RegExp(RESEND_SEND_URL.source, 'gi');
+const HTTP_READ_CALL = /\b(requests|httpx|axios|got|ky|session|client)\.(get|head)\s*\(|\bmethod\s*[:=]\s*["'](GET|HEAD)["']|\b(https?|xh)\s+(GET|HEAD)\b/i;
+const HTTP_WRITE_CALL = /\.(post|put|patch)\s*\(|\bmethod\s*[:=]\s*["'](POST|PUT|PATCH)["']|\b(https?|xh)\s+(POST|PUT|PATCH)\b/i;
+// curl uses the LAST -X/--request it is given (`curl -X GET -X POST` sends a POST).
 function curlMethod(a) {
+  let method = null;
   for (let i = 1; i < a.length; i++) {
     const x = a[i];
-    if (x === '--request') return (a[i + 1] ?? '').toUpperCase();
-    const req = /^--request=(.*)$/.exec(x); if (req) return req[1].toUpperCase();
-    const short = /^-[A-Za-z]*X(.*)$/.exec(x); if (short) return (short[1] || a[i + 1] || '').toUpperCase();
+    if (x === '--request') { method = a[++i] ?? ''; continue; }
+    const req = /^--request=(.*)$/.exec(x); if (req) { method = req[1]; continue; }
+    const short = /^-[A-Za-z]*X(.*)$/.exec(x); if (short) { method = short[1] || (a[++i] ?? ''); continue; }
   }
+  if (method !== null) return method.toUpperCase();
   if (a.some(x => x === '-I' || x === '--head')) return 'HEAD';
   if (a.some(x => x === '-G' || x === '--get')) return 'GET';
   const sends = a.slice(1).some(x => /^--(data(-raw|-binary|-urlencode|-ascii)?|form(-string)?|json|upload-file)(=|$)/.test(x) || /^-[A-Za-z]*[dFT]/.test(x));
   return sends ? 'POST' : 'GET';
 }
 function resendSend(t, segs) {
-  if (!RESEND_SEND_URL.test(t)) return false;
+  const total = (t.match(RESEND_SEND_URLS) ?? []).length;
+  if (!total) return false;
   const curls = segs.filter(a => a[0] === 'curl' && a.some(x => RESEND_SEND_URL.test(x)));
-  if (curls.length) return curls.some(a => !['GET', 'HEAD'].includes(curlMethod(a)));
-  return !/\b(requests|httpx|axios|got|ky|session|client)\.(get|head)\s*\(|\bmethod\s*[:=]\s*["'](GET|HEAD)["']|\b(https?|xh)\s+(GET|HEAD)\b/i.test(t);
+  if (curls.some(a => !['GET', 'HEAD'].includes(curlMethod(a)))) return true;
+  const inCurl = curls.reduce((n, a) => n + a.filter(x => RESEND_SEND_URL.test(x)).length, 0);
+  if (total <= inCurl) return false;
+  return !(HTTP_READ_CALL.test(t) && !HTTP_WRITE_CALL.test(t));
 }
 // `mail`, `mailx` and `mutt` with no subject, attachment or recipient open a mailbox to
 // read; with one of those they send.

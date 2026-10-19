@@ -159,6 +159,12 @@ const FLAGGED = [
   ['curl --json @m.json https://api.resend.com/emails', 'ask', 'mail.send'],
   ['curl https://api.resend.com/emails/batch -d @batch.json', 'ask', 'mail.send'],
   ['python3 -c "import requests; requests.post(\'https://api.resend.com/emails\', json=m)"', 'ask', 'mail.send'],
+  // curl uses the last -X; a GET elsewhere in the command does not excuse a POST
+  // (Codex review, #281).
+  ['curl -X GET -X POST https://api.resend.com/emails', 'ask', 'mail.send'],
+  ['curl --request GET --request POST https://api.resend.com/emails', 'ask', 'mail.send'],
+  ['python3 -c "import requests; requests.get(\'https://example.com\'); requests.post(\'https://api.resend.com/emails\', json=m)"', 'ask', 'mail.send'],
+  ['curl -X GET https://api.resend.com/emails && python3 -c "import requests; requests.post(\'https://api.resend.com/emails\', json=m)"', 'ask', 'mail.send'],
   // A recipient need not contain @: a local user or an alias, which can forward
   // anywhere (Codex review, #280).
   ["printf 'body' | mail board", 'ask', 'mail.send'],
@@ -194,6 +200,7 @@ const SAFE = [
   'curl -X POST https://graph.microsoft.com/v1.0/me/messages/AAMk=/createReply',
   'curl https://api.mailgun.net/v3/domains/mg.example.com/messages/KEY',
   'curl https://api.resend.com/emails', 'curl -X GET https://api.resend.com/emails', 'curl -G https://api.resend.com/emails -d limit=10',
+  'curl -X POST -X GET https://api.resend.com/emails', 'bash -c "curl -X GET https://api.resend.com/emails"',
   'curl -H "Authorization: Bearer $K" https://api.resend.com/emails/4ef9a417',
   'curl -X POST https://api.resend.com/emails/4ef9a417/cancel',
   'python3 -c "import requests; requests.get(\'https://api.resend.com/emails\', headers=h)"',
