@@ -14,6 +14,8 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-10-20
+
 ### Added
 
 - `atlasent-change-sample <owner>/<repo>`: what a SOX change-management sample

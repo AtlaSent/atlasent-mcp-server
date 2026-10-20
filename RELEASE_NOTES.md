@@ -1,5 +1,23 @@
 # Release Notes
 
+## v2.20.0 — 2026-10-20
+
+- **New: `atlasent-change-sample`, what an auditor's change-management sample
+  would find.** Run `npx -y -p @atlasent/mcp-server@latest atlasent-change-sample
+  your-org/your-repo` on your own machine. It reads one repository's merged pull
+  requests, reviews and checks with your own GitHub login, and writes a report
+  that opens with "X of N merged changes would fail a change-management sample",
+  each failing change linked to its pull request. It sends nothing to AtlaSent.
+  Anything it could not read is reported as unknown, never as a failure.
+- **Changed: tools the hosted API does not serve are no longer listed** when the
+  server targets it. They still register against a self-hosted runtime or with
+  `ATLASENT_MCP_ENABLE_GATEWAY_TOOLS=1`. `evaluate` and `verify_permit` are
+  unchanged.
+- **Fixes to the exposure scan:** inline YAML maps and lists are parsed; shell
+  indirection (`bash -c`, `eval`, piped `sh`) is seen through, and a command
+  chosen at run time is reported as unknown; there is no longer a 200-file cap,
+  and an unreadable file makes the scan INCOMPLETE (exit 3).
+
 ## v2.19.2 — 2026-10-14
 
 - **Fix: `atlasent_evaluate` works for `agent.*` actions.** It now seals the
