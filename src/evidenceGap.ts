@@ -37,6 +37,19 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { toolResult } from "./decision.js";
+import {
+  comparePriority,
+  environmentOf,
+  priorityOf,
+  secretsOf,
+  triggerOf,
+  type Cause,
+  type CauseKind,
+  type Environment,
+  type EnvironmentInfo,
+  type Priority,
+  type TriggerInfo,
+} from "./findingContext.js";
 
 // ---------------------------------------------------------------------------
 // Minimal YAML (block subset) → plain values, with line numbers for objects.
@@ -879,6 +892,8 @@ export type GapStatus = "bound" | "gated" | "gated_upstream" | "weak" | "ungover
 interface GateInfo {
   index: number;
   id: string | null;
+  name: string;
+  line: number;
   issuesOnly: boolean; // mode: evaluate-only
   verifies: boolean; // enforce mode, or verify-permit: true
   advisory: boolean; // continue-on-error
@@ -982,6 +997,8 @@ function gateInfo(step: YMap, index: number, extraGates: string[] = []): GateInf
   return {
     index,
     id: typeof step.id === "string" ? step.id : null,
+    name: typeof step.name === "string" ? step.name : uses || `step ${index + 1}`,
+    line: LINE_OF.get(step) ?? 0,
     issuesOnly,
     verifies,
     advisory: mayContinueOnError(step["continue-on-error"]),
@@ -1028,6 +1045,16 @@ export interface Finding {
   reason: string;
   /** Present on gaps (ungoverned / weak): the concrete change for this step. */
   fix?: Fix;
+  /** The environment this step changes, and what in the file said so. */
+  environment: EnvironmentInfo;
+  /** What starts it, from the workflow's `on:`. */
+  trigger: TriggerInfo;
+  /** Names of the secrets the step can read (never values). */
+  secrets: string[];
+  /** How soon to fix it, and why. */
+  priority: Priority;
+  /** Present on gaps: the id of the root cause in the report's `causes`. */
+  cause?: string;
 }
 
 export interface Fix {
@@ -1060,8 +1087,16 @@ export interface EvidenceGapReport {
     consequential_steps: number;
     by_status: Record<GapStatus, number>;
     gaps: number;
+    /** Every recognized step, by the environment it changes. */
+    steps_by_environment: Record<Environment, number>;
+    /** Gaps only, by the environment they change. */
+    gaps_by_environment: Record<Environment, number>;
+    /** Distinct root causes behind the gaps. */
+    causes: number;
   };
   findings: Finding[];
+  /** Root causes behind the gaps, highest priority first. */
+  causes: Cause[];
   triggers: Record<string, string[]>;
   parse_errors: Array<{ workflow: string; line: number; error: string }>;
   not_checked: string[];
@@ -1247,6 +1282,99 @@ function fixFor(
   return { action_type: action, change, ...withBinding(gateId), ...tail() };
 }
 
+interface PendingCause {
+  index: number;
+  kind: CauseKind;
+  id: string;
+  workflow: string;
+  job: string;
+  step: string;
+  line: number;
+  gate?: Cause["gate"];
+  fixOnce?: string;
+}
+
+function emptyEnvCounts(): Record<Environment, number> {
+  return { production: 0, non_production: 0, unknown: 0 };
+}
+
+function causeText(p: PendingCause): { title: string; detail: string } {
+  const gateStep = p.gate?.step ?? "";
+  switch (p.kind) {
+    case "gate_skippable":
+      return {
+        title: `Gate step "${gateStep}" can be skipped`,
+        detail: "The gate runs under its own `if:`, so when that condition is false the steps after it run with no authorization check.",
+      };
+    case "gate_advisory":
+      return {
+        title: `Gate step "${gateStep}" cannot fail the job`,
+        detail: "The gate has continue-on-error, so a deny is recorded and the steps after it run anyway.",
+      };
+    case "gate_issues_only":
+      return {
+        title: `Gate step "${gateStep}" issues a permit nothing verifies`,
+        detail: "The gate runs in evaluate-only mode and no step verifies and consumes the permit before the change runs.",
+      };
+    case "runs_after_failure":
+      return {
+        title: `"${p.step}" runs even after the gate denies`,
+        detail: "The step's `if:` uses always(), failure() or cancelled(), so a failed gate does not stop it.",
+      };
+    case "upstream_gate_weak":
+      return {
+        title: `The gate in job "${p.gate?.job}" cannot stop the jobs that need it`,
+        detail: "That gate can be skipped, can continue on error, or only issues a permit, so jobs that depend on it run without a check that can stop them.",
+      };
+    case "upstream_after_failure":
+      return {
+        title: `Job "${p.job}" runs even after the gate job fails`,
+        detail: "The job's `if:` uses always(), failure() or cancelled(), so the gate job failing does not stop it.",
+      };
+    default:
+      return { title: `No gate in front of "${p.step}"`, detail: "No AtlaSent gate runs in this job or in any job it needs." };
+  }
+}
+
+/**
+ * Gaps that one change would close share a cause: every step behind the same
+ * skippable / advisory / issue-only gate, or every job needing the same weak
+ * gate job. Everything else is its own cause. Highest priority first.
+ */
+function buildCauses(pending: PendingCause[], findings: Finding[]): Cause[] {
+  const byId = new Map<string, Cause>();
+  for (const p of pending) {
+    const f = findings[p.index];
+    let c = byId.get(p.id);
+    if (!c) {
+      c = {
+        id: p.id,
+        kind: p.kind,
+        ...causeText(p),
+        workflow: p.workflow,
+        job: p.gate?.job ?? p.job,
+        ...(p.gate ? { gate: p.gate } : {}),
+        ...(p.fixOnce ? { fix_once: p.fixOnce } : {}),
+        findings: [],
+        priority: f.priority,
+        environments: emptyEnvCounts(),
+      };
+      byId.set(p.id, c);
+    }
+    c.findings.push(p.index);
+    c.environments[f.environment.value]++;
+    if (comparePriority(f.priority, c.priority) < 0) c.priority = f.priority;
+    f.cause = p.id;
+  }
+  const causes = [...byId.values()];
+  for (const c of causes) {
+    c.findings.sort((a, b) => comparePriority(findings[a].priority, findings[b].priority) || a - b);
+  }
+  return causes.sort(
+    (a, b) => comparePriority(a.priority, b.priority) || b.findings.length - a.findings.length || a.findings[0] - b.findings[0],
+  );
+}
+
 /**
  * @param gateActions extra `uses:` values the caller declares as its gate:
  *   a wrapper composite action, or `./` inside the atlasent-action repo.
@@ -1254,6 +1382,7 @@ function fixFor(
  */
 export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] = []): EvidenceGapReport {
   const findings: Finding[] = [];
+  const pendingCauses: PendingCause[] = [];
   const parseErrors: EvidenceGapReport["parse_errors"] = [];
   const triggers: Record<string, string[]> = {};
 
@@ -1335,11 +1464,14 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
         let status: GapStatus;
         let reason: string;
         let weakGate: GateInfo | undefined;
+        let causeKind: CauseKind | undefined;
+        let upJob: string | undefined;
         const enforcing = earlier.filter(enforcingGate);
         const bound = enforcing.find((g) => g.id && requiresVerified(stepIf, g.id));
         const jobIf = typeof job.if === "string" ? job.if : "";
         if (enforcing.length > 0 && !bound && runsAfterFailure(stepIf)) {
           status = "weak";
+          causeKind = "runs_after_failure";
           reason =
             "A gate runs earlier in this job, but this step's `if:` uses always(), failure() or cancelled(), " +
             "so the gate failing does not stop it. The rest of the condition may still prevent it (for example " +
@@ -1360,6 +1492,7 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
           const g = earlier[earlier.length - 1];
           weakGate = g;
           status = "weak";
+          causeKind = g.advisory ? "gate_advisory" : g.conditional ? "gate_skippable" : "gate_issues_only";
           reason = g.advisory
             ? "The gate step has continue-on-error, so a deny does not stop this step."
             : g.conditional
@@ -1369,6 +1502,8 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
           const up = upstreamGate(jobName);
           if (up?.kind === "enforcing" && runsAfterFailure(jobIf)) {
             status = "weak";
+            causeKind = "upstream_after_failure";
+            upJob = up.job;
             reason =
               `Gated in job "${up.job}", but this job's \`if:\` uses always(), failure() or cancelled(), ` +
               "so the gate job failing does not stop it. The rest of the condition is not evaluated.";
@@ -1379,26 +1514,52 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
               "a verify-permit step in this job would bind the permit to the execution.";
           } else if (up) {
             status = "weak";
+            causeKind = "upstream_gate_weak";
+            upJob = up.job;
             reason =
               `Job "${up.job}", which this job needs, has a gate that cannot stop this step ` +
               "(continue-on-error, its own `if:`, or evaluate-only with nothing consuming the permit).";
           } else {
             status = "ungoverned";
+            causeKind = "no_gate";
             reason = "No AtlaSent gate in this job or in any job it needs.";
           }
+        }
+        const stepName = typeof step.name === "string" ? step.name : typeof step.uses === "string" ? step.uses : `step ${i + 1}`;
+        const line = LINE_OF.get(step) ?? 0;
+        const environment = environmentOf(job, jobName, step, wf.path);
+        const trigger = triggerOf(triggers[wf.path], jobIf, stepIf);
+        const secrets = secretsOf(step, job, doc as YMap);
+        const fix = fixFor(status, det.category, step, job, doc as YMap, weakGate, usedIds);
+        if (causeKind) {
+          pendingCauses.push({
+            index: findings.length,
+            kind: causeKind,
+            id:
+              weakGate ? `${causeKind}:${wf.path}#${jobName}#${weakGate.index}`
+              : causeKind === "upstream_gate_weak" ? `${causeKind}:${wf.path}#${upJob}`
+              : `${causeKind}:${wf.path}#${jobName}#${i}`,
+            workflow: wf.path,
+            job: jobName,
+            step: stepName,
+            line,
+            gate: weakGate ? { job: jobName, step: weakGate.name, line: weakGate.line } : upJob ? { job: upJob } : undefined,
+            fixOnce: weakGate ? fix?.change : undefined,
+          });
         }
         findings.push({
           workflow: wf.path,
           job: jobName,
-          step: typeof step.name === "string" ? step.name : typeof step.uses === "string" ? step.uses : `step ${i + 1}`,
-          line: LINE_OF.get(step) ?? 0,
+          step: stepName,
+          line,
           ...det,
           status,
           reason,
-          ...(() => {
-            const fix = fixFor(status, det.category, step, job, doc as YMap, weakGate, usedIds);
-            return fix ? { fix } : {};
-          })(),
+          ...(fix ? { fix } : {}),
+          environment,
+          trigger,
+          secrets,
+          priority: priorityOf(det.category, environment, trigger, secrets, det.confidence),
         });
       });
     }
@@ -1407,6 +1568,13 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
   const counts = emptyCounts();
   for (const f of findings) counts[f.status]++;
   const gaps = counts.ungoverned + counts.weak;
+  const stepsByEnv = emptyEnvCounts();
+  const gapsByEnv = emptyEnvCounts();
+  for (const f of findings) {
+    stepsByEnv[f.environment.value]++;
+    if (f.status === "ungoverned" || f.status === "weak") gapsByEnv[f.environment.value]++;
+  }
+  const causes = buildCauses(pendingCauses, findings);
   const scanned = inputs.length - parseErrors.length;
 
   let next: string;
@@ -1434,8 +1602,12 @@ export function analyzeWorkflows(inputs: WorkflowInput[], gateActions: string[] 
       consequential_steps: findings.length,
       by_status: counts,
       gaps,
+      steps_by_environment: stepsByEnv,
+      gaps_by_environment: gapsByEnv,
+      causes: causes.length,
     },
     findings,
+    causes,
     triggers,
     parse_errors: parseErrors,
     not_checked: NOT_CHECKED,
