@@ -14,6 +14,16 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+### Added
+
+- `atlasent-change-sample <owner>/<repo>`: what a SOX change-management sample
+  would find in one repository's merged pull requests. Each change gets one
+  verdict (approved by someone else on the merged code; no human approval;
+  approved only by its author; approved on an earlier commit; checks failed;
+  or unknown), with a link to the pull request. It reads GitHub with your own
+  token and sends nothing to AtlaSent. Unreadable data is unknown, never a
+  failure, and makes the scan INCOMPLETE (exit 3).
+
 ### Changed
 
 - Tools the hosted AtlaSent API does not serve are no longer listed when the

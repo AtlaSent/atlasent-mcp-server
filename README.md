@@ -377,6 +377,24 @@ npx -y -p @atlasent/mcp-server@latest atlasent-exposure-scan path/to/repo
 
 Keep `@latest`: without it `npx` can reuse an older cached copy that has no such command (on Windows it then reports "'atlasent-exposure-scan' is not recognized"). Offline: it reads `.github/workflows/` and makes no network call. The HTML is a single self-contained file (no scripts or external assets). Add `--fail-on-gaps` to use it as a CI check; `--out <dir>` picks where the files go. If any workflow file cannot be read or parsed, the report says INCOMPLETE SCAN, names the files, and the command exits 3.
 
+### `atlasent-change-sample` (what a change-management sample would find)
+
+An auditor testing change management samples production changes and asks whether each was approved, by someone other than its author, on the exact code that merged. This command answers that for one repository's merged pull requests:
+
+```bash
+npx -y -p @atlasent/mcp-server@latest atlasent-change-sample your-org/your-repo --days 90
+# writes atlasent-change-sample.html, .md and .json
+```
+
+It reads pull requests, reviews and the check runs on each merged commit through GitHub's API with **your** token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`). It calls GitHub only: nothing is sent to AtlaSent, and the token is never printed or written. The report opens with one line, such as "7 of 112 merged changes would fail a change-management sample", and links every failing change to its pull request.
+
+- A bot's approval is not a human approval, and a reviewer's later "changes requested" or dismissal cancels their earlier approval.
+- An approval on an earlier commit only counts if someone approved the commit that merged.
+- Anything it could not read is **unknown**, never a failure, and the report says INCOMPLETE SCAN and exits 3.
+- It cannot see approvals outside GitHub, changes that bypassed pull requests, what was actually deployed, branch-protection bypass rights, or whether a reviewer was authorized under your policy. The report says so.
+
+`--base <branch>` picks the branch (default: the repository's default branch); `--fail-on-findings` exits 1 when any change would fail. It is not a compliance assessment or certification.
+
 ### `atlasent_exposure_review`
 
 The free Authorization Exposure Review. It runs the same offline analysis as `atlasent_evidence_gap_report` and returns it as a review a person can read: what was scanned and what it cannot see, every step that can change a real system without a gate that can stop it, the exact fix for each, and what is already gated.
