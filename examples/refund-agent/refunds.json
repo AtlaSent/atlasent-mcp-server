@@ -1,0 +1,43 @@
+[
+  {
+    "refund_id": "RF-1001",
+    "ticket_id": "SUP-4410",
+    "customer_ref": "cus_demo_ava",
+    "charge_ref": "ch_demo_7781",
+    "amount": 42.5,
+    "currency": "USD",
+    "original_payment_method": true,
+    "reason": "Double-charged for one month"
+  },
+  {
+    "refund_id": "RF-1002",
+    "ticket_id": "SUP-4416",
+    "customer_ref": "cus_demo_noah",
+    "charge_ref": "ch_demo_7790",
+    "amount": 189,
+    "currency": "USD",
+    "original_payment_method": true,
+    "reason": "Cancelled within the trial window"
+  },
+  {
+    "refund_id": "RF-1003",
+    "ticket_id": "SUP-4423",
+    "customer_ref": "cus_demo_mia",
+    "charge_ref": "ch_demo_7802",
+    "amount": 2400,
+    "currency": "USD",
+    "original_payment_method": true,
+    "reason": "Annual plan refund after outage"
+  },
+  {
+    "refund_id": "RF-1004",
+    "ticket_id": "SUP-4431",
+    "customer_ref": "cus_demo_liam",
+    "charge_ref": "ch_demo_7815",
+    "amount": 12750,
+    "currency": "USD",
+    "original_payment_method": false,
+    "destination": "new_bank_account",
+    "reason": "Customer asks for refund to a new bank account"
+  }
+]
