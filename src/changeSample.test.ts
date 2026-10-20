@@ -80,9 +80,22 @@ describe("change sample: verdicts", () => {
     assert.equal(judge(pr({ reviews: null })).verdict, "unknown");
   });
 
-  it("no checks, or unreadable checks, do not fail an approved change", () => {
+  it("no checks configured does not fail an approved change", () => {
     assert.equal(judge(pr({ checks: [] })).verdict, "pass");
-    assert.equal(judge(pr({ checks: null })).verdict, "pass");
+  });
+
+  it("checks still running or unreadable make an approved change unknown, never a pass", () => {
+    assert.equal(judge(pr({ checks: null })).verdict, "unknown");
+    assert.equal(judge(pr({ checks: [{ name: "ci", status: "in_progress", conclusion: null }] })).verdict, "unknown");
+  });
+
+  it("a deleted author account is unknown: independence cannot be established", () => {
+    const r = judge(pr({ author: null }));
+    assert.equal(r.verdict, "unknown");
+    assert.equal(r.author, "(deleted account)");
+  });
+
+  it("checks states", () => {
     assert.equal(checksState([]), "none");
     assert.equal(checksState(null), "unreadable");
     assert.equal(checksState([{ name: "x", status: "in_progress", conclusion: null }]), "unreadable");
@@ -155,6 +168,18 @@ const apiPull = (n: number, merged: string | null, updated = merged ?? "2026-10-
 
 describe("change sample: collection", () => {
   const now = new Date("2026-10-20T00:00:00Z");
+
+  it("a pull request whose author account is gone is collected with a null author", async () => {
+    const get = fakeGet({
+      "repos/o/r/pulls": [{ ...apiPull(1, "2026-10-10T00:00:00Z"), user: null }],
+      "repos/o/r/pulls/1/reviews": [rv("bob", "APPROVED")],
+      [`repos/o/r/commits/${HEAD}/check-runs`]: { total_count: 1, check_runs: ok },
+      "repos/o/r/pulls/1": {},
+    });
+    const c = await collect(get, "o/r", "main", 90, now);
+    assert.equal(c.pulls[0].author, null);
+    assert.equal(judge(c.pulls[0]).verdict, "unknown");
+  });
 
   it("keeps merged pull requests in the window and drops closed-unmerged and old ones", async () => {
     const get = fakeGet({

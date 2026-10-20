@@ -63,7 +63,8 @@ export interface PullInput {
   number: number;
   title: string;
   url: string;
-  author: string;
+  /** null = the author account is gone, so independence cannot be established. */
+  author: string | null;
   merged_at: string;
   merged_by: string | null;
   head_sha: string;
@@ -125,12 +126,15 @@ export function checksState(checks: CheckRun[] | null): PullResult["checks"] {
 
 export function judge(p: PullInput): PullResult {
   const base = {
-    number: p.number, title: p.title, url: p.url, author: p.author,
+    number: p.number, title: p.title, url: p.url, author: p.author ?? "(deleted account)",
     merged_at: p.merged_at, merged_by: p.merged_by,
   };
   const checks = checksState(p.checks);
   if (p.reviews === null) {
     return { ...base, verdict: "unknown", detail: "Reviews could not be read.", human_approvers: [], independent_approvers: [], approved_head: false, checks };
+  }
+  if (p.author === null) {
+    return { ...base, verdict: "unknown", detail: "The author's account no longer exists, so whether an approval was independent cannot be established.", human_approvers: [], independent_approvers: [], approved_head: false, checks };
   }
   const approvals = standingApprovals(p.reviews);
   const human = [...new Set(approvals.map((r) => r.user!.login))];
@@ -151,6 +155,9 @@ export function judge(p: PullInput): PullResult {
     );
   }
   if (checks === "failed") return out("checks_failed", "At least one check failed on the merged commit.");
+  // An approved change only passes when its checks are known: still running
+  // or unreadable is unknown, never a pass.
+  if (checks === "unreadable") return out("unknown", "Approved on the merged commit, but its checks were still running or could not be read.");
   return out("pass", `Approved by ${indepLogins.join(", ")} on ${p.head_sha.slice(0, 7)}, the code that merged.`);
 }
 
@@ -234,7 +241,7 @@ export async function collect(get: Get, repo: string, base: string, days: number
       number: p.number,
       title: p.title,
       url: p.html_url,
-      author: p.user?.login ?? "(unknown)",
+      author: p.user?.login ?? null,
       merged_at: p.merged_at!,
       merged_by: mergedBy,
       head_sha: p.head.sha,
