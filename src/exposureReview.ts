@@ -19,6 +19,19 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { toolResult } from "./decision.js";
 import { analyzeWorkflows, type EvidenceGapReport, type Finding } from "./evidenceGap.js";
+import {
+  PRIORITY_LABEL,
+  STATUS_LABEL,
+  STATUS_ORDER,
+  causeFindings,
+  causeLeverage,
+  causeReach,
+  contextLine,
+  environmentBreakdown,
+  headline,
+  isGap,
+  plural,
+} from "./reportModel.js";
 
 const CONSOLE = "https://console.atlasent.io";
 const UTM = "utm_source=exposure-review&utm_medium=mcp";
@@ -41,18 +54,6 @@ export interface ExposureReview {
   sign_up_url?: string;
 }
 
-const STATUS_LABEL: Record<Finding["status"], string> = {
-  ungoverned: "No gate",
-  weak: "Gate cannot stop it",
-  gated: "Gated, not bound",
-  gated_upstream: "Gated in an earlier job",
-  bound: "Gated and bound",
-};
-
-function plural(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
 function where(f: Finding): string {
   return `\`${f.workflow}${f.line ? `:${f.line}` : ""}\` (job \`${f.job}\`, step "${f.step}")`;
 }
@@ -71,10 +72,40 @@ export interface RenderOptions {
   incomplete?: Array<{ path: string; error: string }>;
 }
 
+/** One gapped step: where, its context and priority, and its own part of the fix. */
+function renderStep(lines: string[], f: Finding, grouped: boolean, fixOnce?: string): void {
+  lines.push(`#### ${PRIORITY_LABEL[f.priority.label]} · ${f.step}`);
+  lines.push("");
+  lines.push(`- **Where:** ${where(f)}`);
+  lines.push(`- **What it is:** ${contextLine(f)}`);
+  lines.push(`- **Environment read from:** ${f.environment.source}`);
+  if (f.secrets.length) lines.push(`- **Secrets it can read:** ${f.secrets.map((n) => `\`${n}\``).join(", ")}`);
+  lines.push(`- **Priority ${f.priority.score}/100:** ${f.priority.factors.join("; ")}`);
+  if (!grouped) lines.push(`- **Why:** ${f.reason}`);
+  if (f.confidence === "possible") {
+    lines.push(
+      f.category === "unknown"
+        ? "- **Confidence:** possible (the command is chosen at run time; what it runs is not known)."
+        : "- **Confidence:** possible (a script is called; its contents were not read).",
+    );
+  }
+  if (f.fix?.gate_step) {
+    lines.push("- **Add this step before it:**");
+    lines.push("");
+    lines.push("```yaml");
+    lines.push(f.fix.gate_step.trimEnd());
+    lines.push("```");
+  }
+  if (f.fix?.bind_if) lines.push(`- **Then give the step this condition:** \`${f.fix.bind_if}\``);
+  if (f.fix?.change && f.fix.change !== fixOnce) lines.push(`- **Change:** ${f.fix.change}`);
+  if (f.fix?.job_permissions) lines.push(`- **Job permissions:** ${f.fix.job_permissions}`);
+  if (f.fix?.note) lines.push(`- **Note:** ${f.fix.note}`);
+  lines.push("");
+}
+
 export function renderExposureReview(report: EvidenceGapReport, opts: RenderOptions = {}): ExposureReview {
   const s = report.summary;
-  const gapFindings = report.findings.filter((f) => f.status === "ungoverned" || f.status === "weak");
-  const covered = report.findings.filter((f) => f.status !== "ungoverned" && f.status !== "weak");
+  const covered = report.findings.filter((f) => !isGap(f));
   const lines: string[] = [];
 
   lines.push("# Authorization Exposure Review");
@@ -117,48 +148,48 @@ export function renderExposureReview(report: EvidenceGapReport, opts: RenderOpti
         "there are none: see what this review cannot see, above.",
     );
   } else {
-    lines.push(
-      `${plural(s.consequential_steps, "step")} can change a real system. ` +
-        (s.gaps > 0
-          ? `**${plural(s.gaps, "of them has", "of them have")} no approval gate that can stop ${s.gaps === 1 ? "it" : "them"}.**`
-          : "Every one has a gate in front of it."),
-    );
+    lines.push(`**${headline(report).text}**`);
+    const breakdown = environmentBreakdown(report);
+    const leverage = causeLeverage(report);
+    if (breakdown) lines.push("", breakdown);
+    if (leverage) lines.push("", leverage);
     lines.push("");
     lines.push("| Status | Steps |");
     lines.push("|---|---|");
-    for (const k of ["ungoverned", "weak", "gated", "gated_upstream", "bound"] as const) {
-      lines.push(`| ${STATUS_LABEL[k]} | ${s.by_status[k]} |`);
-    }
+    for (const k of STATUS_ORDER) lines.push(`| ${STATUS_LABEL[k]} | ${s.by_status[k]} |`);
+    lines.push("");
+    lines.push(
+      "Environment and priority are read from names in the workflow file (the job's `environment:`, job and step " +
+        "names, the file name) and its `on:` triggers. Each finding says what it was read from.",
+    );
   }
   lines.push("");
 
-  if (gapFindings.length > 0) {
+  if (report.causes.length > 0) {
+    lines.push("## Fix these first");
+    lines.push("");
+    report.causes.slice(0, 3).forEach((c, i) => {
+      lines.push(
+        `${i + 1}. **${PRIORITY_LABEL[c.priority.label]}** · ${c.title} (\`${c.workflow}\`, job \`${c.job}\`). ` +
+          `Closes ${causeReach(c)}.`,
+      );
+    });
+    lines.push("");
+
     lines.push("## Steps to fix");
     lines.push("");
-    gapFindings.forEach((f, i) => {
-      lines.push(`### ${i + 1}. ${STATUS_LABEL[f.status]}: ${f.category}`);
+    lines.push("Grouped by cause, most urgent first. Where one change closes several steps, it is shown once.");
+    lines.push("");
+    report.causes.forEach((c, i) => {
+      const fs = causeFindings(report, c);
+      lines.push(`### ${i + 1}. ${PRIORITY_LABEL[c.priority.label]}: ${c.title}`);
       lines.push("");
-      lines.push(`- **Where:** ${where(f)}`);
-      lines.push(`- **Why:** ${f.reason}`);
-      if (f.confidence === "possible") {
-        lines.push(
-          f.category === "unknown"
-            ? "- **Confidence:** possible (the command is chosen at run time; what it runs is not known)."
-            : "- **Confidence:** possible (a script is called; its contents were not read).",
-        );
-      }
-      if (f.fix?.gate_step) {
-        lines.push("- **Add this step before it:**");
-        lines.push("");
-        lines.push("```yaml");
-        lines.push(f.fix.gate_step.trimEnd());
-        lines.push("```");
-      }
-      if (f.fix?.bind_if) lines.push(`- **Then give the step this condition:** \`${f.fix.bind_if}\``);
-      if (f.fix?.change) lines.push(`- **Change:** ${f.fix.change}`);
-      if (f.fix?.job_permissions) lines.push(`- **Job permissions:** ${f.fix.job_permissions}`);
-      if (f.fix?.note) lines.push(`- **Note:** ${f.fix.note}`);
+      if (c.gate?.step) lines.push(`- **Gate step:** \`${c.workflow}${c.gate.line ? `:${c.gate.line}` : ""}\` (job \`${c.gate.job}\`)`);
+      lines.push(`- **Why:** ${c.detail}`);
+      lines.push(`- **Closes:** ${causeReach(c)}.`);
+      if (c.fix_once) lines.push(`- **Fix once:** ${c.fix_once}`);
       lines.push("");
+      for (const f of fs) renderStep(lines, f, fs.length > 1, c.fix_once);
     });
   }
 

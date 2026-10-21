@@ -9,11 +9,12 @@
  *
  * Reads <repo-dir>/.github/workflows/*.yml|*.yaml, runs the same offline
  * analysis as atlasent_exposure_review (analyzeWorkflows +
- * renderExposureReview), and writes three files to --out (default: cwd):
+ * renderExposureReview), and writes four files to --out (default: cwd):
  *
  *   atlasent-exposure-review.html   self-contained, no external resources
  *   atlasent-exposure-review.md     the same review as Markdown
  *   atlasent-exposure-review.json   the machine-readable evidence-gap report
+ *   atlasent-exposure-review.csv    one row per step, ungated first in rank order
  *
  * Offline and read-only: no network call, no API key, nothing leaves the
  * machine. The report states its own scope (these files only), exactly as the
@@ -35,6 +36,26 @@ import { pathToFileURL } from "node:url";
 
 import { analyzeWorkflows, type EvidenceGapReport, type Finding, type WorkflowInput } from "./evidenceGap.js";
 import { HELP_NOTE, REVIEW_SIGN_UP_URL, helpUrl, renderExposureReview } from "./exposureReview.js";
+import {
+  CATEGORY_LABEL,
+  ENVIRONMENT_LABEL,
+  PRIORITY_LABEL,
+  PRIORITY_TONE,
+  STATUS_LABEL,
+  STATUS_ORDER,
+  STATUS_TONE,
+  TRIGGER_LABEL,
+  causeFindings,
+  causeLeverage,
+  causeReach,
+  contextLine,
+  environmentBreakdown,
+  headline as headlineOf,
+  isGap,
+  possibleNote,
+} from "./reportModel.js";
+import { renderCsv } from "./reportCsv.js";
+import type { Cause } from "./findingContext.js";
 import { VERSION } from "./version.js";
 
 export const EXIT = { OK: 0, GAPS: 1, NO_WORKFLOWS: 2, INCOMPLETE: 3, USAGE: 64 } as const;
@@ -148,22 +169,6 @@ export function esc(s: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
-const STATUS: Record<Finding["status"], { label: string; tone: "bad" | "warn" | "ok" }> = {
-  ungoverned: { label: "No gate", tone: "bad" },
-  weak: { label: "Gate cannot stop it", tone: "bad" },
-  gated: { label: "Gated, not bound", tone: "warn" },
-  gated_upstream: { label: "Gated in an earlier job", tone: "warn" },
-  bound: { label: "Gated and bound", tone: "ok" },
-};
-
-const CATEGORY: Record<Finding["category"], string> = {
-  deploy: "Production deploy",
-  publish: "Package or image publish",
-  migrate: "Database migration",
-  infrastructure: "Infrastructure change",
-  unknown: "Command built at run time",
-};
-
 export interface HtmlMeta {
   target: string;
   generatedAt: string;
@@ -175,44 +180,61 @@ function where(f: Finding): string {
   return `<code>${esc(f.workflow)}${f.line ? `:${esc(f.line)}` : ""}</code> · job <code>${esc(f.job)}</code> · step “${esc(f.step)}”`;
 }
 
+function stepCard(f: Finding, fixOnce: string | undefined, grouped: boolean): string {
+  const fx = f.fix;
+  return `<div class="step">
+  <div class="fhead"><span class="pill ${PRIORITY_TONE[f.priority.label]}">${esc(PRIORITY_LABEL[f.priority.label])}</span><h4>${esc(f.step)}</h4></div>
+  <p class="where">${where(f)}</p>
+  <p class="ctx">${esc(contextLine(f))}</p>
+  <p class="muted">Environment read from ${esc(f.environment.source)}.${f.secrets.length ? ` Secrets it can read: ${f.secrets.map((n) => `<code>${esc(n)}</code>`).join(", ")}.` : ""} Priority ${f.priority.score}/100: ${esc(f.priority.factors.join("; "))}.</p>
+  ${grouped ? "" : `<p><strong>Why it matters:</strong> ${esc(f.reason)}</p>`}
+  ${f.confidence === "possible" ? `<p class="muted">Confidence: possible. ${esc(possibleNote(f))}</p>` : ""}
+  ${fx?.gate_step ? `<p><strong>Fix: add this step before it</strong></p><pre>${esc(fx.gate_step.trimEnd())}</pre>` : ""}
+  ${fx?.bind_if ? `<p><strong>Then give the step this condition:</strong> <code>${esc(fx.bind_if)}</code></p>` : ""}
+  ${fx?.change && fx.change !== fixOnce ? `<p><strong>Change:</strong> ${esc(fx.change)}</p>` : ""}
+  ${fx?.job_permissions ? `<p><strong>Job permissions:</strong> <code>${esc(fx.job_permissions)}</code></p>` : ""}
+  ${fx?.note ? `<p class="muted">${esc(fx.note)}</p>` : ""}
+</div>`;
+}
+
+function causeCard(report: EvidenceGapReport, c: Cause, i: number): string {
+  const fs = causeFindings(report, c);
+  return `<article class="finding" id="cause-${i + 1}">
+  <div class="fhead"><span class="pill ${PRIORITY_TONE[c.priority.label]}">${esc(PRIORITY_LABEL[c.priority.label])}</span><h3>${i + 1}. ${esc(c.title)}</h3></div>
+  ${c.gate?.step ? `<p class="where">Gate step: <code>${esc(c.workflow)}${c.gate.line ? `:${esc(c.gate.line)}` : ""}</code> · job <code>${esc(c.gate.job)}</code></p>` : ""}
+  <p><strong>Why it matters:</strong> ${esc(c.detail)}</p>
+  <p><strong>Closes:</strong> ${esc(causeReach(c))}.</p>
+  ${c.fix_once ? `<p class="fixonce"><strong>Fix once:</strong> ${esc(c.fix_once)}</p>` : ""}
+  ${fs.map((f) => stepCard(f, c.fix_once, fs.length > 1)).join("\n")}
+</article>`;
+}
+
 export function renderHtml(report: EvidenceGapReport, meta: HtmlMeta): string {
   const s = report.summary;
-  const gaps = report.findings.filter((f) => f.status === "ungoverned" || f.status === "weak");
-  const covered = report.findings.filter((f) => f.status !== "ungoverned" && f.status !== "weak");
-
-  const headline =
-    report.findings.length === 0
-      ? `No production-changing steps were recognized in ${s.workflows_scanned} workflow file${s.workflows_scanned === 1 ? "" : "s"}.`
-      : s.gaps > 0
-        ? `${s.gaps} of ${s.consequential_steps} production-changing step${s.consequential_steps === 1 ? "" : "s"} can run with no approval that could stop ${s.gaps === 1 ? "it" : "them"}.`
-        : `All ${s.consequential_steps} production-changing step${s.consequential_steps === 1 ? " has" : "s have"} a gate in front.`;
+  const covered = report.findings.filter((f) => !isGap(f));
+  const head = headlineOf(report);
   const incomplete = meta.incomplete ?? [];
-  const headTone = incomplete.length > 0 ? "bad" : report.findings.length === 0 ? "warn" : s.gaps > 0 ? "bad" : "ok";
+  const headTone = incomplete.length > 0 ? "bad" : head.tone;
+  const breakdown = environmentBreakdown(report);
+  const leverage = causeLeverage(report);
 
   const stat = (n: number, label: string, tone: string) =>
     `<div class="stat ${tone}"><div class="n">${n}</div><div class="l">${esc(label)}</div></div>`;
 
-  const gapCards = gaps
-    .map((f, i) => {
-      const fx = f.fix;
-      return `<article class="finding">
-  <div class="fhead"><span class="pill bad">${esc(STATUS[f.status].label)}</span><h3>${i + 1}. ${esc(CATEGORY[f.category])}</h3></div>
-  <p class="where">${where(f)}</p>
-  <p><strong>Why it matters:</strong> ${esc(f.reason)}</p>
-  ${f.confidence === "possible" ? `<p class="muted">Confidence: possible. ${esc(possibleNote(f))}</p>` : ""}
-  ${fx?.gate_step ? `<p><strong>Fix: add this step before it</strong></p><pre>${esc(fx.gate_step.trimEnd())}</pre>` : ""}
-  ${fx?.bind_if ? `<p><strong>Then give the step this condition:</strong> <code>${esc(fx.bind_if)}</code></p>` : ""}
-  ${fx?.change ? `<p><strong>Change:</strong> ${esc(fx.change)}</p>` : ""}
-  ${fx?.job_permissions ? `<p><strong>Job permissions:</strong> <code>${esc(fx.job_permissions)}</code></p>` : ""}
-  ${fx?.note ? `<p class="muted">${esc(fx.note)}</p>` : ""}
-</article>`;
-    })
+  const fixFirst = report.causes
+    .slice(0, 3)
+    .map(
+      (c, i) =>
+        `<li><a href="#cause-${i + 1}"><span class="pill ${PRIORITY_TONE[c.priority.label]}">${esc(PRIORITY_LABEL[c.priority.label])}</span> ${esc(c.title)}</a> <span class="muted">· <code>${esc(c.workflow)}</code> · closes ${esc(causeReach(c))}</span></li>`,
+    )
     .join("\n");
+
+  const causeCards = report.causes.map((c, i) => causeCard(report, c, i)).join("\n");
 
   const coveredRows = covered
     .map(
       (f) =>
-        `<tr><td><span class="pill ${STATUS[f.status].tone}">${esc(STATUS[f.status].label)}</span></td><td>${esc(CATEGORY[f.category])}</td><td>${where(f)}</td></tr>`,
+        `<tr><td><span class="pill ${STATUS_TONE[f.status]}">${esc(STATUS_LABEL[f.status])}</span></td><td>${esc(CATEGORY_LABEL[f.category])}<br><span class="muted">${esc(ENVIRONMENT_LABEL[f.environment.value])} · ${esc(TRIGGER_LABEL[f.trigger.kind])}</span></td><td>${where(f)}</td></tr>`,
     )
     .join("\n");
 
@@ -244,7 +266,10 @@ h2{font-size:18px;margin:0 0 12px}h3{font-size:16px;margin:0}
 .finding{border:1px solid var(--line);border-radius:10px;padding:16px;margin:12px 0}.fhead{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .pill{display:inline-block;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600;white-space:nowrap}
 .pill.bad{background:var(--badbg);color:var(--bad)}.pill.warn{background:var(--warnbg);color:var(--warn)}.pill.ok{background:var(--okbg);color:var(--ok)}
-.where{color:var(--muted);font-size:13px;word-break:break-word}code{font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-word}
+.where{color:var(--muted);font-size:13px;word-break:break-word}.ctx{font-size:13px;font-weight:600;margin:4px 0}
+.step{border-top:1px dashed var(--line);padding-top:12px;margin-top:12px}h4{font-size:15px;margin:0}
+.fixonce{background:var(--okbg);border-radius:8px;padding:10px 12px}.first{padding-left:20px}.first li{margin:6px 0}.first a{text-decoration:none;color:var(--ink);font-weight:600}
+.scope{font-size:13px;color:var(--muted);margin-top:8px}code{font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-word}
 pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 table{width:100%;border-collapse:collapse}td{border-top:1px solid var(--line);padding:8px 6px;vertical-align:top;font-size:14px}
 .muted{color:var(--muted)}ul{padding-left:20px}a{color:var(--brand)}
@@ -268,18 +293,19 @@ ${
     : ""
 }
 <section>
-  <p class="headline ${headTone}">${esc(headline)}</p>
+  <p class="headline ${headTone}">${esc(head.text)}</p>
+  ${breakdown ? `<p>${esc(breakdown)}</p>` : ""}
+  ${leverage ? `<p><strong>${esc(leverage)}</strong></p>` : ""}
   <div class="stats">
-    ${stat(s.by_status.ungoverned, "No gate", "bad")}
-    ${stat(s.by_status.weak, "Gate cannot stop it", "bad")}
-    ${stat(s.by_status.gated + s.by_status.gated_upstream, "Gated, not bound", "warn")}
-    ${stat(s.by_status.bound, "Gated and bound", "ok")}
+    ${STATUS_ORDER.map((k) => stat(s.by_status[k], STATUS_LABEL[k], STATUS_TONE[k])).join("\n    ")}
   </div>
-  <p class="muted" style="margin-top:14px">A <strong>production-changing step</strong> is a deploy, publish, database migration or infrastructure apply in your CI. <strong>Gated and bound</strong> means it runs only after an authorization check that can stop it, and only on the exact change that was approved.</p>
+  <p class="muted" style="margin-top:14px">A step that can <strong>change a real system</strong> is a deploy, publish, database migration or infrastructure apply in your CI. <strong>Gated and bound</strong> means it runs only after an authorization check that can stop it, and only on the exact change that was approved. Environment and priority are read from names and triggers in the workflow files; each step says what they were read from.</p>
+  <p class="scope">Covers these workflow files only; it is not an assessment of your organization. <a href="#scope">What it cannot see</a>.</p>
 </section>
 ${
-  gaps.length
-    ? `<section><h2>What to fix</h2><p class="muted">Each item is a step that can change a real system today with nothing able to stop it. The fix is shown for each one.</p>${gapCards}</section>`
+  report.causes.length
+    ? `<section><h2>Fix these first</h2><ol class="first">${fixFirst}</ol></section>
+<section><h2>What to fix</h2><p class="muted">Grouped by cause, most urgent first. Where one change closes several steps, it is shown once.</p>${causeCards}</section>`
     : ""
 }
 ${covered.length ? `<section><h2>Already gated</h2><table>${coveredRows}</table></section>` : ""}
@@ -288,7 +314,7 @@ ${
     ? `<section><h2>Not read</h2><ul>${unreadable.map((u) => `<li><code>${esc(u)}</code></li>`).join("")}</ul><p class="muted">No conclusion is drawn about these files.</p></section>`
     : ""
 }
-<section>
+<section id="scope">
   <h2>What this review covers, and what it does not</h2>
   <p>It covers the CI workflow files in this repository only. It is <strong>not</strong> an assessment of your organization's authorization posture. It cannot see:</p>
   <ul>${report.not_checked.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>
@@ -318,15 +344,9 @@ const USAGE = `atlasent-exposure-scan — free Authorization Exposure Review (of
 
   atlasent-exposure-scan [repo-dir] [--out <dir>] [--fail-on-gaps]
 
-Reads <repo-dir>/.github/workflows and writes atlasent-exposure-review.{html,md,json}
+Reads <repo-dir>/.github/workflows and writes atlasent-exposure-review.{html,md,json,csv}
 to --out (default: the current directory). No network call, no API key.
 `;
-
-function possibleNote(f: Finding): string {
-  return f.category === "unknown"
-    ? "The command is chosen at run time, so what it runs is not known."
-    : "A script is called and its contents were not read.";
-}
 
 export function main(argv: string[], now: Date = new Date()): number {
   const args = parseArgs(argv);
@@ -383,15 +403,18 @@ export function main(argv: string[], now: Date = new Date()): number {
     html: join(out, "atlasent-exposure-review.html"),
     md: join(out, "atlasent-exposure-review.md"),
     json: join(out, "atlasent-exposure-review.json"),
+    csv: join(out, "atlasent-exposure-review.csv"),
   };
   writeFileSync(files.html, html);
   writeFileSync(files.md, review.markdown + "\n");
   writeFileSync(files.json, JSON.stringify({ ...report, scan }, null, 2) + "\n");
+  writeFileSync(files.csv, renderCsv(report));
 
   const s = report.summary;
   process.stdout.write(
-    `${s.workflows_scanned} workflow files, ${s.consequential_steps} production-changing steps, ${s.gaps} with no gate that can stop them.\n` +
-      `Report: ${files.html}\n`,
+    `${s.workflows_scanned} workflow files, ${s.consequential_steps} steps that can change a real system, ${s.gaps} with no gate that can stop them` +
+      ` (${s.gaps_by_environment.production} in production, ${s.gaps_by_environment.unknown} environment not determined).\n` +
+      `Report: ${files.html}\nSpreadsheet: ${files.csv}\n`,
   );
   if (!scan.complete) {
     process.stderr.write(

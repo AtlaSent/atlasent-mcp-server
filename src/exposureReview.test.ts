@@ -65,7 +65,9 @@ describe("renderExposureReview", () => {
     assert.match(r.markdown, /## Steps to fix/);
     assert.match(r.markdown, /`\.github\/workflows\/deploy\.yml:\d+` \(job `deploy`, step "Ship it"\)/);
     assert.match(r.markdown, /```yaml\n[\s\S]*AtlaSent\/atlasent-action/);
-    assert.match(r.markdown, /\*\*1 of them has no approval gate that can stop it\.\*\*/);
+    // Nothing in this file names an environment, so the headline does not
+    // pretend it is staging: it says the environment is not known.
+    assert.match(r.markdown, /\*\*1 step can run with no approval that could stop it, and this review could not tell whether it changes production\.\*\*/);
     assert.equal(r.sign_up_url, REVIEW_SIGN_UP_URL);
     assert.deepEqual(r.help, { explain: helpUrl("explain", 1), rollout: helpUrl("rollout", 1), note: HELP_NOTE });
     assert.ok(r.markdown.includes(helpUrl("explain", 1)));

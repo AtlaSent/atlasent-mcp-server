@@ -50,12 +50,12 @@ describe("atlasent-exposure-scan", () => {
     assert.deepEqual(collectWorkflows(dir).inputs.map((i) => i.path), [".github/workflows/a.yml", ".github/workflows/b.yaml"]);
   });
 
-  it("writes html, md and json and reports the ungated deploy", () => {
+  it("writes html, md, json and csv and reports the ungated deploy", () => {
     const dir = repo({ "deploy.yml": UNGATED });
     const out = join(dir, "out");
     assert.equal(quiet(() => main([dir, "--out", out], new Date("2026-10-12T12:00:00Z"))), EXIT.OK);
     const html = readFileSync(join(out, "atlasent-exposure-review.html"), "utf8");
-    assert.match(html, /1 of 1 production-changing step can run with no approval/);
+    assert.match(html, /1 step that changes production can run with no approval that could stop it\./);
     assert.match(html, /What to fix/);
     assert.match(html, /<code>if: steps\.atlasent_gate\.outputs\.verified == &#39;true&#39;<\/code>/);
     assert.doesNotMatch(html, /if: if:/);
@@ -64,6 +64,9 @@ describe("atlasent-exposure-scan", () => {
     assert.ok(existsSync(join(out, "atlasent-exposure-review.md")));
     const json = JSON.parse(readFileSync(join(out, "atlasent-exposure-review.json"), "utf8"));
     assert.equal(json.summary.gaps, 1);
+    const csv = readFileSync(join(out, "atlasent-exposure-review.csv"), "utf8");
+    assert.match(csv, /^\uFEFFrank,priority,/);
+    assert.match(csv, /\r\n1,High,\d+,No gate,Deploy,Production,/);
   });
 
   it("states its scope and loads nothing external", () => {

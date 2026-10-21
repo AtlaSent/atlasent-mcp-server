@@ -14,6 +14,17 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+### Added
+
+- Exposure Review ranks what to fix. Every step now reports the environment it changes (and what in the file said so), what starts it, the secret names it can read, and a 0–100 priority with its reasons. Gaps behind the same weak gate are grouped into one cause with one fix, and the review opens with "Fix these first".
+- `atlasent-exposure-scan` also writes `atlasent-exposure-review.csv`: one row per step, ungated first in rank order, safe to open in a spreadsheet.
+- `evidence_gap.v1` gains `environment`, `trigger`, `secrets`, `priority` and `cause` on each finding, a top-level `causes` list, and environment and cause counts in `summary`. Additive; no field changed.
+
+### Fixed
+
+- The HTML report folded two statuses into one card, so its counts disagreed with the Markdown. Both now show all five statuses from one source.
+- The headline no longer calls staging steps "production-changing": it counts production gaps, and says when the environment could not be determined.
+
 ## [2.20.0] - 2026-10-20
 
 ### Added
