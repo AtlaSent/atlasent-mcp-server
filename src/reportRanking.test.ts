@@ -183,6 +183,8 @@ describe("trigger, secrets and priority", () => {
       "(inputs.x && (github.event_name == 'workflow_dispatch'))",
       // Operators inside a quoted string are text, not part of the condition.
       "github.event_name == 'workflow_dispatch' && inputs.note != 'a || b'",
+      // Every || branch requires dispatch, so the whole condition does.
+      "github.event_name == 'workflow_dispatch' && inputs.a || github.event_name == 'workflow_dispatch' && inputs.b",
     ]) {
       assert.equal(triggerOf(["push", "workflow_dispatch"], cond, "").kind, "manual", cond);
     }

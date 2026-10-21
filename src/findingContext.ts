@@ -200,9 +200,11 @@ function splitTopLevel(expr: string, op: "&&" | "||"): string[] {
 function exprRequiresDispatch(expr: string): boolean {
   const e = stripOuterParens(expr);
   // `&&` binds tighter than `||`, so a top-level `||` is the outermost
-  // operator: `dispatch && x || push` can run on push. Reject it before
-  // looking at conjuncts.
-  if (splitTopLevel(e, "||").length > 1) return false;
+  // operator: the condition requires dispatch only if every branch does.
+  // `dispatch && x || push` can run on push; `dispatch && a || dispatch && b`
+  // cannot.
+  const branches = splitTopLevel(e, "||");
+  if (branches.length > 1) return branches.every(exprRequiresDispatch);
   const conjuncts = splitTopLevel(e, "&&").map(stripOuterParens);
   if (conjuncts.length === 1) {
     // Anchored: a negation (`!x`, `!(x)`) never matches, whatever it wraps.
