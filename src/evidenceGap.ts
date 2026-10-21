@@ -1272,13 +1272,19 @@ function fixFor(
   }
   const gateId = weakGate.id ?? GATE_ID;
   if (!weakGate.id) notes.push("Give the gate step an `id:` so this step can reference its output.");
-  const change = weakGate.advisory
-    ? "Remove continue-on-error from the gate step, so a deny fails the job."
-    : weakGate.conditional
-      ? "Remove the gate step's own `if:` (for example a skip_gate input), so it cannot be skipped."
-      : weakGate.issuesOnly
-        ? "The gate only issues a permit (mode: evaluate-only). Add a step with `verify-permit: 'true'` before this one, or drop evaluate-only."
-        : "Bind this step to the gate's verified output.";
+  // Every weakness the gate has, not just the first: this text becomes the
+  // cause's fix_once, and a one-time fix that leaves the gate skippable (or
+  // advisory) does not close the findings it claims to close.
+  const weaknesses: string[] = [];
+  if (weakGate.advisory) weaknesses.push("Remove continue-on-error from the gate step, so a deny fails the job.");
+  if (weakGate.conditional) weaknesses.push("Remove the gate step's own `if:` (for example a skip_gate input), so it cannot be skipped.");
+  if (weakGate.issuesOnly) {
+    weaknesses.push("The gate only issues a permit (mode: evaluate-only). Add a step with `verify-permit: 'true'` before this one, or drop evaluate-only.");
+  }
+  const change =
+    weaknesses.length === 0 ? "Bind this step to the gate's verified output."
+    : weaknesses.length === 1 ? weaknesses[0]
+    : `The gate is weak in ${weaknesses.length} ways; all of these are needed: ${weaknesses.join(" ")}`;
   return { action_type: action, change, ...withBinding(gateId), ...tail() };
 }
 

@@ -23,6 +23,7 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 ### Fixed
 
 - The HTML report folded two statuses into one card, so its counts disagreed with the Markdown. Both now show all five statuses from one source.
+- Exposure Review ranking no longer errs in the reassuring direction in five cases: a step `environment` input chosen at run time is unknown (not the job's name); a negated `workflow_dispatch` check is not "started by hand only"; every event-driven trigger, listed or not, ranks as automatic; `secrets['NAME']` references count; and a gate weak in two ways gets a one-time fix naming both.
 - The headline no longer calls staging steps "production-changing": it counts production gaps, and says when the environment could not be determined.
 
 ## [2.20.0] - 2026-10-20

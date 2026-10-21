@@ -104,9 +104,9 @@ function fileName(path: string): string {
 /**
  * The environment a step changes, from the most to the least specific place
  * that names it: the job's GitHub `environment:`, the step's `with.environment`,
- * the job id and `name:`, the step name, then the workflow file name. A job
- * environment chosen at run time (`${{ ... }}`) stops the search: the names
- * around it do not decide where it goes.
+ * the job id and `name:`, the step name, then the workflow file name. A job or
+ * step environment chosen at run time (`${{ ... }}`) stops the search: the
+ * names around it do not decide where it goes.
  */
 export function environmentOf(job: YMap, jobId: string, step: YMap, workflowPath: string): EnvironmentInfo {
   const jobEnv = envName(job.environment);
@@ -116,8 +116,13 @@ export function environmentOf(job: YMap, jobId: string, step: YMap, workflowPath
     if (c) return { value: c, source: `job environment "${jobEnv}"` };
   }
   const w = step.with && typeof step.with === "object" && !Array.isArray(step.with) ? (step.with as YMap) : {};
+  // Same rule for the step's own `with.environment`: chosen at run time, it can
+  // be production whatever the job or file is called.
+  if (typeof w.environment === "string" && w.environment.includes("${{")) {
+    return { value: "unknown", source: "the step's environment input is chosen at run time" };
+  }
   const candidates: Array<[string | null, string]> = [
-    [typeof w.environment === "string" && !w.environment.includes("${{") ? w.environment : null, "step input environment"],
+    [typeof w.environment === "string" ? w.environment : null, "step input environment"],
     [jobId, "job"],
     [typeof job.name === "string" ? job.name : null, "job name"],
     [typeof step.name === "string" ? step.name : null, "step name"],
@@ -135,15 +140,91 @@ export function environmentOf(job: YMap, jobId: string, step: YMap, workflowPath
 // Trigger
 // ---------------------------------------------------------------------------
 
-const AUTOMATIC_EVENTS = new Set([
-  "push", "schedule", "pull_request", "pull_request_target", "merge_group", "release", "workflow_run",
-  "deployment", "deployment_status", "registry_package", "check_run", "check_suite", "create", "delete",
-  "issues", "issue_comment", "label", "milestone", "page_build", "project", "project_card", "project_column",
-  "public", "status", "watch", "fork", "gollum", "discussion", "discussion_comment", "branch_protection_rule",
-  "pull_request_review", "pull_request_review_comment",
-]);
+// The only events that are not "something happened, so it runs": started by
+// hand, by an API call, or by another workflow. Every other `on:` event is
+// event-driven and counts as automatic, including ones not listed anywhere
+// here (`workflow_job`, `image_version`, events GitHub adds later): an
+// unrecognized trigger ranks as automatic, never below it.
+const NON_AUTOMATIC_EVENTS = new Set(["workflow_dispatch", "repository_dispatch", "workflow_call"]);
 
-const DISPATCH_ONLY = /github\.event_name\s*==\s*(['"])workflow_dispatch\1/;
+function isAutomaticEvent(e: string): boolean {
+  return !NON_AUTOMATIC_EVENTS.has(e);
+}
+
+const DISPATCH_EQ = /^(?:github\.event_name\s*==\s*(['"])workflow_dispatch\1|(['"])workflow_dispatch\2\s*==\s*github\.event_name)$/;
+
+function stripOuterParens(t: string): string {
+  let s = t.trim();
+  for (;;) {
+    if (!(s.startsWith("(") && s.endsWith(")"))) return s;
+    // Only strip a pair that encloses the whole expression.
+    let depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === "(") depth++;
+      else if (s[i] === ")") depth--;
+      if (depth === 0 && i < s.length - 1) return s;
+    }
+    s = s.slice(1, -1).trim();
+  }
+}
+
+/**
+ * Splits an expression on its top-level `&&`, ignoring any
+ * inside parentheses or quoted strings.
+ */
+function splitTopLevel(expr: string, op: "&&"): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (depth === 0 && expr.startsWith(op, i)) {
+      parts.push(expr.slice(start, i));
+      start = i + op.length;
+      i += op.length - 1;
+    }
+  }
+  parts.push(expr.slice(start));
+  return parts;
+}
+
+/** True when `expr` can only be true if `github.event_name == 'workflow_dispatch'`. */
+function exprRequiresDispatch(expr: string): boolean {
+  const e = stripOuterParens(expr);
+  // An `a || b` at this level is never a single anchored comparison, so it
+  // cannot match below: another branch could be true instead.
+  const conjuncts = splitTopLevel(e, "&&").map(stripOuterParens);
+  if (conjuncts.length === 1) {
+    // Anchored: a negation (`!x`, `!(x)`) never matches, whatever it wraps.
+    return DISPATCH_EQ.test(conjuncts[0]);
+  }
+  // One required, positive conjunct is enough; negations in the others
+  // (`... && !inputs.skip`) only narrow it further.
+  return conjuncts.some(exprRequiresDispatch);
+}
+
+/**
+ * True only when the condition REQUIRES `github.event_name ==
+ * 'workflow_dispatch'`: the comparison is a positive conjunct of the
+ * condition (through any grouping parentheses), with no `||` alternative at
+ * its level and no `!` applied to it. `!(github.event_name ==
+ * 'workflow_dispatch')` mentions the event but excludes it, so it does not
+ * narrow; `github.event_name == 'workflow_dispatch' && !inputs.skip` does.
+ */
+function requiresDispatch(cond: string): boolean {
+  let c = cond.trim();
+  const m = /^\$\{\{([\s\S]*)\}\}$/.exec(c);
+  if (m) c = m[1];
+  return exprRequiresDispatch(c);
+}
 
 /**
  * What starts this step, from the workflow's `on:`. A job or step condition
@@ -153,11 +234,11 @@ const DISPATCH_ONLY = /github\.event_name\s*==\s*(['"])workflow_dispatch\1/;
 export function triggerOf(events: string[], jobIf: string, stepIf: string): TriggerInfo {
   const base = { events: [...events] };
   for (const [cond, where] of [[jobIf, "job"], [stepIf, "step"]] as const) {
-    if (DISPATCH_ONLY.test(cond) && !cond.includes("||")) {
+    if (requiresDispatch(cond)) {
       return { kind: "manual", ...base, narrowed_by: `the ${where} runs only on workflow_dispatch` };
     }
   }
-  if (events.some((e) => AUTOMATIC_EVENTS.has(e))) return { kind: "automatic", ...base };
+  if (events.some(isAutomaticEvent)) return { kind: "automatic", ...base };
   if (events.includes("repository_dispatch")) return { kind: "external", ...base };
   if (events.includes("workflow_call")) return { kind: "called", ...base };
   if (events.includes("workflow_dispatch")) return { kind: "manual", ...base };
@@ -168,7 +249,8 @@ export function triggerOf(events: string[], jobIf: string, stepIf: string): Trig
 // Secrets
 // ---------------------------------------------------------------------------
 
-const SECRET_REF = /\bsecrets\.([A-Za-z_][A-Za-z0-9_]*)/g;
+// `secrets.NAME` and the fixed bracket form `secrets['NAME']` / `secrets["NAME"]`.
+const SECRET_REF = /\bsecrets(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[\s*(['"])([A-Za-z_][A-Za-z0-9_]*)\2\s*\])/g;
 
 function collectStrings(v: YValue | undefined, out: string[]): void {
   if (typeof v === "string") out.push(v);
@@ -187,7 +269,7 @@ export function secretsOf(step: YMap, job: YMap, doc: YMap): string[] {
   collectStrings(job.env, texts);
   collectStrings(doc.env, texts);
   const names = new Set<string>();
-  for (const t of texts) for (const m of t.matchAll(SECRET_REF)) names.add(m[1]);
+  for (const t of texts) for (const m of t.matchAll(SECRET_REF)) names.add(m[1] ?? m[3]);
   return [...names].sort();
 }
 
@@ -208,7 +290,7 @@ const TRIGGER_WEIGHT: Record<TriggerKind, number> = { automatic: 20, external: 1
 function triggerFactor(t: TriggerInfo): string {
   switch (t.kind) {
     case "automatic":
-      return `runs automatically (${t.events.filter((e) => AUTOMATIC_EVENTS.has(e)).join(", ")})`;
+      return `runs automatically (${t.events.filter(isAutomaticEvent).join(", ")})`;
     case "external":
       return "can be started by an API call (repository_dispatch)";
     case "called":

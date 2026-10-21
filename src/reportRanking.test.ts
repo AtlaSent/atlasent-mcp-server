@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { analyzeWorkflows } from "./evidenceGap.js";
 import { renderExposureReview } from "./exposureReview.js";
 import { renderHtml } from "./exposureScanCli.js";
-import { classifyName, priorityOf, triggerOf } from "./findingContext.js";
+import { classifyName, environmentOf, priorityOf, secretsOf, triggerOf } from "./findingContext.js";
 import { CSV_COLUMNS, csvCell, renderCsv } from "./reportCsv.js";
 import { STATUS_LABEL, STATUS_ORDER, headline } from "./reportModel.js";
 
@@ -122,6 +122,17 @@ jobs:
     assert.match(r.findings[0].environment.source, /chosen at run time/);
   });
 
+  it("a step environment input chosen at run time is unknown, even in a job named deploy-staging", () => {
+    const job = { "runs-on": "ubuntu-latest" };
+    const step = { uses: "some/deploy-action@v1", with: { environment: "${{ inputs.target }}" } };
+    const e = environmentOf(job, "deploy-staging", step, ".github/workflows/ship.yml");
+    assert.equal(e.value, "unknown");
+    assert.match(e.source, /step's environment input is chosen at run time/);
+    // A literal step input still decides.
+    const literal = environmentOf(job, "deploy-staging", { ...step, with: { environment: "production" } }, ".github/workflows/ship.yml");
+    assert.deepEqual(literal, { value: "production", source: 'step input environment "production"' });
+  });
+
   it("falls back to the workflow file name, then to unknown", () => {
     const body = `
 on: push
@@ -146,6 +157,53 @@ describe("trigger, secrets and priority", () => {
     assert.equal(triggerOf(["push"], "github.event_name == 'workflow_dispatch' || true", "").kind, "automatic");
     assert.equal(triggerOf(["workflow_call"], "", "").kind, "called");
     assert.equal(triggerOf(["repository_dispatch"], "", "").kind, "external");
+  });
+
+  it("a negated dispatch check does not narrow to manual; a required one does, in any spelling", () => {
+    for (const cond of [
+      "!(github.event_name == 'workflow_dispatch')",
+      "${{ !(github.event_name == 'workflow_dispatch') }}",
+      "!(inputs.x && github.event_name == 'workflow_dispatch')",
+      "(github.event_name == 'workflow_dispatch' || inputs.force) && inputs.x",
+      "github.event_name == 'workflow_dispatch' || github.event_name == 'push'",
+    ]) {
+      assert.equal(triggerOf(["push", "workflow_dispatch"], cond, "").kind, "automatic", cond);
+    }
+    for (const cond of [
+      "${{ github.event_name == 'workflow_dispatch' }}",
+      "github.event_name == 'workflow_dispatch' && inputs.confirm == 'yes'",
+      "(github.event_name == \"workflow_dispatch\")",
+      "'workflow_dispatch' == github.event_name",
+      "${{ (github.event_name == 'workflow_dispatch' && inputs.confirm) }}",
+      "github.event_name == 'workflow_dispatch' && !inputs.skip",
+      "github.event_name == 'workflow_dispatch' && (inputs.a || inputs.b)",
+      "(inputs.x && (github.event_name == 'workflow_dispatch'))",
+      // Operators inside a quoted string are text, not part of the condition.
+      "github.event_name == 'workflow_dispatch' && inputs.note != 'a || b'",
+    ]) {
+      assert.equal(triggerOf(["push", "workflow_dispatch"], cond, "").kind, "manual", cond);
+    }
+  });
+
+  it("every event-driven trigger is automatic, including ones not listed (workflow_job, image_version)", () => {
+    for (const e of ["workflow_job", "image_version", "push", "workflow_run"]) {
+      const t = triggerOf([e], "", "");
+      assert.equal(t.kind, "automatic", e);
+      const p = priorityOf("deploy", { value: "production", source: "x" }, t, [], "certain");
+      assert.ok(p.factors.includes(`runs automatically (${e})`), e);
+    }
+    assert.equal(triggerOf(["workflow_dispatch"], "", "").kind, "manual");
+    assert.equal(triggerOf([], "", "").kind, "unknown");
+  });
+
+  it("reads bracket-form secret references by name", () => {
+    const step = {
+      run: "deploy",
+      env: { A: "${{ secrets['DEPLOY_TOKEN'] }}", B: '${{ secrets[ "OTHER_KEY" ] }}', C: "${{ secrets.PLAIN }}" },
+    };
+    assert.deepEqual(secretsOf(step, {}, {}), ["DEPLOY_TOKEN", "OTHER_KEY", "PLAIN"]);
+    // A computed index is not a fixed name and is not guessed at.
+    assert.deepEqual(secretsOf({ run: "x", env: { A: "${{ secrets[inputs.name] }}" } }, {}, {}), []);
   });
 
   it("lists secret names from the step, job env and workflow env, never values", () => {
@@ -175,6 +233,30 @@ describe("causes", () => {
     assert.equal(r.summary.causes, r.causes.length);
     assert.ok(r.summary.causes < r.summary.gaps);
     assert.match(renderExposureReview(r).markdown, /These 3 gaps come from 2 causes: fixing them closes all 3\./);
+  });
+
+  it("a gate weak in two ways gets a one-time fix that names both", () => {
+    const r = analyzeWorkflows(wf(`
+on: push
+jobs:
+  prod:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Permit
+        id: gate
+        if: \${{ !inputs.skip_gate }}
+        continue-on-error: true
+        uses: AtlaSent/atlasent-action@v1
+        with:
+          action: production.deploy
+      - name: Deploy
+        run: helm upgrade --install api ./chart
+`));
+    const cause = r.causes.find((c) => c.gate?.step === "Permit")!;
+    assert.ok(cause, JSON.stringify(r.causes));
+    assert.match(cause.fix_once ?? "", /continue-on-error/);
+    assert.match(cause.fix_once ?? "", /own `if:`/);
   });
 
   it("ranks causes by their most urgent step; production first", () => {
