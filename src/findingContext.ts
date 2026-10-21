@@ -169,10 +169,10 @@ function stripOuterParens(t: string): string {
 }
 
 /**
- * Splits an expression on its top-level `&&`, ignoring any
+ * Splits an expression on a top-level operator (`&&` or `||`), ignoring any
  * inside parentheses or quoted strings.
  */
-function splitTopLevel(expr: string, op: "&&"): string[] {
+function splitTopLevel(expr: string, op: "&&" | "||"): string[] {
   const parts: string[] = [];
   let depth = 0;
   let quote: string | null = null;
@@ -199,8 +199,12 @@ function splitTopLevel(expr: string, op: "&&"): string[] {
 /** True when `expr` can only be true if `github.event_name == 'workflow_dispatch'`. */
 function exprRequiresDispatch(expr: string): boolean {
   const e = stripOuterParens(expr);
-  // An `a || b` at this level is never a single anchored comparison, so it
-  // cannot match below: another branch could be true instead.
+  // `&&` binds tighter than `||`, so a top-level `||` is the outermost
+  // operator: the condition requires dispatch only if every branch does.
+  // `dispatch && x || push` can run on push; `dispatch && a || dispatch && b`
+  // cannot.
+  const branches = splitTopLevel(e, "||");
+  if (branches.length > 1) return branches.every(exprRequiresDispatch);
   const conjuncts = splitTopLevel(e, "&&").map(stripOuterParens);
   if (conjuncts.length === 1) {
     // Anchored: a negation (`!x`, `!(x)`) never matches, whatever it wraps.
