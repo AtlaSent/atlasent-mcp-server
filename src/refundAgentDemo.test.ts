@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 // @ts-expect-error plain .mjs example module, no type declarations
-import { ACTION_TYPE, payloadDigest, refundPayload, runRefundAgent } from "../examples/refund-agent/core.mjs";
+import { ACTION_TYPE, payloadDigest, refundPayload, runRefundAgent, toolCallTimeoutMs } from "../examples/refund-agent/core.mjs";
 // @ts-expect-error plain .mjs example module, no type declarations
 import { createSimulatedTools } from "../examples/refund-agent/simulated.mjs";
 
@@ -108,5 +108,17 @@ describe("refund agent demo", () => {
       assert.ok(doc.includes(scope), `docs/REFUND_AGENT_DEMO.md names ${scope}`);
       assert.ok(script.includes(scope), `examples/refund-agent-demo.mjs names ${scope}`);
     }
+  });
+
+  it("gives the approval wait an MCP timeout longer than the wait itself", async () => {
+    // The MCP client SDK's default request timeout is 60 s; a 600 s wait must not inherit it.
+    assert.ok(toolCallTimeoutMs("atlasent_await_approval", { max_wait_seconds: 600 }) > 600_000);
+    assert.ok(toolCallTimeoutMs("atlasent_await_approval", {}) > 120_000, "server default wait is 120 s");
+    assert.equal(toolCallTimeoutMs("atlasent_await_approval", { max_wait_seconds: 5 }), 60_000);
+    assert.equal(toolCallTimeoutMs("atlasent_evaluate", { max_wait_seconds: 600 }), 60_000);
+    // The live script passes it on every call.
+    const { readFileSync } = await import("node:fs");
+    const script = readFileSync(new URL("../examples/refund-agent-demo.mjs", import.meta.url), "utf8");
+    assert.match(script, /callTool\(\{ name, arguments: args \}, undefined, \{ timeout: toolCallTimeoutMs\(name, args\) \}\)/);
   });
 });

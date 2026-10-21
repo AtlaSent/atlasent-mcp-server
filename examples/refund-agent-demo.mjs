@@ -34,7 +34,7 @@ import { dirname, resolve } from "node:path";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { runRefundAgent } from "./refund-agent/core.mjs";
+import { runRefundAgent, toolCallTimeoutMs } from "./refund-agent/core.mjs";
 import { createSimulatedTools } from "./refund-agent/simulated.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -72,7 +72,10 @@ async function liveTools() {
       stderr: process.env.DEMO_SERVER_LOGS === "1" ? "inherit" : "ignore",
     }),
   );
-  const call = async (name, args) => parse(await client.callTool({ name, arguments: args }));
+  // Without an explicit timeout the MCP client abandons atlasent_await_approval
+  // after 60 s, long before the approver's window closes.
+  const call = async (name, args) =>
+    parse(await client.callTool({ name, arguments: args }, undefined, { timeout: toolCallTimeoutMs(name, args) }));
   return {
     close: () => client.close(),
     tools: {

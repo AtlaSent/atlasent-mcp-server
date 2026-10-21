@@ -25,6 +25,20 @@
  */
 import { createHash } from "node:crypto";
 
+/**
+ * The MCP request timeout for one tool call. The MCP client SDK gives up on a
+ * request after 60 s unless told otherwise, and atlasent_await_approval holds
+ * its request open for up to max_wait_seconds (default 120 on the server)
+ * while a person decides. So that call gets its wait plus 30 s of headroom;
+ * every other call keeps the SDK's 60 s.
+ */
+export const MCP_DEFAULT_TIMEOUT_MS = 60_000;
+export function toolCallTimeoutMs(name, args) {
+  if (name !== "atlasent_await_approval") return MCP_DEFAULT_TIMEOUT_MS;
+  const wait = Number.isFinite(args?.max_wait_seconds) ? args.max_wait_seconds : 120;
+  return Math.max(MCP_DEFAULT_TIMEOUT_MS, wait * 1000 + 30_000);
+}
+
 export const ACTION_TYPE = "finance.payment.authorize";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
