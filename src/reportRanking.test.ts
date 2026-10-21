@@ -164,6 +164,8 @@ describe("trigger, secrets and priority", () => {
       "!(github.event_name == 'workflow_dispatch')",
       "${{ !(github.event_name == 'workflow_dispatch') }}",
       "!(inputs.x && github.event_name == 'workflow_dispatch')",
+      "(github.event_name == 'workflow_dispatch' || inputs.force) && inputs.x",
+      "github.event_name == 'workflow_dispatch' || github.event_name == 'push'",
     ]) {
       assert.equal(triggerOf(["push", "workflow_dispatch"], cond, "").kind, "automatic", cond);
     }
@@ -172,6 +174,12 @@ describe("trigger, secrets and priority", () => {
       "github.event_name == 'workflow_dispatch' && inputs.confirm == 'yes'",
       "(github.event_name == \"workflow_dispatch\")",
       "'workflow_dispatch' == github.event_name",
+      "${{ (github.event_name == 'workflow_dispatch' && inputs.confirm) }}",
+      "github.event_name == 'workflow_dispatch' && !inputs.skip",
+      "github.event_name == 'workflow_dispatch' && (inputs.a || inputs.b)",
+      "(inputs.x && (github.event_name == 'workflow_dispatch'))",
+      // Operators inside a quoted string are text, not part of the condition.
+      "github.event_name == 'workflow_dispatch' && inputs.note != 'a || b'",
     ]) {
       assert.equal(triggerOf(["push", "workflow_dispatch"], cond, "").kind, "manual", cond);
     }

@@ -169,19 +169,61 @@ function stripOuterParens(t: string): string {
 }
 
 /**
+ * Splits an expression on its top-level `&&`, ignoring any
+ * inside parentheses or quoted strings.
+ */
+function splitTopLevel(expr: string, op: "&&"): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (depth === 0 && expr.startsWith(op, i)) {
+      parts.push(expr.slice(start, i));
+      start = i + op.length;
+      i += op.length - 1;
+    }
+  }
+  parts.push(expr.slice(start));
+  return parts;
+}
+
+/** True when `expr` can only be true if `github.event_name == 'workflow_dispatch'`. */
+function exprRequiresDispatch(expr: string): boolean {
+  const e = stripOuterParens(expr);
+  // An `a || b` at this level is never a single anchored comparison, so it
+  // cannot match below: another branch could be true instead.
+  const conjuncts = splitTopLevel(e, "&&").map(stripOuterParens);
+  if (conjuncts.length === 1) {
+    // Anchored: a negation (`!x`, `!(x)`) never matches, whatever it wraps.
+    return DISPATCH_EQ.test(conjuncts[0]);
+  }
+  // One required, positive conjunct is enough; negations in the others
+  // (`... && !inputs.skip`) only narrow it further.
+  return conjuncts.some(exprRequiresDispatch);
+}
+
+/**
  * True only when the condition REQUIRES `github.event_name ==
- * 'workflow_dispatch'`: the equality is one of its top-level `&&` conjuncts,
- * and the condition has no `||` and no `!` negation that could invert it.
- * `!(github.event_name == 'workflow_dispatch')` mentions the event but
- * excludes it, so it does not narrow.
+ * 'workflow_dispatch'`: the comparison is a positive conjunct of the
+ * condition (through any grouping parentheses), with no `||` alternative at
+ * its level and no `!` applied to it. `!(github.event_name ==
+ * 'workflow_dispatch')` mentions the event but excludes it, so it does not
+ * narrow; `github.event_name == 'workflow_dispatch' && !inputs.skip` does.
  */
 function requiresDispatch(cond: string): boolean {
   let c = cond.trim();
   const m = /^\$\{\{([\s\S]*)\}\}$/.exec(c);
   if (m) c = m[1];
-  if (c.includes("||")) return false;
-  if (/!(?!=)/.test(c)) return false;
-  return c.split("&&").some((part) => DISPATCH_EQ.test(stripOuterParens(part)));
+  return exprRequiresDispatch(c);
 }
 
 /**
