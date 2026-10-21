@@ -8,7 +8,8 @@
  * as an MCP host would, and calls atlasent_evaluate, atlasent_await_approval
  * and verify_permit. Needs:
  *
- *   ATLASENT_API_KEY          a key for the refund demo org (evaluate:write, verify:execute)
+ *   ATLASENT_API_KEY          a key for the refund demo org (evaluate:write, verify:execute,
+ *                             approvals:read: atlasent_await_approval polls and claims with it)
  *   ATLASENT_BASE_URL         the runtime, e.g. https://<ref>.supabase.co/functions/v1
  *   ATLASENT_ENVIRONMENT      required, e.g. staging (no default: the demo never assumes production)
  *   REFUND_AGENT_ACTOR_ID     optional, default service:refund-agent

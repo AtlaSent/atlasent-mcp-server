@@ -97,4 +97,16 @@ describe("refund agent demo", () => {
       ["escalate", "not_issued"],
     ]);
   });
+
+  it("documents every scope the live run needs, approvals:read included", async () => {
+    // The escalation path polls GET /v1-approvals/:id and claims the permit;
+    // both need approvals:read, so a key without it can never finish RF-1003.
+    const { readFileSync } = await import("node:fs");
+    const doc = readFileSync(new URL("../docs/REFUND_AGENT_DEMO.md", import.meta.url), "utf8");
+    const script = readFileSync(new URL("../examples/refund-agent-demo.mjs", import.meta.url), "utf8");
+    for (const scope of ["evaluate:write", "verify:execute", "approvals:read"]) {
+      assert.ok(doc.includes(scope), `docs/REFUND_AGENT_DEMO.md names ${scope}`);
+      assert.ok(script.includes(scope), `examples/refund-agent-demo.mjs names ${scope}`);
+    }
+  });
 });

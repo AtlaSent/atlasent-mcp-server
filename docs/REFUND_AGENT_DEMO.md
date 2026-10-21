@@ -58,8 +58,11 @@ owner, never something the agent or a script does on inferred authority.
 
    `--activate` is required; without it the bundle is a draft and every
    refund fails closed ("no published policy bundle").
-3. **Key.** Mint an API key for the org with `evaluate:write` and
-   `verify:execute` (Settings → API keys). It is shown once.
+3. **Key.** Mint an API key for the org with `evaluate:write`,
+   `verify:execute` and `approvals:read` (Settings → API keys). It is shown
+   once. `approvals:read` is what lets `atlasent_await_approval` poll an
+   escalated refund and claim its permit after Eric approves; without it the
+   small refunds go through and every escalated one stops with a refusal.
 4. **Approver (Eric).** See below.
 5. **Rehearse** with `--simulate`, then one live run on staging before showing
    it to anyone.
