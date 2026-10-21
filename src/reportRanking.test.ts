@@ -166,6 +166,9 @@ describe("trigger, secrets and priority", () => {
       "!(inputs.x && github.event_name == 'workflow_dispatch')",
       "(github.event_name == 'workflow_dispatch' || inputs.force) && inputs.x",
       "github.event_name == 'workflow_dispatch' || github.event_name == 'push'",
+      // && binds tighter than ||: this runs on push.
+      "github.event_name == 'workflow_dispatch' && inputs.confirm || github.event_name == 'push'",
+      "${{ inputs.x && github.event_name == 'workflow_dispatch' || always() }}",
     ]) {
       assert.equal(triggerOf(["push", "workflow_dispatch"], cond, "").kind, "automatic", cond);
     }
