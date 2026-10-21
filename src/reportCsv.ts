@@ -97,5 +97,5 @@ export function renderCsv(report: EvidenceGapReport): string {
     ...others.map((f) => row(f, null)),
   ];
   // CRLF per RFC 4180; a UTF-8 BOM so Excel reads non-ASCII step names correctly.
-  return "﻿" + lines.join("\r\n") + "\r\n";
+  return "\uFEFF" + lines.join("\r\n") + "\r\n";
 }
