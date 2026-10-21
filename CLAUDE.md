@@ -66,6 +66,7 @@ glama.json            Glama listing ownership (maintainers)
 
 examples/
   demo.mjs            End-to-end script: spawns server, drives evaluate -> deploy -> verify flow
+  refund-agent-demo.mjs  Refund agent (`npm run demo:refund [-- --simulate]`): finance.payment.authorize per refund, digest bound, hold -> person approves in console -> verify -> issue once (processor always simulated). Never sends an approval claim. Runbook incl. adding an approver: docs/REFUND_AGENT_DEMO.md
 
 .github/workflows/
   ci.yml              build + test on push/PR, Node 18/20/22 matrix; docker-smoke job
