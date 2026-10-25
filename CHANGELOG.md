@@ -14,6 +14,10 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+### Added
+
+- `atlasent-exposure-scan --gate-action <uses>` (repeatable): declare your own gate wrapper, or `./` inside atlasent-action, as the MCP tools' `gate_actions` already allowed. The report's advice for an unrecognized gate now names both.
+
 ## [2.21.0] - 2026-10-25
 
 ### Added
