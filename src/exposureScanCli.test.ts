@@ -38,11 +38,33 @@ function quiet<T>(fn: () => T): T {
 
 describe("atlasent-exposure-scan", () => {
   it("parses args, with safe defaults and refusals", () => {
-    assert.deepEqual(parseArgs([]), { dir: ".", out: ".", failOnGaps: false });
-    assert.deepEqual(parseArgs(["r", "--out", "o", "--fail-on-gaps"]), { dir: "r", out: "o", failOnGaps: true });
+    assert.deepEqual(parseArgs([]), { dir: ".", out: ".", failOnGaps: false, gateActions: [] });
+    assert.deepEqual(parseArgs(["r", "--out", "o", "--fail-on-gaps"]), { dir: "r", out: "o", failOnGaps: true, gateActions: [] });
+    assert.deepEqual(parseArgs(["--gate-action", "./", "--gate-action", "my-org/deploy-gate"]),
+      { dir: ".", out: ".", failOnGaps: false, gateActions: ["./", "my-org/deploy-gate"] });
+    assert.ok("error" in parseArgs(["--gate-action"]));
+    assert.ok("error" in parseArgs(["--gate-action", "--out"]));
+    assert.ok("error" in parseArgs(["--gate-action", "x".repeat(257)]));
+    assert.ok("error" in parseArgs(Array.from({ length: 21 }, () => ["--gate-action", "a/b"]).flat()));
     assert.ok("error" in parseArgs(["--out"]));
     assert.ok("error" in parseArgs(["--nope"]));
     assert.ok("error" in parseArgs(["a", "b"]));
+  });
+
+  it("--gate-action makes a repo's own gate count, as gate_actions does in the MCP tool", () => {
+    const SELF_GATED =
+      "on: push\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n" +
+      "      - id: gate\n        uses: ./\n        with:\n          action: package.release\n" +
+      "      - if: steps.gate.outputs.verified == 'true'\n        run: npm publish\n";
+    const dir = repo({ "release.yml": SELF_GATED });
+    const status = (args: string[]) => {
+      const out = join(dir, `out-${args.length}`);
+      quiet(() => main([dir, "--out", out, ...args], new Date("2026-10-25T00:00:00Z")));
+      const j = JSON.parse(readFileSync(join(out, "atlasent-exposure-review.json"), "utf8"));
+      return j.findings.find((f: { step?: { run?: string } }) => JSON.stringify(f).includes("npm publish")).status;
+    };
+    assert.equal(status([]), "ungoverned", "without the flag the local gate is not recognized");
+    assert.notEqual(status(["--gate-action", "./"]), "ungoverned", "with --gate-action ./ it is");
   });
 
   it("reads only .yml/.yaml under .github/workflows, sorted", () => {

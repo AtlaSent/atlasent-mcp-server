@@ -111,6 +111,49 @@ jobs:
     const doc = parseYamlSubset(`a: "x # y"\n`) as Record<string, string>;
     assert.equal(doc.a, "x # y");
   });
+
+  // Real workflows (vercel/turborepo, hashicorp/terraform-provider-aws,
+  // grafana/k6, supabase/cli) put a value on the line after its key. These used
+  // to throw "expected key: value", so the whole file became INCOMPLETE SCAN.
+  it("reads a value that starts on the next, more-indented line", () => {
+    const doc = parseYamlSubset(
+      "jobs:\n  b:\n    strategy:\n      matrix:\n        platform:\n          [ubuntu-24.04, macos-14]\n" +
+        "    steps:\n      - uses: x/y@v1\n        with:\n          github-token:\n            ${{ secrets.X }}\n" +
+        "      - run: npm publish\n",
+    ) as YamlDoc;
+    assert.deepEqual(doc.jobs.b.strategy.matrix.platform, ["ubuntu-24.04", "macos-14"]);
+    assert.equal(doc.jobs.b.steps[0].with["github-token"], "${{ secrets.X }}");
+    assert.equal(doc.jobs.b.steps[1].run, "npm publish");
+  });
+
+  it("keeps a nested map when its first key is quoted", () => {
+    const source =
+      'on: push\njobs:\n  release:\n    "runs-on": ubuntu-latest\n    steps:\n      - run: npm publish\n';
+    const doc = parseYamlSubset(source) as YamlDoc;
+    assert.equal(doc.jobs.release["runs-on"], "ubuntu-latest");
+
+    const r = analyzeWorkflows([{ path: ".github/workflows/release.yml", content: source }]);
+    assert.deepEqual(r.parse_errors, []);
+    assert.equal(r.findings[0].job, "release");
+    assert.equal(r.findings[0].status, "ungoverned");
+  });
+
+  it("joins a plain value over several next lines, and still opens a nested map or list", () => {
+    const doc = parseYamlSubset("a:\n  hello\n  world\nb:\n  c: 1\nd:\n  - 2\ne:\n  {x: 1}\n") as Record<string, unknown>;
+    assert.equal(doc.a, "hello world");
+    assert.deepEqual(doc.b, { c: "1" });
+    assert.deepEqual(doc.d, ["2"]);
+    assert.deepEqual(doc.e, { x: "1" });
+  });
+
+  it("finds the ungated publish in a workflow that has a next-line value", () => {
+    const r = analyzeWorkflows([{
+      path: ".github/workflows/release.yml",
+      content: "on: push\njobs:\n  r:\n    runs-on:\n      ubuntu-latest\n    steps:\n      - run: npm publish\n",
+    }]);
+    assert.equal(r.parse_errors.length, 0);
+    assert.ok(r.findings.some((f) => /npm publish/.test(JSON.stringify(f))), JSON.stringify(r).slice(0, 400));
+  });
 });
 
 describe("detectStep", () => {

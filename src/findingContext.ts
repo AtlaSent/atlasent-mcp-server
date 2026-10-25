@@ -76,16 +76,19 @@ export interface Cause {
 // Environment
 // ---------------------------------------------------------------------------
 
-const PRE_PROD = /(?:^|[^a-z0-9])pre-?prod(?:uction)?(?:$|[^a-z0-9])/i;
+// "pre-prod" and "non-prod" contain a "prod" the PROD test would match on its
+// own, so they are taken out of the name before that test. Removed rather
+// than checked first: "prod and non-prod" still names production.
+const NOT_PROD = /(?:^|[^a-z0-9])(?:pre|non)[-_ ]?prod(?:uction)?(?=$|[^a-z0-9])/gi;
 const PROD = /(?:^|[^a-z0-9])(?:prod|production|prd|live)(?:$|[^a-z0-9])/i;
 const NON_PROD =
   /(?:^|[^a-z0-9])(?:stag|stage|staging|uat|qa|dev|develop|development|test|testing|sandbox|preview|canary|nonprod|non-prod)(?:$|[^a-z0-9])/i;
 
 /** production / non_production from a name, or null when the name says neither. */
 export function classifyName(text: string): Environment | null {
-  if (PRE_PROD.test(text)) return "non_production";
-  if (PROD.test(text)) return "production";
-  if (NON_PROD.test(text)) return "non_production";
+  const rest = text.replace(NOT_PROD, " ");
+  if (PROD.test(rest)) return "production";
+  if (rest !== text || NON_PROD.test(text)) return "non_production";
   return null;
 }
 

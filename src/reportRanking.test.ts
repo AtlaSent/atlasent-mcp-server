@@ -102,6 +102,11 @@ describe("environment", () => {
   it("pre-prod is not prod; names that say nothing are unknown", () => {
     assert.equal(classifyName("pre-prod"), "non_production");
     assert.equal(classifyName("preprod"), "non_production");
+    for (const n of ["non-prod", "non_prod", "nonprod", "Non Prod", "non-production", "pre_prod"]) {
+      assert.equal(classifyName(n), "non_production", n);
+    }
+    assert.equal(classifyName("prod-and-non-prod"), "production");
+    assert.equal(classifyName("pre-prod, then prod"), "production");
     assert.equal(classifyName("deploy-production"), "production");
     assert.equal(classifyName("deploy_prod"), "production");
     assert.equal(classifyName("deliver"), null);

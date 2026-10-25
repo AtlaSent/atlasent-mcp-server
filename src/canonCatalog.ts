@@ -3427,5 +3427,48 @@ export const CANON_ACT_CATALOG: ActSpecEntry[] = [
       "healthtech",
       "enterprise"
     ]
+  },
+  {
+    "id": "ACT-0061",
+    "canon_id": "CANON-000058",
+    "slug": "customer.refund.issue",
+    "display_name": "Customer Refund Issue",
+    "description": "Authorization gate for returning money a customer already paid, to the payment instrument it came from, against one original payment (a Stripe refund, a Shopify refund, an ERP card reversal). A refund cannot choose its destination and cannot exceed what was paid and not yet refunded, so the redirected-disbursement risk that justifies finance.payment.authorize's human-approval floor does not exist here; the risks are abuse, volume, refunds made around the control, and refunds issued on facts nobody verified. The load-bearing evidence is therefore the binding and the facts, not an approval artifact on every refund: the permit binds the exact refund (provider account, original payment, amount, currency), the destination and the refundable balance come from the payment provider or adapter, never from the caller, and the provider's own refund record is matched back to the permit after execution. A refund to any instrument other than the original one is not this action; it is a payment and stays under finance.payment.authorize (CANON-000021). Account credits (customer balance, store credit, gift cards) are not this action either.",
+    "family": "finance.payment",
+    "risk_posture": "standard",
+    "ai_risk": "High",
+    "gate_flags": {
+      "requires_human_approval": false,
+      "requires_mfa": false,
+      "requires_verified_actor": false,
+      "requires_state_snapshot": false,
+      "required_assertion_classes": []
+    },
+    "authorization_pattern": {
+      "type": "role-only",
+      "machine_executable": true
+    },
+    "regulatory_mappings": [
+      {
+        "framework": "nist_800_53",
+        "clause": "NIST SP 800-53 Rev.5 AU-12 — Audit Record Generation",
+        "mapping": "Every refund decision is recorded with the actor, the bound refund (provider account, original payment, amount, currency), the assertion keys consulted and the decision, and the provider's refund record is later matched to the permit, giving an audit record per refund rather than a log of whatever the caller chose to report.\n",
+        "evidence_source": "evaluation_record",
+        "status_query": "refund_decisions_recorded_pct"
+      }
+    ],
+    "evidence_requirements": {
+      "minimum_pattern": "EP-01",
+      "approval_artifact_required": false,
+      "state_snapshot_required": false,
+      "notes": "Intent is the refund request naming provider account, original payment, amount and currency, bound at evaluate as a bare-hex execution_payload_hash and re-presented at verify. The destination and the refundable balance are provider- or adapter-sourced assertion keys (refund_destination_original, within_refundable_balance), not assertion.v1 classes, which is why required_assertion_classes is empty. Execution is the provider's refund object (for Stripe, a refund carrying the gate reference in metadata and the idempotency key derived from the business request). Effect is an independent provider read of that refund and its status: succeeded, pending, requires_action, failed and canceled stay distinct, and a timeout after submit is unconfirmed, not failed. A refund that appears at the provider with no matching permit is a detected bypass, not a prevented one.\n"
+    },
+    "use_case": "Let support staff, tooling and agents issue refunds quickly while every refund is bound to the exact payment, amount and currency, allowed only on provider-confirmed facts, and matched back to the provider's own refund record, so refunds made around the control are detected and refunds made on unverified claims are refused.",
+    "industries": [
+      "ecommerce",
+      "saas",
+      "marketplaces",
+      "fintech"
+    ]
   }
 ];
