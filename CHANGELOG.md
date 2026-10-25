@@ -14,18 +14,18 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
-### Fixed
-
-- Exposure Review and `atlasent-exposure-scan` no longer stop with INCOMPLETE SCAN when a workflow puts a value on the line after its key (`platform:` then `[ubuntu-24.04, ...]`, or `github-token:` then `${{ secrets.X }}`). Seen on vercel/turborepo, grafana/k6, hashicorp/terraform-provider-aws and supabase/cli; all four now scan in full.
+## [2.21.0] - 2026-10-25
 
 ### Added
 
 - Exposure Review ranks what to fix. Every step now reports the environment it changes (and what in the file said so), what starts it, the secret names it can read, and a 0–100 priority with its reasons. Gaps behind the same weak gate are grouped into one cause with one fix, and the review opens with "Fix these first".
 - `atlasent-exposure-scan` also writes `atlasent-exposure-review.csv`: one row per step, ungated first in rank order, safe to open in a spreadsheet.
 - `evidence_gap.v1` gains `environment`, `trigger`, `secrets`, `priority` and `cause` on each finding, a top-level `causes` list, and environment and cause counts in `summary`. Additive; no field changed.
+- `npm run demo:refund`: a refund agent that asks before each refund; a person approves in the console, and the refund is issued once (the payment processor is always simulated). Runbook: `docs/REFUND_AGENT_DEMO.md`.
 
 ### Fixed
 
+- Exposure Review and `atlasent-exposure-scan` no longer stop with INCOMPLETE SCAN when a workflow puts a value on the line after its key (`platform:` then `[ubuntu-24.04, ...]`, or `github-token:` then `${{ secrets.X }}`). Seen on vercel/turborepo, grafana/k6, hashicorp/terraform-provider-aws and supabase/cli; all four now scan in full.
 - The HTML report folded two statuses into one card, so its counts disagreed with the Markdown. Both now show all five statuses from one source.
 - Exposure Review ranking no longer errs in the reassuring direction in five cases: a step `environment` input chosen at run time is unknown (not the job's name); a negated `workflow_dispatch` check is not "started by hand only"; every event-driven trigger, listed or not, ranks as automatic; `secrets['NAME']` references count; and a gate weak in two ways gets a one-time fix naming both.
 - The headline no longer calls staging steps "production-changing": it counts production gaps, and says when the environment could not be determined.
