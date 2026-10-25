@@ -1366,5 +1366,21 @@ export const CANON_ACTION_GRAPH: Record<string, CanonNeighborhood> = {
     ],
     "domain": "production",
     "pattern": "role-only"
+  },
+  "customer.refund.issue": {
+    "requires": [],
+    "produces": [
+      "audit-chain",
+      "permit"
+    ],
+    "assertions": [],
+    "frameworks": [
+      "nist_800_53"
+    ],
+    "controls": [
+      "NIST SP 800-53 Rev.5 AU-12 — Audit Record Generation"
+    ],
+    "domain": "finance",
+    "pattern": "role-only"
   }
 };
