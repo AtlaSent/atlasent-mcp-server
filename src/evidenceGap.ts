@@ -351,7 +351,7 @@ export function parseYamlSubset(source: string): YValue {
     // that value (a flow collection or a plain scalar, possibly over several
     // lines), not a nested map.
     const isItem = next.text === "-" || next.text.startsWith("- ");
-    const startsScalar = /^["'[{]/.test(next.text) || !splitKey(next.text);
+    const startsScalar = /^[{[]/.test(next.text) || !splitKey(next.text);
     if (!isItem && startsScalar) {
       const no = next.no;
       let text = next.text;
