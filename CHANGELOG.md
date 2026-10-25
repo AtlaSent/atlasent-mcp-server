@@ -14,6 +14,10 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+### Added
+
+- `atlasent-exposure-scan --gate-action <uses>` (repeatable): declare your own gate wrapper, or `./` inside atlasent-action, as the MCP tools' `gate_actions` already allowed. The report's advice for an unrecognized gate now names both.
+
 ### Fixed
 
 - Exposure Review no longer ranks an environment named `non-prod` (or `non_prod`, `Non Prod`, `pre_prod`) as production. A name that also says plain `prod` still ranks as production.

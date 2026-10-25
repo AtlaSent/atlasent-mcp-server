@@ -1268,7 +1268,7 @@ function fixFor(
       action_type: action,
       change:
         `This step already requires ${ref.kind}.${ref.id}.outputs.verified == 'true', but no gate was recognized there. ` +
-        "If that is your gate, pass its `uses:` value in `gate_actions` and run the report again; if not, add a gate step in its place.",
+        "If that is your gate, declare its `uses:` value (`--gate-action <uses>` on atlasent-exposure-scan, `gate_actions` in the MCP tool) and run the report again; if not, add a gate step in its place.",
       ...tail(),
     };
   }

@@ -5,7 +5,12 @@
  * forward (a CISO, an auditor, an engineering lead).
  *
  *   npx -y -p @atlasent/mcp-server@latest atlasent-exposure-scan [repo-dir]
- *       [--out <dir>] [--fail-on-gaps]
+ *       [--out <dir>] [--fail-on-gaps] [--gate-action <uses>]...
+ *
+ * --gate-action declares a `uses:` value that is your own AtlaSent gate (a
+ * wrapper action, or `./` inside atlasent-action itself), the same as the MCP
+ * tools' `gate_actions`. Repeatable, at most 20. atlasent-action is always
+ * recognized without it.
  *
  * Reads <repo-dir>/.github/workflows/*.yml|*.yaml, runs the same offline
  * analysis as atlasent_exposure_review (analyzeWorkflows +
@@ -65,12 +70,18 @@ export interface CliArgs {
   dir: string;
   out: string;
   failOnGaps: boolean;
+  gateActions: string[];
 }
+
+/** Same limits as the MCP tools' `gate_actions`. */
+export const MAX_GATE_ACTIONS = 20;
+const MAX_GATE_ACTION_LENGTH = 256;
 
 export function parseArgs(argv: string[]): CliArgs | { error: string } | { help: true } {
   let dir: string | undefined;
   let out: string | undefined;
   let failOnGaps = false;
+  const gateActions: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-h" || a === "--help") return { help: true };
@@ -79,11 +90,17 @@ export function parseArgs(argv: string[]): CliArgs | { error: string } | { help:
       const v = argv[++i];
       if (!v || v.startsWith("--")) return { error: "--out needs a directory" };
       out = v;
+    } else if (a === "--gate-action") {
+      const v = argv[++i];
+      if (!v || v.startsWith("--")) return { error: "--gate-action needs a `uses:` value, e.g. my-org/deploy-gate or ./" };
+      if (v.length > MAX_GATE_ACTION_LENGTH) return { error: `--gate-action is longer than ${MAX_GATE_ACTION_LENGTH} characters` };
+      if (gateActions.length >= MAX_GATE_ACTIONS) return { error: `at most ${MAX_GATE_ACTIONS} --gate-action values` };
+      gateActions.push(v);
     } else if (a.startsWith("--")) return { error: `unknown option ${a}` };
     else if (dir === undefined) dir = a;
     else return { error: `unexpected argument ${a}` };
   }
-  return { dir: dir ?? ".", out: out ?? ".", failOnGaps };
+  return { dir: dir ?? ".", out: out ?? ".", failOnGaps, gateActions };
 }
 
 export interface ScanError {
@@ -342,10 +359,14 @@ ${
 
 const USAGE = `atlasent-exposure-scan — free Authorization Exposure Review (offline)
 
-  atlasent-exposure-scan [repo-dir] [--out <dir>] [--fail-on-gaps]
+  atlasent-exposure-scan [repo-dir] [--out <dir>] [--fail-on-gaps] [--gate-action <uses>]...
 
 Reads <repo-dir>/.github/workflows and writes atlasent-exposure-review.{html,md,json,csv}
 to --out (default: the current directory). No network call, no API key.
+
+  --gate-action <uses>  a uses: value that is your own AtlaSent gate
+                        (e.g. my-org/deploy-gate, or ./ in atlasent-action).
+                        Repeatable. atlasent-action is always recognized.
 `;
 
 export function main(argv: string[], now: Date = new Date()): number {
@@ -368,7 +389,7 @@ export function main(argv: string[], now: Date = new Date()): number {
     return EXIT.NO_WORKFLOWS;
   }
 
-  const report = analyzeWorkflows(inputs);
+  const report = analyzeWorkflows(inputs, args.gateActions);
   // Files that could not be read join the files that could not be parsed:
   // either way the scan did not cover them, and the result must say so.
   for (const e of collected.errors) report.parse_errors.push({ workflow: e.path, line: 0, error: e.error });
