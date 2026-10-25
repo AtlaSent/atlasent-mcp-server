@@ -1,5 +1,24 @@
 # Release Notes
 
+## v2.21.0 — 2026-10-25
+
+- **Exposure Review now tells you what to fix first.** Each step reports the
+  environment it changes, what starts it, the secret names it can read, and a
+  0–100 priority with its reasons. Gaps behind the same weak gate are grouped
+  into one cause with one fix, and the review opens with "Fix these first".
+- **New: a CSV of the review.** `atlasent-exposure-scan` also writes
+  `atlasent-exposure-review.csv`, one row per step, ungated first, safe to open
+  in a spreadsheet.
+- **Fix: valid workflows no longer come back INCOMPLETE SCAN** when a value
+  starts on the line after its key (`platform:` then `[ubuntu-24.04, ...]`, or
+  `github-token:` then `${{ secrets.X }}`). Seen on vercel/turborepo,
+  grafana/k6, hashicorp/terraform-provider-aws and supabase/cli; all four now
+  scan in full.
+- **Ranking fixes:** five cases where the ranking erred toward "safe" now rank
+  correctly, and the HTML report's counts match the Markdown.
+- **New example:** `npm run demo:refund`, a refund agent that waits for a
+  person's approval before each refund (the processor is simulated).
+
 ## v2.20.0 — 2026-10-20
 
 - **New: `atlasent-change-sample`, what an auditor's change-management sample
