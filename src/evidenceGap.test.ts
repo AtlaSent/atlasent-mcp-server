@@ -126,6 +126,18 @@ jobs:
     assert.equal(doc.jobs.b.steps[1].run, "npm publish");
   });
 
+  it("keeps a nested map when its first key is quoted", () => {
+    const source =
+      'on: push\njobs:\n  release:\n    "runs-on": ubuntu-latest\n    steps:\n      - run: npm publish\n';
+    const doc = parseYamlSubset(source) as YamlDoc;
+    assert.equal(doc.jobs.release["runs-on"], "ubuntu-latest");
+
+    const r = analyzeWorkflows([{ path: ".github/workflows/release.yml", content: source }]);
+    assert.deepEqual(r.parse_errors, []);
+    assert.equal(r.findings[0].job, "release");
+    assert.equal(r.findings[0].status, "ungoverned");
+  });
+
   it("joins a plain value over several next lines, and still opens a nested map or list", () => {
     const doc = parseYamlSubset("a:\n  hello\n  world\nb:\n  c: 1\nd:\n  - 2\ne:\n  {x: 1}\n") as Record<string, unknown>;
     assert.equal(doc.a, "hello world");
