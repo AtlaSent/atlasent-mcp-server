@@ -42,6 +42,7 @@ export const EXIT = {
   INTERNAL: 70, // EX_SOFTWARE
   NOT_EXECUTED: 126, // command could not be started
   OUTCOME_UNKNOWN: 125,
+  NOT_ELIGIBLE: 78, // EX_CONFIG: activation-check found an unmet precondition
 } as const;
 
 export interface RunResult {

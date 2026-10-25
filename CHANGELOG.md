@@ -16,9 +16,13 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ### Added
 
+- `atlasent-openshell activation-check --manifest <file>` (#279): reports whether an OpenShell path may move from watch-only to blocking. It requires a released OpenShell with a recorded probe pass, the AtlaSent workload guard registered and inspecting requests (response-only is refused), attached to the AtlaSent host with `fail_closed`, and proof from the running supervisor's current policy generation that the binding holds and that a guard outage is refused. It never turns blocking on; today no manifest is eligible.
+
 - `atlasent-exposure-scan --gate-action <uses>` (repeatable): declare your own gate wrapper, or `./` inside atlasent-action, as the MCP tools' `gate_actions` already allowed. The report's advice for an unrecognized gate now names both.
 
 ### Fixed
+
+- An OpenShell `403 middleware_failed` (the guard down, timed out or answering invalidly) was reported as an API key scope problem. It is now worded as a middleware failure. It is still a DENY, with no permit and nothing executed.
 
 - Exposure Review no longer ranks an environment named `non-prod` (or `non_prod`, `Non Prod`, `pre_prod`) as production. A name that also says plain `prod` still ranks as production.
 

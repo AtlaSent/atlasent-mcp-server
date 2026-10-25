@@ -12,6 +12,12 @@ import { middlewareDenialMessage, parseMiddlewareDenial } from "./middlewareDeni
 
 const SCOPE_MSG = "Permission denied — your key lacks the required scope";
 const GUARD_BODY = JSON.stringify({ error: "middleware_denied", reason_code: "workload_mismatch" });
+// What OpenShell 0.1.5 returns when the guard is down, times out or answers
+// invalidly under on_error = "fail_closed" (relay.rs at v0.1.5).
+const FAILED_BODY = JSON.stringify({
+  error: "middleware_failed",
+  detail: "Request could not be processed by configured middleware",
+});
 const SANDBOX = { sandbox_id: "sbx_01J9ZK", sandbox_name: "payments-agent", workspace: "team-a", policy_generation: 3 };
 const ENVELOPE = { action_type: "data.export", actor_id: "agent:42", environment: "production", target_id: "warehouse" };
 
@@ -35,6 +41,19 @@ describe("parseMiddlewareDenial", () => {
     assert.equal(parseMiddlewareDenial(403, ""), null);
     assert.equal(parseMiddlewareDenial(401, GUARD_BODY), null);
     assert.equal(parseMiddlewareDenial(500, GUARD_BODY), null);
+  });
+
+  it("matches OpenShell's middleware_failed (guard down / timeout) as a failure, not a denial (#279)", () => {
+    assert.deepEqual(parseMiddlewareDenial(403, FAILED_BODY), { reason_code: null, failed: true });
+    assert.equal(parseMiddlewareDenial(502, FAILED_BODY), null);
+    assert.equal(parseMiddlewareDenial(403, JSON.stringify({ error: "middleware_failure" })), null);
+    const m = middlewareDenialMessage({ reason_code: null, failed: true });
+    assert.match(m, /middleware_failed/);
+    assert.match(m, /could not complete its check/);
+    assert.match(m, /Nothing was authorized/);
+    assert.doesNotMatch(m, /lacks the required scope/);
+    // A denial is still worded as a denial.
+    assert.doesNotMatch(middlewareDenialMessage({ reason_code: null }), /middleware_failed/);
   });
 
   it("message gives the code, does not blame key scopes, and does not claim which middleware refused", () => {
@@ -97,6 +116,31 @@ describe("403 wording through the remote engine and the openshell run CLI", () =
     assert.match(r.reasons[0], /supervisor middleware/);
     assert.match(r.reasons[0], /workload_mismatch/);
     assert.doesNotMatch(r.reasons[0], /lacks the required scope/);
+  });
+
+  it("guard unavailable (403 middleware_failed) → DENY, no permit, nothing executes, not scope wording (#279)", async () => {
+    respond = () => new Response(FAILED_BODY, { status: 403 });
+    const { r, spawned } = await run();
+    assert.equal(r.outcome, "DENY");
+    assert.equal(r.exit_code, EXIT.DENY);
+    assert.equal(spawned, 0);
+    assert.match(r.reasons[0], /middleware_failed/);
+    assert.doesNotMatch(r.reasons[0], /lacks the required scope/);
+    const d = await authorize({ action_type: "data.export", actor_id: "agent:42", environment: "production" });
+    assert.equal(d.decision, "deny");
+    assert.equal(d.permit_token, undefined);
+  });
+
+  it("guard transport error or timeout before any response → DENY, nothing executes (#279)", async () => {
+    for (const err of [new TypeError("fetch failed"), Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" })]) {
+      respond = () => {
+        throw err;
+      };
+      const { r, spawned } = await run();
+      assert.equal(r.outcome, "DENY");
+      assert.equal(r.exit_code, EXIT.DENY);
+      assert.equal(spawned, 0);
+    }
   });
 
   it("plain scope 403 keeps today's wording, same DENY / exit code", async () => {

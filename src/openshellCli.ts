@@ -6,10 +6,14 @@
  *   atlasent-openshell run --envelope <file|-> [--wait-ms N] [--timeout-ms N]
  *                          [--breaker-state <file>] -- <command> [args...]
  *   atlasent-openshell check [--version <openshell-version>]
+ *   atlasent-openshell activation-check --manifest <file|->
  *
  * `run` prints one JSON result line to stderr (stdout belongs to the command)
  * and exits with the command's own code, or 77 DENY, 75 HOLD unresolved,
  * 125 outcome unknown (tripped), 126 not started, 64 usage, 70 internal.
+ * `activation-check` prints the #279 activation report to stderr and exits 0
+ * only when every precondition was shown, else 78. It never activates
+ * blocking; see src/openshellActivation.ts.
  */
 
 import { readFileSync } from "node:fs";
@@ -19,6 +23,7 @@ import { CircuitBreaker } from "./governedAction.js";
 import { getMode, recordCircuitTrip } from "./engine.js";
 import { dropEmptyAtlasentEnv } from "./hostEnv.js";
 import { EXIT, parseSandboxContext, runGoverned, sandboxContextFrom } from "./openshellRun.js";
+import { assessOpenShellActivation } from "./openshellActivation.js";
 
 export interface ParsedArgs {
   command: string;
@@ -28,7 +33,9 @@ export interface ParsedArgs {
 
 export function parseArgs(args: string[]): ParsedArgs | { error: string } {
   const [command, ...rest] = args;
-  if (command !== "run" && command !== "check") return { error: `unknown command ${command ?? "(none)"}; expected run | check` };
+  if (command !== "run" && command !== "check" && command !== "activation-check") {
+    return { error: `unknown command ${command ?? "(none)"}; expected run | check | activation-check` };
+  }
   const flags: Record<string, string> = {};
   let i = 0;
   for (; i < rest.length; i++) {
@@ -121,6 +128,24 @@ export async function main(args: string[], env: NodeJS.ProcessEnv = process.env)
       openshell_assessment: version ? assessOpenShellVersion(version) : null,
     });
     return sandbox.ok ? 0 : EXIT.USAGE;
+  }
+
+  if (parsed.command === "activation-check") {
+    const source = parsed.flags.manifest;
+    if (!source) {
+      emit({ outcome: "USAGE", reasons: ["--manifest <file|-> is required"] });
+      return EXIT.USAGE;
+    }
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(readFileSync(source === "-" ? 0 : source, "utf8"));
+    } catch (err) {
+      emit({ outcome: "USAGE", reasons: [`could not read manifest: ${err instanceof Error ? err.message : String(err)}`] });
+      return EXIT.USAGE;
+    }
+    const report = assessOpenShellActivation(manifest);
+    emit(report);
+    return report.eligible_for_blocking ? 0 : EXIT.NOT_ELIGIBLE;
   }
 
   if (remoteModeIn(env)) {
