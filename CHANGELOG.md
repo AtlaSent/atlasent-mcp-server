@@ -14,6 +14,10 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+### Fixed
+
+- Exposure Review and `atlasent-exposure-scan` no longer stop with INCOMPLETE SCAN when a workflow puts a value on the line after its key (`platform:` then `[ubuntu-24.04, ...]`, or `github-token:` then `${{ secrets.X }}`). Seen on vercel/turborepo, grafana/k6, hashicorp/terraform-provider-aws and supabase/cli; all four now scan in full.
+
 ### Added
 
 - Exposure Review ranks what to fix. Every step now reports the environment it changes (and what in the file said so), what starts it, the secret names it can read, and a 0–100 priority with its reasons. Gaps behind the same weak gate are grouped into one cause with one fix, and the review opens with "Fix these first".

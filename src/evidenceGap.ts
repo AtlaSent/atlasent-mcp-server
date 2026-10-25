@@ -342,10 +342,27 @@ export function parseYamlSubset(source: string): YValue {
     const next = lines[pos];
     if (!next) return "";
     // A sequence may sit at the same indent as its key (`steps:\n- run: x`).
-    if (next.indent > keyIndent || (next.indent === keyIndent && (next.text === "-" || next.text.startsWith("- ")))) {
-      return parseNode(next.indent);
+    if (next.indent === keyIndent && (next.text === "-" || next.text.startsWith("- "))) return parseNode(next.indent);
+    if (next.indent <= keyIndent) return "";
+    // The value itself may start on the next, more-indented line:
+    //   platform:            github-token:
+    //     [ubuntu, macos]      ${{ secrets.X }}
+    // Anything there that is not a sequence item or a `key: value` line is
+    // that value (a flow collection or a plain scalar, possibly over several
+    // lines), not a nested map.
+    const isItem = next.text === "-" || next.text.startsWith("- ");
+    const startsScalar = /^[{[]/.test(next.text) || !splitKey(next.text);
+    if (!isItem && startsScalar) {
+      const no = next.no;
+      let text = next.text;
+      pos++;
+      while (pos < lines.length && lines[pos].indent > keyIndent) {
+        text += " " + lines[pos].text;
+        pos++;
+      }
+      return parseScalarLiteral(text, no);
     }
-    return "";
+    return parseNode(next.indent);
   }
 
   function parseMap(indent: number): YMap {
