@@ -432,6 +432,81 @@ What it means here:
 - **Nothing changes in the adapter.** It already sends the workload, or relies
   on the guard in guard-bound mode. The runtime decides.
 
+## Activation gate (#279, 2026-10-25)
+
+`atlasent-openshell activation-check --manifest <file|->`
+(`src/openshellActivation.ts`) answers whether a path may move from
+watch-only to blocking. **It never activates anything.** The report's
+`posture` is always `watch_only`; `eligible_for_blocking: true` only means
+every precondition was shown, and the move to blocking stays a separate,
+explicit decision. Exit 0 when eligible, 78 when not, 64 on a usage error.
+
+Every check fails closed: a missing or malformed field fails, never passes.
+
+**Limit.** The manifest is assembled by an operator from configuration and
+probe output; the gate does not verify those records cryptographically. It
+decides eligibility for a human activation decision and is never read on the
+authorization path: no permit, HOLD or verify depends on it.
+
+| Check | Fails when |
+|---|---|
+| `version` | the OpenShell version is a prerelease, not a published tag (`OPENSHELL_RELEASED_STABLE`), or has no recorded startup-probe pass |
+| `guard_registered` | `guard_registration` names no `[[openshell.supervisor.middleware]]` entry, names a built-in, the registered service's Describe is not the AtlaSent workload guard, or the registration sets `allow_insecure_transport` |
+| `guard_request_binding` | the guard has no `HTTP_REQUEST` / `PRE_CREDENTIALS` binding. Response-only or WebSocket-only inspection is refused: OpenShell itself says that blocking a response "does not undo" a request the external service already handled |
+| `guard_capabilities` | the guard requires anything beyond `openshell.supervisor-middleware.contract` (for example #4359's `http-session`) |
+| `policy_attachment` | no `network_middlewares` entry attaches the guard to the pinned AtlaSent host **by exact name**, or an `exclude` could match it. Wildcard-only coverage is not accepted |
+| `fail_closed` | that entry sets `on_error` to anything but `fail_closed` (omitted means OpenShell's `fail_closed` default) |
+| `current_supervisor_binding` | there is no proof from the **running** supervisor's sandbox and policy generation that the guard saw a probe request and the runtime reported `workload_attested: true`. OpenShell keeps a sandbox's previous middleware setup when a new one fails validation, so a config file is not proof; a proof from an older generation or another sandbox does not carry over |
+| `failure_probe` | on that same generation, a request with the guard unavailable was not refused with `middleware_failed` with nothing executed |
+
+Manifest shape (the fields come from the gateway TOML, the sandbox policy, the
+guard's `Describe` answer, and two probe runs):
+
+```json
+{
+  "openshell_version": "0.1.5",
+  "atlasent_host": "api.atlasent.io",
+  "guard_registration": "atlasent-workload-guard",
+  "gateway_middleware": [{ "name": "atlasent-workload-guard", "grpc_endpoint": "https://host.openshell.internal:50061" }],
+  "guard_describe": { "name": "atlasent-workload-guard", "bindings": [...], "extension": {...} },
+  "network_middlewares": { "atlasent-guard": { "middleware": "atlasent-workload-guard", "endpoints": { "include": ["api.atlasent.io"] }, "on_error": "fail_closed" } },
+  "supervisor": { "sandbox_id": "<id>", "policy_generation": 7 },
+  "binding_proof": { "sandbox_id": "<id>", "policy_generation": 7, "guard_observed": true, "workload_attested": true },
+  "failure_probe": { "sandbox_id": "<id>", "policy_generation": 7, "error": "middleware_failed", "executed": false }
+}
+```
+
+**Today no manifest is eligible.** OpenShell 0.1.5 (released 2026-10-20) is
+the newest stable release, and no released version has a recorded
+startup-probe pass (`OPENSHELL_PROBE_PASSED` holds only `0.1.3-pre.4`). The
+gate reports `version` as unmet until such a run is recorded, as the #279 stop
+rule requires.
+
+**Guard unavailable at request time.** Under `on_error = "fail_closed"`,
+OpenShell 0.1.5 answers a middleware that is down, timed out or answered
+invalidly with `403 {"error":"middleware_failed"}`
+(`crates/openshell-supervisor-network/src/l7/relay.rs` at v0.1.5). That 403
+used to be reported as "your key lacks the required scope". It is now worded
+as a middleware failure (`src/middlewareDenial.ts`), still a DENY, with no
+permit and nothing executed. A transport error or timeout reaching AtlaSent is
+a DENY too. Both are pinned in `src/middlewareDenial.test.ts`.
+
+**Upstream status, checked against the NVIDIA/OpenShell tags on 2026-10-25.**
+Stable 0.1.x tags run to `v0.1.5`; `v0.1.6-pre.4` is the newest prerelease.
+v0.1.5's `proto/supervisor_middleware.proto` matches the vendored copy apart
+from one comment. The v1 `EvaluateHttpRequest` RPC is still present on
+v0.1.5, on `v0.1.6-pre.4` and on `main` (`c4688aa8`), and no `http-session`
+interface has merged, so the #4359 advisory and the guard port item below
+stand unchanged.
+
+Every gate check was shown to fail against a mutation of the code it guards:
+response-only binding accepted, `fail_open` accepted, stale generation
+accepted, other-sandbox proof accepted, an executed failure probe accepted,
+wildcard include accepted, exclude ignored, an extra required capability
+ignored, a prerelease accepted, an unattested proof accepted, an insecure
+registration accepted, and `middleware_failed` unrecognised (12 of 12
+killed). That is resistance to those twelve defects, not coverage.
+
 ## Remaining
 
 The live runs below each have a single command in
@@ -449,9 +524,13 @@ The live runs below each have a single command in
   body, that the attestation's `body_sha256` matches those bytes, that
   OpenShell fixes `Content-Length` after the body changes, and that a forged
   workload still gets `workload_mismatch`.
-- OpenShell 0.1.3 stable. As of 2026-10-06 the newest tag is
-  `v0.1.3-pre.4`. When stable ships, re-run the probe on it and add the
-  result.
+- A startup-probe run on a released OpenShell. As of 2026-10-25 the newest
+  stable tag is `v0.1.5` and no released version has a recorded pass, so the
+  activation gate's `version` check is unmet everywhere. Run the probe on
+  0.1.5 and record it before any activation decision.
+- An activation-check manifest from a real deployment: the binding proof and
+  the guard-unavailable failure probe must come from the running supervisor's
+  current policy generation.
 - Run the transport-identity probe live: once on 0.1.3-pre.4 (expected to
   fail with `defect_4397`, the control), then on the first release carrying
   the #4397 fix. Record both runs here and add the passing version to

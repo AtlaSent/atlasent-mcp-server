@@ -18,10 +18,12 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 - Exposure Review ranks what to fix. Every step now reports the environment it changes (and what in the file said so), what starts it, the secret names it can read, and a 0–100 priority with its reasons. Gaps behind the same weak gate are grouped into one cause with one fix, and the review opens with "Fix these first".
 - `atlasent-exposure-scan` also writes `atlasent-exposure-review.csv`: one row per step, ungated first in rank order, safe to open in a spreadsheet.
+- `atlasent-openshell activation-check --manifest <file>` (#279): reports whether an OpenShell path may move from watch-only to blocking. It requires a released OpenShell with a recorded probe pass, the AtlaSent workload guard registered and inspecting requests (response-only is refused), attached to the AtlaSent host with `fail_closed`, and proof from the running supervisor's current policy generation that the binding holds and that a guard outage is refused. It never turns blocking on; today no manifest is eligible.
 - `evidence_gap.v1` gains `environment`, `trigger`, `secrets`, `priority` and `cause` on each finding, a top-level `causes` list, and environment and cause counts in `summary`. Additive; no field changed.
 
 ### Fixed
 
+- An OpenShell `403 middleware_failed` (the guard down, timed out or answering invalidly) was reported as an API key scope problem. It is now worded as a middleware failure. It is still a DENY, with no permit and nothing executed.
 - The HTML report folded two statuses into one card, so its counts disagreed with the Markdown. Both now show all five statuses from one source.
 - Exposure Review ranking no longer errs in the reassuring direction in five cases: a step `environment` input chosen at run time is unknown (not the job's name); a negated `workflow_dispatch` check is not "started by hand only"; every event-driven trigger, listed or not, ranks as automatic; `secrets['NAME']` references count; and a gate weak in two ways gets a one-time fix naming both.
 - The headline no longer calls staging steps "production-changing": it counts production gaps, and says when the environment could not be determined.
