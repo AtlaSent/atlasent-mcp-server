@@ -14,6 +14,10 @@ Companion packages in this repository (`@atlasent/mcp-gate`, the
 
 ## [Unreleased]
 
+### Fixed
+
+- Exposure Review no longer ranks an environment named `non-prod` (or `non_prod`, `Non Prod`, `pre_prod`) as production. A name that also says plain `prod` still ranks as production.
+
 ## [2.21.0] - 2026-10-25
 
 ### Added
