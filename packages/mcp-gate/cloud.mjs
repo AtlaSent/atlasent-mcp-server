@@ -129,6 +129,7 @@ export function cloudAuthorizer(connection, apiKey, { fetchImpl = fetch, timeout
         if (evaluation.mode !== 'live' || evaluation.execution_payload_hash_accepted !== true || evaluation.execution_hash_expected !== hash || typeof token !== 'string' || !token || (evaluation.human_approval_required === true && evaluation.human_approval_status !== 'satisfied')) return { effect: 'deny', reason: 'cloud_unbound_or_unapproved' };
       }
       signal?.throwIfAborted();
+      if (params.name !== subject.tool) return { effect: 'deny', reason: 'cloud_tool_changed' };
       if (executionHash({...subject, arguments: params.arguments ?? {}}) !== hash) return { effect: 'deny', reason: 'cloud_arguments_changed' };
       const verification = await post('/v1-verify-permit', {
         permit_token: token, action_type: mapping.actionType,
@@ -139,6 +140,7 @@ export function cloudAuthorizer(connection, apiKey, { fetchImpl = fetch, timeout
       // Public verify consumes atomically; never accept legacy truthy/unchecked responses.
       if (verification.valid !== true || verification.outcome !== 'allow' || verification.consumed !== true || !Number.isFinite(Date.parse(verification.expires_at)) || Date.parse(verification.expires_at) <= Date.now()) return { effect: 'deny', reason: 'cloud_verification_failed' };
       // Check the live caller's arguments again after both asynchronous boundaries.
+      if (params.name !== subject.tool) return { effect: 'deny', reason: 'cloud_tool_changed' };
       if (executionHash({...subject, arguments: params.arguments ?? {}}) !== hash) return { effect: 'deny', reason: 'cloud_arguments_changed' };
       return { effect: 'allow', reason: 'cloud_permit_consumed' };
     } catch { return { effect: 'deny', reason: 'cloud_unavailable' }; }
