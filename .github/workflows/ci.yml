@@ -28,6 +28,23 @@ jobs:
         run: |
           node scripts/check-package-licenses.mjs --self-test
           node scripts/check-package-licenses.mjs
+      # Every publish job (a job bound to npm, or any job in
+      # publish-mcp-registry.yml or create-v2-11-0-tag.yml) must check its
+      # dispatcher first. js-yaml is not a dependency here, so it is installed,
+      # pinned, outside the workspace. One leg only.
+      - name: Install js-yaml 4.3.2 for the dispatcher guard
+        if: matrix.node-version == 22
+        run: npm install --prefix "$RUNNER_TEMP/dispatcher-guard-yaml" js-yaml@4.3.2 --no-audit --no-fund --no-save
+      - name: Prove the dispatcher guard rejects the defects it targets
+        if: matrix.node-version == 22
+        env:
+          JS_YAML_MODULE: ${{ runner.temp }}/dispatcher-guard-yaml/node_modules/js-yaml/dist/js-yaml.mjs
+        run: node scripts/check-production-dispatcher.mjs --self-test
+      - name: Check every publish job runs the dispatcher check first
+        if: matrix.node-version == 22
+        env:
+          JS_YAML_MODULE: ${{ runner.temp }}/dispatcher-guard-yaml/node_modules/js-yaml/dist/js-yaml.mjs
+        run: node scripts/check-production-dispatcher.mjs --verify-workflows
       # The MCPB bundle (Smithery stdio listing, Claude Desktop) is the same
       # dist/ packed with prod deps; build + validate it on one leg only.
       - name: Build and validate the MCPB bundle

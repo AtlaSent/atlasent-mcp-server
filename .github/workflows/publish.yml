@@ -15,6 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Before anything else: refuse unless the dispatcher (and anyone
+      # re-running this attempt) is on .github/production-dispatchers.json.
+      - name: Production dispatcher must be on the allowlist
+        uses: ./.github/actions/production-dispatcher-check
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
