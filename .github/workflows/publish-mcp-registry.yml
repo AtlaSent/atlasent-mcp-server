@@ -32,6 +32,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Before anything else: refuse unless the dispatcher (and anyone
+      # re-running this attempt) is on .github/production-dispatchers.json.
+      - name: Production dispatcher must be on the allowlist
+        uses: ./.github/actions/production-dispatcher-check
+
       # ── AtlaSent publish gate ────────────────────────────────────────
       # Dogfooding fix: this workflow published server.json to the official
       # MCP Registry with no AtlaSent evaluate/permit gate at all. Running
