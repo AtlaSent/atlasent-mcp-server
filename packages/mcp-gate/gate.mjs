@@ -47,7 +47,9 @@ async function send(stream, msg) {
 // This gate intentionally exposes only MCP initialization, ping and tools.
 // Resources, prompts, sampling, elicitation and extension methods fail closed.
 export async function runGate({ policy, command, args = [], input = process.stdin, output = process.stdout, audit, authorize, timeoutMs = 30000 }) {
-  validatePolicy(policy);
+  // A host retaining the config object cannot rewrite policy during an async
+  // authorization/approval wait. This session uses the validated snapshot.
+  policy = structuredClone(validatePolicy(policy));
   const session = randomUUID();
   const pending = new Map();
   const maxBlocked = policy.denialBudget?.maxBlockedCalls;
@@ -111,6 +113,17 @@ export async function runGate({ policy, command, args = [], input = process.stdi
         // the organizational authorizer or upstream tool server.
         if (decision.effect === 'allow') {
           msg.params = { name: msg.params.name, arguments: msg.params.arguments ?? {} };
+          // Give the authorizer the exact object that will be forwarded, with
+          // every nested value immutable. Mutation-and-restore is also blocked:
+          // a post-await equality check alone cannot detect that substitution.
+          const values = [msg.params];
+          while (values.length) {
+            const value = values.pop();
+            if (value !== null && typeof value === 'object') {
+              values.push(...Object.values(value));
+              Object.freeze(value);
+            }
+          }
         }
         if (decision.effect === 'allow' && authorize) {
           const cloud = await authorize(msg.params, { signal: cancellation.signal, onPending: id => log({ invocation, status: 'awaiting_approval', policy_rule_id: policyRuleId, approval_request_id: id }) });

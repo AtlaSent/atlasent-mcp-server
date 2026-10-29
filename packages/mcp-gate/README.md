@@ -346,3 +346,17 @@ Tests use the canonical response shapes inspected in `v1-approvals/handler.ts` a
 the existing `atlasent-action` polling client. They are contract tests, not proof of a
 live approval journey. Before public release, verify this with an actual sandbox
 organization, original execution key, independently authorized reviewer and two gates.
+# Authorization wait integrity
+
+Each session snapshots the validated local policy. The exact tool name and full
+nested arguments passed to an asynchronous authorizer are immutable and are the
+same subject forwarded upstream. A callback cannot substitute arguments or add
+metadata, including by changing and restoring values during a wait. The cloud
+authorizer also checks that the tool name still matches its bound subject both
+before and after verification, alongside the existing argument checks.
+
+Regression tests use actual stdio subprocesses and scripted authorization. They
+do not establish live cloud acceptance, host/browser/shell or network containment,
+provider outcome verification, or isolation of native provider credentials.
+Those deployment boundaries remain required by issue #274.
+

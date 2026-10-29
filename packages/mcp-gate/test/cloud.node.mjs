@@ -119,6 +119,65 @@ test('argument mutation during authorization is rejected',async()=>{
  const p=params();const t=transport({verify:()=>{p.arguments.status='tampered';return verified()}});
  assert.equal((await cloudAuthorizer(connection,'ask_test_fixture',t)(p)).reason,'cloud_arguments_changed');
 });
+for (const phase of ['evaluate','verify']) {
+ test(`tool-name substitution during ${phase} is rejected`,async()=>{
+  const p=params();
+  const t=transport({[phase]:body=>{
+   p.name='delete_production';
+   return phase==='verify' ? verified() : {decision:'allow',mode:'live',permit_token:'fixture',execution_payload_hash_accepted:true,execution_hash_expected:body.execution_payload_hash};
+  }});
+  const result=await cloudAuthorizer(connection,'ask_test_fixture',t)(p);
+  assert.equal(result.effect,'deny');assert.equal(result.reason,'cloud_tool_changed');
+  assert.equal(t.calls.filter(c=>c.url.endsWith('/v1-verify-permit')).length,phase==='verify'?1:0);
+ });
+}
+
+test('the stdio authorizer cannot mutate or substitute any nested forwarded subject', {timeout:10000},async()=>{
+ const input=new PassThrough(),output=new PassThrough(),events=[];
+ const original={name:'set_status',arguments:{environment:'sandbox',status:'ready',nested:{values:['exact']}}};
+ const task=runGate({policy:{version:1,default:'deny',rules:[{id:'exact',tool:'set_status',kind:'write',effect:'allow',argumentsEquals:original.arguments}]},
+  command:process.execPath,args:[fileURLToPath(new URL('../demo-server.mjs',import.meta.url))],input,output,audit:e=>events.push(e),
+  authorize:async p=>{
+   await Promise.resolve();
+   assert.throws(()=>{p.name='delete_production'},TypeError);
+   assert.throws(()=>{p.arguments.status='substituted'},TypeError);
+   assert.throws(()=>{p.arguments.nested.values[0]='substituted'},TypeError);
+   assert.throws(()=>{p._meta={authority:'forged'}},TypeError);
+   return {effect:'allow',reason:'fixture_allow'};
+  }});
+ const lines=createInterface({input:output})[Symbol.asyncIterator]();
+ try {
+  input.write(JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:original})+'\n');
+  assert.equal(JSON.parse((await lines.next()).value).result.content[0].text,'ready');
+  assert.equal(events.filter(e=>e.status==='server_returned').length,1);
+ } finally {input.end();await task;output.end();}
+});
+
+test('policy cannot be rewritten by a host during an authorization wait', {timeout:10000},async()=>{
+ const input=new PassThrough(),output=new PassThrough();
+ let enter,release;const entered=new Promise(r=>enter=r),waiting=new Promise(r=>release=r);
+ const policy={version:1,default:'deny',rules:[
+  {id:'read',tool:'read_status',effect:'allow',kind:'read'},
+  {id:'sandbox',tool:'set_status',effect:'allow',kind:'write',argumentsEquals:{environment:'sandbox',status:'ready'}}
+ ]};
+ let asked=0;
+ const task=runGate({policy,command:process.execPath,args:[fileURLToPath(new URL('../demo-server.mjs',import.meta.url))],input,output,audit:()=>{},
+  authorize:async()=>{asked++;enter();await waiting;return {effect:'allow',reason:'fixture_allow'}}});
+ const lines=createInterface({input:output})[Symbol.asyncIterator]();
+ try {
+  input.write(JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'read_status',arguments:{}}})+'\n');
+  await entered;
+  policy.rules[1].argumentsEquals.environment='production';
+  policy.rules.push({id:'extra',tool:'delete_production',kind:'delete',effect:'allow'});
+  release();assert.equal(JSON.parse((await lines.next()).value).result.content[0].text,'pending');
+  for (const [id,params] of [[2,{name:'set_status',arguments:{environment:'production',status:'ready'}}],
+    [3,{name:'delete_production',arguments:{}}]]) {
+   input.write(JSON.stringify({jsonrpc:'2.0',id,method:'tools/call',params})+'\n');
+   assert.equal(JSON.parse((await lines.next()).value).result.isError,true);
+  }
+  assert.equal(asked,1);
+ } finally {release();input.end();await task;output.end();}
+});
 test('two gates observe fresh central policy decisions (contract harness, not live service)',async()=>{
  let allow=true;
  const t=transport({evaluate:b=>allow?{decision:'allow',mode:'live',permit_token:'fixture',execution_payload_hash_accepted:true,execution_hash_expected:b.execution_payload_hash}:{decision:'deny'}});
